@@ -156,7 +156,7 @@ private:
 
     // Persistent total blocks mined counter (loaded from file, survives restarts)
     std::atomic<uint64_t> m_totalBlocksMined{0};
-    // CNetworkManager* m_network;  // TODO: Implement network manager
+    // Network manager placeholder — not yet needed (P2P layer handles networking directly)
 
     // RPC handlers
     std::map<std::string, RPCHandler> m_handlers;
@@ -534,10 +534,7 @@ public:
      */
     void SetAttestationRateLimit(int maxPerDay) { m_attestationMaxPerDay = maxPerDay; }
 
-    /**
-     * Register network manager instance
-     * TODO: Implement when network manager is ready
-     */
+    // Network manager registration — reserved for future use
     // void RegisterNetwork(CNetworkManager* network) { m_network = network; }
 
     /**

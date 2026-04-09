@@ -367,7 +367,8 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
     g_network_stats.bytes_recv += message.GetTotalSize();
 
     // BUG #132 DEBUG: Log all incoming messages to trace handshake
-    std::cout << "[MSG-RECV] peer=" << peer_id << " cmd=" << command << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[MSG-RECV] peer=" << peer_id << " cmd=" << command << std::endl;
 
     // Dispatch based on command
     if (command == "version") {
@@ -607,7 +608,8 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                 if (node) {
                     peer->addr = node->addr;  // Copy actual TCP connection IP
                 }
-                std::cout << "[PeerManager] Created peer " << peer_id << " for inbound connection" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[PeerManager] Created peer " << peer_id << " for inbound connection" << std::endl;
             }
         }
 
@@ -794,8 +796,9 @@ bool CNetMessageProcessor::ProcessGetAddrMessage(int peer_id) {
     extern NodeContext g_node_context;
     if (g_node_context.connman) {
         g_node_context.connman->PushMessage(peer_id, addr_msg);
-        std::cout << "[P2P] Sent " << addrs.size() << " addresses to peer "
-                  << peer_id << " in response to GETADDR" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] Sent " << addrs.size() << " addresses to peer "
+                      << peer_id << " in response to GETADDR" << std::endl;
     }
 
     return true;
@@ -944,9 +947,10 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
                         vToFetch.push_back(inv_item);
                         tx_relay->MarkRequested(inv_item.hash, peer_id);
 
-                        std::cout << "[P2P] Requesting transaction "
-                                  << inv_item.hash.GetHex().substr(0, 16)
-                                  << "... from peer " << peer_id << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[P2P] Requesting transaction "
+                                      << inv_item.hash.GetHex().substr(0, 16)
+                                      << "... from peer " << peer_id << std::endl;
                     }
                 }
             }
@@ -971,8 +975,9 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
             extern NodeContext g_node_context;
             if (g_node_context.connman) {
                 g_node_context.connman->PushMessage(peer_id, getdata_msg);
-                std::cout << "[P2P] Sent GETDATA for " << vToFetch.size()
-                          << " item(s) to peer " << peer_id << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] Sent GETDATA for " << vToFetch.size()
+                              << " item(s) to peer " << peer_id << std::endl;
             } else {
                 std::cout << "[P2P] Cannot send GETDATA - connman not initialized" << std::endl;
             }
@@ -1020,7 +1025,8 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
         }
 
         // BUG #87 DEBUG: Log GETDATA processing
-        std::cout << "[P2P] Processing GETDATA from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] Processing GETDATA from peer " << peer_id << std::endl;
         // Read number of inv items
         uint64_t count = stream.ReadCompactSize();
 
@@ -1071,16 +1077,18 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
                         extern NodeContext g_node_context;
                         if (g_node_context.connman) {
                             g_node_context.connman->PushMessage(peer_id, tx_msg);
-                            std::cout << "[P2P] Sent transaction "
-                                      << inv.hash.GetHex().substr(0, 16)
-                                      << "... to peer " << peer_id << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[P2P] Sent transaction "
+                                          << inv.hash.GetHex().substr(0, 16)
+                                          << "... to peer " << peer_id << std::endl;
                         } else {
                             std::cout << "[P2P] Cannot send transaction - connman not initialized" << std::endl;
                         }
                     } else {
-                        std::cout << "[P2P] Transaction "
-                                  << inv.hash.GetHex().substr(0, 16)
-                                  << "... not found in mempool for peer " << peer_id << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[P2P] Transaction "
+                                      << inv.hash.GetHex().substr(0, 16)
+                                      << "... not found in mempool for peer " << peer_id << std::endl;
                         // Could send "notfound" message here
                     }
                 }
@@ -1114,15 +1122,17 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
                 std::lock_guard<std::mutex> lock(cs_served_blocks);
                 strikes = ++g_peer_dedup_strikes[peer_id];
             }
-            std::cout << "[P2P] DEDUP: Peer " << peer_id << " re-requested "
-                      << duplicate_count << " already-served blocks (+"
-                      << penalty << " misbehavior, strike "
-                      << strikes << "/" << MAX_DEDUP_STRIKES << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] DEDUP: Peer " << peer_id << " re-requested "
+                          << duplicate_count << " already-served blocks (+"
+                          << penalty << " misbehavior, strike "
+                          << strikes << "/" << MAX_DEDUP_STRIKES << ")" << std::endl;
             peer_manager.Misbehaving(peer_id, penalty, MisbehaviorType::GETDATA_RATE_EXCEEDED);
 
             if (strikes >= MAX_DEDUP_STRIKES) {
-                std::cout << "[P2P] DEDUP: Disconnecting peer " << peer_id
-                          << " after " << strikes << " duplicate GETDATA batches (wasting bandwidth)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] DEDUP: Disconnecting peer " << peer_id
+                              << " after " << strikes << " duplicate GETDATA batches (wasting bandwidth)" << std::endl;
                 g_node_context.connman->DisconnectNode(peer_id);
                 {
                     std::lock_guard<std::mutex> lock(cs_served_blocks);
@@ -1145,17 +1155,20 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
                 }
             }
             if (!new_items.empty()) {
-                std::cout << "[P2P] Invoking GETDATA handler for " << new_items.size()
-                          << " NEW items from peer " << peer_id
-                          << " (skipped " << duplicate_count << " duplicates)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] Invoking GETDATA handler for " << new_items.size()
+                              << " NEW items from peer " << peer_id
+                              << " (skipped " << duplicate_count << " duplicates)" << std::endl;
                 on_getdata(peer_id, new_items);
             } else {
-                std::cout << "[P2P] Skipping GETDATA for peer " << peer_id
-                          << " - all " << getdata.size() << " items already served" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] Skipping GETDATA for peer " << peer_id
+                              << " - all " << getdata.size() << " items already served" << std::endl;
             }
         } else {
             // No duplicates - serve normally
-            std::cout << "[P2P] Invoking GETDATA handler for " << getdata.size() << " items from peer " << peer_id << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] Invoking GETDATA handler for " << getdata.size() << " items from peer " << peer_id << std::endl;
             on_getdata(peer_id, getdata);
         }
 
@@ -1228,11 +1241,15 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
             stream.read(block.vtx.data(), vtx_size);
         }
 
-        std::cout << "[BLOCK-PROCESS] Deserialized block, calling on_block handler..." << std::endl;
-        std::cout.flush();
+        if (g_verbose.load(std::memory_order_relaxed)) {
+            std::cout << "[BLOCK-PROCESS] Deserialized block, calling on_block handler..." << std::endl;
+            std::cout.flush();
+        }
         on_block(peer_id, block);
-        std::cout << "[BLOCK-PROCESS] on_block handler returned" << std::endl;
-        std::cout.flush();
+        if (g_verbose.load(std::memory_order_relaxed)) {
+            std::cout << "[BLOCK-PROCESS] on_block handler returned" << std::endl;
+            std::cout.flush();
+        }
         return true;
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
@@ -1320,8 +1337,9 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
         // Get transaction hash
         const uint256 txid = tx.GetHash();
 
-        std::cout << "[P2P] Received transaction " << txid.GetHex().substr(0, 16)
-                  << "... from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] Received transaction " << txid.GetHex().substr(0, 16)
+                      << "... from peer " << peer_id << std::endl;
 
         // P0-5 FIX: Load atomic pointers for transaction processing
         auto* tx_relay = g_tx_relay_manager.load();
@@ -1338,8 +1356,9 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
 
         // Check if we already have it
         if (mempool && mempool->Exists(txid)) {
-            std::cout << "[P2P] Transaction " << txid.GetHex().substr(0, 16)
-                      << "... already in mempool" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] Transaction " << txid.GetHex().substr(0, 16)
+                          << "... already in mempool" << std::endl;
             on_tx(peer_id, tx);
             return true;
         }
@@ -1377,8 +1396,9 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
                 return true;  // Not necessarily peer's fault
             }
 
-            std::cout << "[P2P] Accepted transaction " << txid.GetHex().substr(0, 16)
-                      << "... from peer " << peer_id << " (fee: " << fee << " ions)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] Accepted transaction " << txid.GetHex().substr(0, 16)
+                          << "... from peer " << peer_id << " (fee: " << fee << " ions)" << std::endl;
 
             // Relay to other peers
             AnnounceTransactionToPeers(txid, peer_id);
@@ -1439,8 +1459,9 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
         // Read stop hash
         msg.hashStop = stream.ReadUint256();
 
-        std::cout << "[P2P] Received GETHEADERS from peer " << peer_id
-                  << " (locator size: " << locator_size << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] Received GETHEADERS from peer " << peer_id
+                      << " (locator size: " << locator_size << ")" << std::endl;
 
         // Call handler
         if (on_getheaders) {
@@ -1537,7 +1558,8 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
             headers.push_back(header);
         }
 
-        std::cout << "[P2P] Received " << header_count << " headers from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] Received " << header_count << " headers from peer " << peer_id << std::endl;
 
         // Call handler
         if (on_headers) {
@@ -1563,7 +1585,8 @@ bool CNetMessageProcessor::ProcessSendHeadersMessage(int peer_id) {
     // When received, the peer is requesting that we send HEADERS instead of INV
     // for new block announcements
 
-    std::cout << "[P2P] Peer " << peer_id << " sent sendheaders (prefers HEADERS over INV)" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[P2P] Peer " << peer_id << " sent sendheaders (prefers HEADERS over INV)" << std::endl;
 
     // Call handler to update peer preference
     if (on_sendheaders) {
@@ -2822,8 +2845,9 @@ bool CNetMessageProcessor::ProcessMempoolMessage(int peer_id) {
         g_node_context.connman->PushMessage(peer_id, inv_msg);
     }
 
-    std::cout << "[P2P] Sent " << txs.size() << " mempool tx INV(s) to peer "
-              << peer_id << " (mempool request)" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[P2P] Sent " << txs.size() << " mempool tx INV(s) to peer "
+                  << peer_id << " (mempool request)" << std::endl;
 
     return true;
 }
@@ -2847,8 +2871,9 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer, bool 
     extern NodeContext g_node_context;
     // Phase 5: Use CConnman instead of deprecated CConnectionManager
     if (!g_node_context.peer_manager || !g_node_context.connman || !g_node_context.message_processor || !tx_relay) {
-        std::cout << "[TX-RELAY] Cannot announce transaction " << txid.GetHex().substr(0, 16)
-                  << "... (networking not initialized)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[TX-RELAY] Cannot announce transaction " << txid.GetHex().substr(0, 16)
+                      << "... (networking not initialized)" << std::endl;
         return;
     }
 
@@ -2856,8 +2881,9 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer, bool 
     std::vector<std::shared_ptr<CPeer>> peers = g_node_context.peer_manager->GetConnectedPeers();
 
     if (peers.empty()) {
-        std::cout << "[TX-RELAY] No connected peers to announce transaction "
-                  << txid.GetHex().substr(0, 16) << "..." << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[TX-RELAY] No connected peers to announce transaction "
+                      << txid.GetHex().substr(0, 16) << "..." << std::endl;
         return;
     }
 
@@ -2902,8 +2928,9 @@ void AnnounceTransactionToPeers(const uint256& txid, int64_t exclude_peer, bool 
         announced_count++;
     }
 
-    std::cout << "[TX-RELAY] Announced transaction " << txid.GetHex().substr(0, 16)
-              << "... to " << announced_count << " peer(s) "
-              << "(skipped " << skipped_count << " already announced, "
-              << "excluded peer " << exclude_peer << ")" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[TX-RELAY] Announced transaction " << txid.GetHex().substr(0, 16)
+                  << "... to " << announced_count << " peer(s) "
+                  << "(skipped " << skipped_count << " already announced, "
+                  << "excluded peer " << exclude_peer << ")" << std::endl;
 }

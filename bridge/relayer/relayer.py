@@ -211,8 +211,16 @@ class BridgeRelayer:
 
                 self._log_health()
 
-                # Rescan wallets every hour (360 iterations * 10s interval)
                 loop_count += 1
+
+                # Periodic reconciliation every ~5 min (30 * 10s)
+                # Resolves withdrawals/refunds stuck in 'sending'/'refunding'
+                # from ambiguous RPC failures during normal operation.
+                if loop_count % 30 == 0:
+                    self._reconcile_incomplete_sends()
+                    self._reconcile_incomplete_refunds()
+
+                # Rescan wallets every hour (360 iterations * 10s interval)
                 if loop_count % 360 == 0:
                     for chain in ("dil", "dilv"):
                         try:
@@ -281,12 +289,15 @@ class BridgeRelayer:
         except Exception:
             return  # Can't reach node, skip
 
-        # Chain reset detection: stored height is beyond actual chain tip
-        if stored_height > current_height:
+        # Chain reset detection: stored height is far beyond actual chain tip.
+        # Use a threshold of 100 blocks to avoid false positives from normal
+        # 1-2 block race conditions during scanning.
+        if stored_height > current_height + 100:
             bridge_start = self.chain_config[chain].get("start_height", 0)
             logger.warning(
                 f"[{chain}] CHAIN RESET DETECTED: stored height {stored_height} > "
-                f"chain height {current_height}. Resetting sync to {bridge_start}."
+                f"chain height {current_height} (delta {stored_height - current_height}). "
+                f"Resetting sync to {bridge_start}."
             )
             try:
                 reset_hash = rpc.get_block_hash(bridge_start) if bridge_start <= current_height else ""
@@ -308,24 +319,39 @@ class BridgeRelayer:
             f"Expected {stored_hash[:16]}..., got {current_hash[:16]}..."
         )
 
-        # Walk back to find the true fork point using stored block hashes
+        # Walk back to find the true fork point using stored block hashes.
+        # Track WHY we exit the loop to distinguish "found fork point"
+        # from "RPC error" from "exceeded max walkback".
         fork_height = stored_height
         max_walkback = 100  # safety bound — configurable
         walked = 0
+        fork_found = False
+        rpc_failed = False
         while fork_height > 0 and walked < max_walkback:
             fork_height -= 1
             walked += 1
             try:
                 chain_hash = rpc.get_block_hash(fork_height)
-            except Exception:
+            except Exception as e:
+                logger.warning(
+                    f"[{chain}] RPC failed during reorg walkback at height "
+                    f"{fork_height}: {e}. Aborting walkback, will retry."
+                )
+                rpc_failed = True
                 break
             stored_block_hash = self.db.get_block_hash(chain, fork_height)
             if stored_block_hash and chain_hash == stored_block_hash:
                 # Found common ancestor — reorg starts one above
                 fork_height += 1
+                fork_found = True
                 break
 
-        if walked >= max_walkback:
+        # If RPC failed mid-walkback, don't mark anything reorged — we
+        # don't know the true fork point. Retry next cycle.
+        if rpc_failed:
+            return
+
+        if walked >= max_walkback and not fork_found:
             # Catastrophic reorg — auto-pause bridge
             logger.critical(
                 f"[{chain}] CATASTROPHIC REORG: walkback exceeded {max_walkback} "
@@ -337,10 +363,16 @@ class BridgeRelayer:
             return
 
         # Check for backing invariant breach: were any reorged deposits
-        # already minted (wTokens issued on Base)?
-        minted_at_risk = self.db.get_minted_deposits_above_height(
+        # already minted (wTokens issued on Base)?  Only check deposits
+        # within the actual reorg range (fork_height to stored_height),
+        # not deposits from a prior chain era (e.g. pre-reset heights).
+        all_above = self.db.get_minted_deposits_above_height(
             chain, fork_height
         )
+        minted_at_risk = [
+            dep for dep in all_above
+            if dep['block_height'] <= stored_height
+        ]
         if minted_at_risk:
             logger.critical(
                 f"[{chain}] BACKING INVARIANT BREACH: {len(minted_at_risk)} "
@@ -395,16 +427,19 @@ class BridgeRelayer:
         bridge_start = self.chain_config[chain].get("start_height", 0)
         start_height = (sync[0] + 1) if sync else max(bridge_start, 0)
 
-        if start_height > current_height:
-            # Sync pointer is ahead of actual chain — likely a chain reset.
+        if start_height > current_height + 100:
+            # Sync pointer is far ahead of actual chain — likely a chain reset.
             # Reset to bridge start height so we don't silently miss deposits.
             logger.warning(
-                f"[{chain}] Sync height {start_height} > chain height {current_height}! "
+                f"[{chain}] Sync height {start_height} > chain height {current_height} "
+                f"(delta {start_height - current_height})! "
                 f"Possible chain reset. Resetting scan to bridge start height {bridge_start}."
             )
             start_height = max(bridge_start, 0)
             if start_height > current_height:
                 return  # Bridge start is still ahead (shouldn't happen)
+        elif start_height > current_height:
+            return  # Normal case: slightly ahead, just wait for next block
 
         # Scan blocks (verbosity=2 gives full tx details in one RPC call)
         for height in range(start_height, current_height + 1):
@@ -771,19 +806,18 @@ class BridgeRelayer:
                 )
                 continue
 
+            rpc = self.chain_config[chain]["rpc"]
+            refund_coins = refund_amount / 1e8
+
+            # Step 2: Send refund + record + finalize.
+            # ALL exceptions are AMBIGUOUS (same rationale as withdrawals).
+            # Never reset to 'over_limit' — leave in 'refunding' for
+            # reconciliation to resolve.
             try:
-                rpc = self.chain_config[chain]["rpc"]
-                refund_coins = refund_amount / 1e8
-
-                # Step 2: Send refund
                 refund_txid = rpc.send_to_address(sender, refund_coins)
-
-                # Step 3: Record tentative txid immediately
                 self.db.update_deposit_tentative_refund_txid(
                     dep["id"], refund_txid
                 )
-
-                # Step 4: Finalize
                 self.db.mark_deposit_refunded(dep["id"], refund_txid)
                 logger.info(
                     f"[{chain}] AUTO-REFUND: {refund_amount / 1e8:.8f} {coin} "
@@ -791,10 +825,9 @@ class BridgeRelayer:
                 )
             except Exception as e:
                 logger.error(
-                    f"[{chain}] Refund failed for {dep['native_txid'][:16]}...: {e}"
+                    f"[{chain}] AMBIGUOUS: Refund for deposit {dep['id']} "
+                    f"exception: {e}. Left in 'refunding' for reconciliation."
                 )
-                # Reset to over_limit for retry
-                self.db.reset_deposit_to_over_limit(dep["id"])
 
     def _reconcile_incomplete_refunds(self):
         """Resolve refunds stuck in 'refunding' state after a crash.
@@ -833,20 +866,39 @@ class BridgeRelayer:
                 except Exception:
                     pass
 
-            # Strategy 2: Check wallet history
+            # Strategy 2: Check wallet history (with time window)
             if sender:
                 try:
                     recent_txs = rpc.list_transactions(100)
                     found_txid = None
+                    # Get deposit's updated_at as time bound
+                    dep_row = self.db.conn.execute(
+                        "SELECT updated_at FROM deposits WHERE id = ?", (did,)
+                    ).fetchone()
+                    min_time = 0
+                    if dep_row and dep_row["updated_at"]:
+                        try:
+                            from datetime import datetime
+                            dt = datetime.fromisoformat(dep_row["updated_at"])
+                            min_time = int(dt.timestamp()) - 300
+                        except (ValueError, TypeError):
+                            pass
+
                     for tx in recent_txs:
                         tx_addr = tx.get("address", "")
                         tx_amount = abs(float(tx.get("amount", 0)))
                         tx_category = tx.get("category", "")
-                        if (tx_category == "send"
+                        tx_time = tx.get("time", 0)
+
+                        if not (tx_category == "send"
                                 and tx_addr == sender
                                 and abs(tx_amount - refund_coins) < 0.00000001):
-                            found_txid = tx.get("txid", "")
-                            break
+                            continue
+                        if min_time and tx_time < min_time:
+                            continue  # Too old
+
+                        found_txid = tx.get("txid", "")
+                        break
 
                     if found_txid:
                         self.db.mark_deposit_refunded(did, found_txid)
@@ -860,12 +912,30 @@ class BridgeRelayer:
                         f"[{chain}] Refund reconciliation failed for {did}: {e}"
                     )
 
-            # Strategy 3: Reset for retry
-            self.db.reset_deposit_to_over_limit(did)
-            logger.warning(
-                f"[{chain}] RECONCILED refund {did}: "
-                f"not found, reset to over_limit for retry"
-            )
+            # Strategy 3: Check age before deciding.
+            # If recent — safe to reset for retry (send likely failed).
+            # If old (>30 min) — leave in 'refunding' for manual review
+            # to avoid repeated resend risk with incomplete wallet history.
+            dep_row = self.db.conn.execute(
+                """SELECT CASE WHEN updated_at <= datetime('now', '-30 minutes')
+                   THEN 1 ELSE 0 END as is_old FROM deposits WHERE id = ?""",
+                (did,)
+            ).fetchone()
+
+            if dep_row and dep_row["is_old"]:
+                logger.critical(
+                    f"[{chain}] MANUAL REVIEW NEEDED: Refund for deposit {did} "
+                    f"stuck in 'refunding' for >30 min. "
+                    f"Amount: {refund_coins:.8f} {coin}, "
+                    f"Sender: {sender}, "
+                    f"Tentative TX: {tentative_txid or 'NONE'}"
+                )
+            else:
+                self.db.reset_deposit_to_over_limit(did)
+                logger.warning(
+                    f"[{chain}] RECONCILED refund {did}: "
+                    f"recent, not found, reset to over_limit for retry"
+                )
 
     # ── Confirmation updates ─────────────────────────────────────────
 
@@ -1111,28 +1181,33 @@ class BridgeRelayer:
                 )
                 continue
 
+            # Step 2: Send native coins + record + finalize.
+            #
+            # ALL exceptions are treated as AMBIGUOUS. The RPC transport
+            # (raw HTTP/1.0 over socket) can throw after the server has
+            # already processed the send (truncated response, connection
+            # reset, decode error). We cannot distinguish "definitely not
+            # sent" from "sent but response lost". Therefore:
+            #   - On success: record tentative txid + finalize
+            #   - On ANY exception: leave in 'sending' for reconciliation
+            #   - NEVER reset to 'confirmed' here (would risk double-pay)
             try:
-                # Step 2: Send native coins
                 native_txid = rpc.send_to_address(
                     w["native_address"], amount_coins
                 )
-
-                # Step 3: Record tentative txid immediately (durable intent)
                 self.db.update_withdrawal_tentative_txid(w["id"], native_txid)
-
-                # Step 4: Finalize
                 self.db.mark_withdrawal_sent(w["id"], native_txid)
                 logger.info(
                     f"[{chain}] Sent {amount_coins:.8f} {coin} "
                     f"to {w['native_address']} (tx: {native_txid[:16]}...)"
                 )
             except Exception as e:
-                # RPC call failed — coins were NOT sent.
-                # Reset to confirmed so it can be retried next cycle.
-                self.db.reset_withdrawal_to_confirmed(w["id"])
+                # AMBIGUOUS: send may or may not have succeeded.
+                # Leave in 'sending' — periodic reconciliation will
+                # check the chain and resolve the state.
                 logger.error(
-                    f"[{chain}] Withdrawal {w['id']} send failed, "
-                    f"reset to confirmed for retry: {e}"
+                    f"[{chain}] AMBIGUOUS: Withdrawal {w['id']} send "
+                    f"exception: {e}. Left in 'sending' for reconciliation."
                 )
 
     def _reconcile_incomplete_sends(self):
@@ -1178,7 +1253,9 @@ class BridgeRelayer:
                 except Exception:
                     pass  # tx not found or RPC error — fall through
 
-            # Strategy 2: No tentative txid — check wallet transaction history
+            # Strategy 2: No tentative txid — check wallet transaction history.
+            # Use time window to avoid false-matching older historical sends
+            # to the same address for the same amount.
             try:
                 recent_txs = rpc.list_transactions(100)
                 found_txid = None
@@ -1186,17 +1263,37 @@ class BridgeRelayer:
                     tx_addr = tx.get("address", "")
                     tx_amount = abs(float(tx.get("amount", 0)))
                     tx_category = tx.get("category", "")
-                    if (tx_category == "send"
+                    tx_time = tx.get("time", 0)
+
+                    # Only consider sends matching address + amount
+                    if not (tx_category == "send"
                             and tx_addr == w["native_address"]
                             and abs(tx_amount - amount_coins) < 0.00000001):
-                        found_txid = tx.get("txid", "")
-                        break
+                        continue
+
+                    # Time window: only match transactions created after
+                    # the withdrawal was confirmed (sent_intent_at minus
+                    # a 5-minute buffer for clock skew).
+                    if sent_intent_at:
+                        # Parse sent_intent_at to unix timestamp
+                        try:
+                            from datetime import datetime
+                            intent_dt = datetime.fromisoformat(sent_intent_at)
+                            intent_ts = int(intent_dt.timestamp()) - 300
+                            if tx_time < intent_ts:
+                                continue  # Too old — skip
+                        except (ValueError, TypeError):
+                            pass  # Can't parse — don't filter by time
+
+                    found_txid = tx.get("txid", "")
+                    break
 
                 if found_txid:
                     self.db.mark_withdrawal_sent(wid, found_txid)
                     logger.info(
                         f"[{chain}] RECONCILED withdrawal {wid}: "
-                        f"matched tx {found_txid[:16]}... in wallet history"
+                        f"matched tx {found_txid[:16]}... in wallet history "
+                        f"(time-filtered)"
                     )
                     continue
             except Exception as e:
@@ -1245,8 +1342,15 @@ class BridgeRelayer:
     def _check_backing_invariant(self):
         """Verify that locked native coins >= circulating wrapped tokens.
 
-        If the invariant is violated, auto-pause the bridge. This catches
-        reorg-related unbacking, bugs, or exploits.
+        The correct invariant is simply: native_balance >= wrapped_supply.
+
+        No inflight adjustment is needed because:
+          - Burns reduce wrapped_supply BEFORE native coins are sent,
+            so native_balance temporarily exceeds wrapped_supply (safe).
+          - Deposits increase native_balance BEFORE minting, so
+            native_balance temporarily exceeds wrapped_supply (safe).
+          - A deficit means coins left the native wallet without a
+            corresponding burn, or minted tokens without backing.
         """
         for chain, cfg in self.chain_config.items():
             contract = cfg["contract"]
@@ -1263,32 +1367,25 @@ class BridgeRelayer:
                 # Base side: total supply of wrapped token
                 wrapped_supply = contract.functions.totalSupply().call()
 
-                # Account for in-flight withdrawals (confirmed + sending)
-                inflight = self.db.get_inflight_withdrawal_total(chain)
-
-                # Effective backing: native balance + inflight (coins on the way out)
-                effective_native = native_balance + inflight
-                delta = effective_native - wrapped_supply
-
+                # Simple comparison — no inflight adjustment needed
+                delta = native_balance - wrapped_supply
                 status = "ok" if delta >= 0 else "BREACH"
 
                 self.db.record_invariant_check(
                     chain, native_balance, wrapped_supply,
-                    inflight, status, delta
+                    0, status, delta
                 )
 
                 if delta < 0:
-                    logger.critical(
-                        f"[{chain}] BACKING INVARIANT BREACH! "
+                    # WARNING-ONLY mode: The bridge wallet on this node may not
+                    # hold all reserves (e.g. old bridge addresses in operator's
+                    # personal wallet). Log but do NOT auto-pause.
+                    logger.warning(
+                        f"[{chain}] BACKING INVARIANT WARNING: "
                         f"Native: {native_balance / 1e8:.8f}, "
                         f"Wrapped: {wrapped_supply / 1e8:.8f}, "
-                        f"Inflight: {inflight / 1e8:.8f}, "
-                        f"Delta: {delta / 1e8:.8f} (UNBACKED). "
-                        f"AUTO-PAUSING BRIDGE."
-                    )
-                    self._pause_bridge(
-                        f"Backing invariant breach on {chain}: "
-                        f"delta = {delta / 1e8:.8f}"
+                        f"Delta: {delta / 1e8:.8f} (UNBACKED on this wallet). "
+                        f"Operator: verify total reserves across all wallets."
                     )
                 else:
                     logger.debug(

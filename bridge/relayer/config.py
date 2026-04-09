@@ -52,10 +52,10 @@ BASE_CONFIRMATIONS = int(os.getenv("BASE_CONFIRMATIONS", "12"))   # ~24 sec
 
 # ── Safety limits (relayer-side, independent of contract limits) ─────
 # Values in smallest units (ions for DIL, volts for DilV)
-DAILY_MINT_CAP_DIL  = int(os.getenv("DAILY_MINT_CAP_DIL",  str(10_000_00000000)))
-DAILY_MINT_CAP_DILV = int(os.getenv("DAILY_MINT_CAP_DILV", str(100_000_00000000)))
-MAX_PER_DEPOSIT_DIL  = int(os.getenv("MAX_PER_DEPOSIT_DIL",  str(1_000_00000000)))
-MAX_PER_DEPOSIT_DILV = int(os.getenv("MAX_PER_DEPOSIT_DILV", str(10_000_00000000)))
+DAILY_MINT_CAP_DIL  = int(os.getenv("DAILY_MINT_CAP_DIL",  str(1_000_00000000)))
+DAILY_MINT_CAP_DILV = int(os.getenv("DAILY_MINT_CAP_DILV", str(10_000_00000000)))
+MAX_PER_DEPOSIT_DIL  = int(os.getenv("MAX_PER_DEPOSIT_DIL",  str(500_00000000)))
+MAX_PER_DEPOSIT_DILV = int(os.getenv("MAX_PER_DEPOSIT_DILV", str(5_000_00000000)))
 
 # ── Bridge OP_RETURN tag ─────────────────────────────────────────────
 BRIDGE_TAG = b"DBRG"

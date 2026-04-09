@@ -326,6 +326,250 @@ class TestOpReturnParsing(unittest.TestCase):
         self.assertIsNone(self.parse_op_return(script))
 
 
+class TestWithdrawalCrashSafety(unittest.TestCase):
+    """Test the CAS + durable attempt ledger for withdrawal crash safety."""
+
+    def setUp(self):
+        self.db_file = tempfile.mktemp(suffix=".db")
+        self.db = StateDB(self.db_file)
+
+    def tearDown(self):
+        self.db.close()
+        if os.path.exists(self.db_file):
+            os.unlink(self.db_file)
+
+    def _make_confirmed_withdrawal(self, burn_txid="0xBurn", amount=500):
+        self.db.insert_withdrawal("dil", burn_txid, 0, 100, amount, "DTestAddr")
+        w = self.db.get_pending_withdrawals()[0]
+        self.db.confirm_withdrawal(w["id"])
+        return w["id"]
+
+    def test_cas_from_confirmed_to_sending(self):
+        wid = self._make_confirmed_withdrawal()
+        result = self.db.mark_withdrawal_sending(wid, "1_0")
+        self.assertTrue(result)
+        self.assertEqual(len(self.db.get_confirmed_withdrawals()), 0)
+        self.assertEqual(len(self.db.get_sending_withdrawals()), 1)
+
+    def test_cas_fails_if_not_confirmed(self):
+        wid = self._make_confirmed_withdrawal()
+        # Already in sending
+        self.db.mark_withdrawal_sending(wid, "1_0")
+        # Second CAS should fail
+        result = self.db.mark_withdrawal_sending(wid, "1_1")
+        self.assertFalse(result)
+
+    def test_cas_fails_on_pending(self):
+        self.db.insert_withdrawal("dil", "0xBurn", 0, 100, 500, "DAddr")
+        w = self.db.get_pending_withdrawals()[0]
+        result = self.db.mark_withdrawal_sending(w["id"], "1_0")
+        self.assertFalse(result, "CAS should fail on 'pending' status")
+
+    def test_sending_not_in_confirmed_query(self):
+        wid = self._make_confirmed_withdrawal()
+        self.db.mark_withdrawal_sending(wid, "1_0")
+        self.assertEqual(len(self.db.get_confirmed_withdrawals()), 0)
+
+    def test_tentative_txid_persists(self):
+        wid = self._make_confirmed_withdrawal()
+        self.db.mark_withdrawal_sending(wid, "1_0")
+        self.db.update_withdrawal_tentative_txid(wid, "native_tx_abc")
+        sending = self.db.get_sending_withdrawals()
+        self.assertEqual(sending[0]["tentative_txid"], "native_tx_abc")
+
+    def test_reset_to_confirmed_clears_attempt(self):
+        wid = self._make_confirmed_withdrawal()
+        self.db.mark_withdrawal_sending(wid, "1_0")
+        self.db.update_withdrawal_tentative_txid(wid, "native_tx_abc")
+        self.db.reset_withdrawal_to_confirmed(wid)
+
+        confirmed = self.db.get_confirmed_withdrawals()
+        self.assertEqual(len(confirmed), 1)
+        self.assertIsNone(confirmed[0]["tentative_txid"])
+        self.assertIsNone(confirmed[0]["attempt_id"])
+        self.assertEqual(confirmed[0]["retry_count"], 1)
+
+    def test_mark_sent_from_sending(self):
+        wid = self._make_confirmed_withdrawal()
+        self.db.mark_withdrawal_sending(wid, "1_0")
+        self.db.mark_withdrawal_sent(wid, "final_txid")
+        self.assertEqual(len(self.db.get_sending_withdrawals()), 0)
+
+    def test_attempt_id_is_recorded(self):
+        wid = self._make_confirmed_withdrawal()
+        self.db.mark_withdrawal_sending(wid, "42_3")
+        sending = self.db.get_sending_withdrawals()
+        self.assertEqual(sending[0]["attempt_id"], "42_3")
+
+    def test_sent_intent_at_is_set(self):
+        wid = self._make_confirmed_withdrawal()
+        self.db.mark_withdrawal_sending(wid, "1_0")
+        sending = self.db.get_sending_withdrawals()
+        self.assertIsNotNone(sending[0]["sent_intent_at"])
+
+
+class TestRefundCrashSafety(unittest.TestCase):
+    """Test the CAS pattern for refund crash safety."""
+
+    def setUp(self):
+        self.db_file = tempfile.mktemp(suffix=".db")
+        self.db = StateDB(self.db_file)
+
+    def tearDown(self):
+        self.db.close()
+        if os.path.exists(self.db_file):
+            os.unlink(self.db_file)
+
+    def _make_over_limit_deposit(self):
+        self.db.insert_deposit("dil", "tx1", 0, 200_000_000_000, "0xA", 10, "h10", "DSender")
+        dep = self.db.get_pending_deposits()[0]
+        # Manually set to over_limit
+        self.db.conn.execute(
+            "UPDATE deposits SET status = 'over_limit' WHERE id = ?",
+            (dep["id"],)
+        )
+        self.db.conn.commit()
+        return dep["id"]
+
+    def test_cas_from_over_limit_to_refunding(self):
+        did = self._make_over_limit_deposit()
+        result = self.db.mark_deposit_refunding(did)
+        self.assertTrue(result)
+        refunding = self.db.get_refunding_deposits()
+        self.assertEqual(len(refunding), 1)
+
+    def test_cas_fails_if_not_over_limit(self):
+        self.db.insert_deposit("dil", "tx1", 0, 100, "0xA", 10, "h10")
+        dep = self.db.get_pending_deposits()[0]
+        result = self.db.mark_deposit_refunding(dep["id"])
+        self.assertFalse(result, "CAS should fail on 'pending' status")
+
+    def test_refunding_not_in_pending_refunds(self):
+        did = self._make_over_limit_deposit()
+        self.db.mark_deposit_refunding(did)
+        # get_pending_refunds only returns 'over_limit'
+        self.assertEqual(len(self.db.get_pending_refunds()), 0)
+
+    def test_tentative_refund_txid_persists(self):
+        did = self._make_over_limit_deposit()
+        self.db.mark_deposit_refunding(did)
+        self.db.update_deposit_tentative_refund_txid(did, "refund_tx_123")
+        refunding = self.db.get_refunding_deposits()
+        self.assertEqual(refunding[0]["tentative_refund_txid"], "refund_tx_123")
+
+    def test_reset_to_over_limit(self):
+        did = self._make_over_limit_deposit()
+        self.db.mark_deposit_refunding(did)
+        self.db.reset_deposit_to_over_limit(did)
+        self.assertEqual(len(self.db.get_pending_refunds()), 1)
+        self.assertEqual(len(self.db.get_refunding_deposits()), 0)
+
+
+class TestBlockHashHistory(unittest.TestCase):
+    """Test block hash storage for reorg detection."""
+
+    def setUp(self):
+        self.db_file = tempfile.mktemp(suffix=".db")
+        self.db = StateDB(self.db_file)
+
+    def tearDown(self):
+        self.db.close()
+        if os.path.exists(self.db_file):
+            os.unlink(self.db_file)
+
+    def test_store_and_retrieve(self):
+        self.db.store_block_hash("dil", 100, "hash100")
+        self.assertEqual(self.db.get_block_hash("dil", 100), "hash100")
+
+    def test_missing_returns_none(self):
+        self.assertIsNone(self.db.get_block_hash("dil", 999))
+
+    def test_overwrite(self):
+        self.db.store_block_hash("dil", 100, "hash_old")
+        self.db.store_block_hash("dil", 100, "hash_new")
+        self.assertEqual(self.db.get_block_hash("dil", 100), "hash_new")
+
+    def test_per_chain_isolation(self):
+        self.db.store_block_hash("dil", 100, "dil_hash")
+        self.db.store_block_hash("dilv", 100, "dilv_hash")
+        self.assertEqual(self.db.get_block_hash("dil", 100), "dil_hash")
+        self.assertEqual(self.db.get_block_hash("dilv", 100), "dilv_hash")
+
+    def test_prune_keeps_recent(self):
+        for h in range(1, 301):
+            self.db.store_block_hash("dil", h, f"hash_{h}")
+        self.db.prune_block_hashes("dil", keep_last=200)
+        # SQL: DELETE WHERE height < MAX(300) - 200 = 100
+        # So height 99 is pruned, height 100+ survives
+        self.assertIsNone(self.db.get_block_hash("dil", 99))
+        self.assertIsNotNone(self.db.get_block_hash("dil", 100))
+        self.assertIsNotNone(self.db.get_block_hash("dil", 300))
+
+    def test_minted_deposits_above_height(self):
+        self.db.insert_deposit("dil", "tx1", 0, 100, "0xA", 50, "h50")
+        self.db.insert_deposit("dil", "tx2", 0, 200, "0xB", 60, "h60")
+        self.db.insert_deposit("dil", "tx3", 0, 300, "0xC", 40, "h40")
+
+        # Mark tx1 and tx2 as minted
+        for dep in self.db.get_pending_deposits():
+            self.db.confirm_deposit(dep["id"], 15)
+        for dep in self.db.get_confirmed_deposits():
+            self.db.mark_deposit_minted(dep["id"], "mint_" + str(dep["id"]))
+
+        # Only tx1 (h=50) and tx2 (h=60) should be returned for height >= 50
+        at_risk = self.db.get_minted_deposits_above_height("dil", 50)
+        self.assertEqual(len(at_risk), 2)
+
+        # Only tx2 (h=60) for height >= 55
+        at_risk = self.db.get_minted_deposits_above_height("dil", 55)
+        self.assertEqual(len(at_risk), 1)
+
+
+class TestInvariantCheck(unittest.TestCase):
+    """Test the invariant check DB methods."""
+
+    def setUp(self):
+        self.db_file = tempfile.mktemp(suffix=".db")
+        self.db = StateDB(self.db_file)
+
+    def tearDown(self):
+        self.db.close()
+        if os.path.exists(self.db_file):
+            os.unlink(self.db_file)
+
+    def test_record_invariant_check(self):
+        self.db.record_invariant_check(
+            "dil", 100_000_000, 50_000_000, 0, "ok", 50_000_000
+        )
+        # No assertion needed — just verify it doesn't throw
+
+    def test_inflight_total_empty(self):
+        total = self.db.get_inflight_withdrawal_total("dil")
+        self.assertEqual(total, 0)
+
+    def test_inflight_total_counts_confirmed_and_sending(self):
+        self.db.insert_withdrawal("dil", "0xB1", 0, 100, 500, "D1")
+        self.db.insert_withdrawal("dil", "0xB2", 1, 100, 300, "D2")
+        w1 = self.db.get_pending_withdrawals()[0]
+        w2 = self.db.get_pending_withdrawals()[1]
+
+        self.db.confirm_withdrawal(w1["id"])
+        self.db.confirm_withdrawal(w2["id"])
+        self.db.mark_withdrawal_sending(w2["id"], "2_0")
+
+        total = self.db.get_inflight_withdrawal_total("dil")
+        self.assertEqual(total, 800)  # 500 confirmed + 300 sending
+
+    def test_inflight_excludes_sent(self):
+        self.db.insert_withdrawal("dil", "0xB1", 0, 100, 500, "D1")
+        w = self.db.get_pending_withdrawals()[0]
+        self.db.confirm_withdrawal(w["id"])
+        self.db.mark_withdrawal_sent(w["id"], "native_tx")
+
+        total = self.db.get_inflight_withdrawal_total("dil")
+        self.assertEqual(total, 0)
+
+
 class TestRelayerSafetyChecks(unittest.TestCase):
     """Test relayer-side safety limit logic."""
 

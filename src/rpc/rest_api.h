@@ -47,6 +47,7 @@ private:
     CUTXOSet* m_utxo_set;
     CChainState* m_chainstate;
     CRateLimiter* m_rateLimiter;
+    bool m_testnet{false};
 
     // Endpoint handlers
     std::string HandleBalance(const std::string& address, const std::string& clientIP);
@@ -83,6 +84,7 @@ public:
     void RegisterUTXOSet(CUTXOSet* utxo_set) { m_utxo_set = utxo_set; }
     void RegisterChainState(CChainState* chainstate) { m_chainstate = chainstate; }
     void RegisterRateLimiter(CRateLimiter* rateLimiter) { m_rateLimiter = rateLimiter; }
+    void SetTestnet(bool testnet) { m_testnet = testnet; }
 
     /**
      * Check if a request path is a REST API request

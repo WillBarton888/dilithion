@@ -51,8 +51,9 @@ void CVDFMiner::OnNewBlock(int newTipHeight)
     // VDF Distribution: If the new block is at the SAME height we're computing for,
     // don't abort. Our VDF output may be lower and win the distribution.
     if (newTipHeight > 0 && newTipHeight == static_cast<int>(m_currentHeight.load())) {
-        std::cout << "[VDF Miner] Competing block at height " << newTipHeight
-                  << " -- continuing computation (distribution)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[VDF Miner] Competing block at height " << newTipHeight
+                      << " -- continuing computation (distribution)" << std::endl;
         return;
     }
 
@@ -134,9 +135,10 @@ void CVDFMiner::MiningLoop()
             int remaining = m_minBlockTimeSec - static_cast<int>(elapsed);
 
             if (remaining > 0) {
-                std::cout << "[VDF Miner] Waiting " << remaining
-                          << "s (min block time " << m_minBlockTimeSec << "s)"
-                          << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[VDF Miner] Waiting " << remaining
+                              << "s (min block time " << m_minBlockTimeSec << "s)"
+                              << std::endl;
                 std::unique_lock<std::mutex> lock(m_epochMutex);
                 m_epochCV.wait_for(lock, std::chrono::seconds(remaining),
                     [this] { return m_epochChanged || !m_running; });
@@ -210,9 +212,10 @@ void CVDFMiner::MiningLoop()
                 int cd = m_cooldownTracker->GetCooldownBlocks();
                 int lastWin = m_cooldownTracker->GetLastWinHeight(cooldownId);
                 int resumeAt = lastWin + cd + 1;
-                std::cout << "[VDF Miner] In cooldown until block " << resumeAt
-                          << " (current: " << height << ", cooldown: " << cd
-                          << " blocks, time-based expiry active)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[VDF Miner] In cooldown until block " << resumeAt
+                              << " (current: " << height << ", cooldown: " << cd
+                              << " blocks, time-based expiry active)" << std::endl;
 
                 std::unique_lock<std::mutex> lock(m_epochMutex);
                 m_epochCV.wait_for(lock, std::chrono::seconds(120),
@@ -228,17 +231,19 @@ void CVDFMiner::MiningLoop()
                 now - m_lastHeightChangeTime).count();
 
             if (sinceLastBlock >= STALL_THRESHOLD_SEC) {
-                std::cout << "[VDF Miner] Chain stall detected (" << sinceLastBlock
-                          << "s since last block) -- bypassing cooldown" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[VDF Miner] Chain stall detected (" << sinceLastBlock
+                              << "s since last block) -- bypassing cooldown" << std::endl;
                 stallBypassed = true;
                 // Fall through to VDF computation
             } else {
                 int cd = m_cooldownTracker->GetCooldownBlocks();
                 int lastWin = m_cooldownTracker->GetLastWinHeight(cooldownId);
                 int resumeAt = lastWin + cd + 1;
-                std::cout << "[VDF Miner] In cooldown until block " << resumeAt
-                          << " (current: " << height << ", cooldown: " << cd << " blocks)"
-                          << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[VDF Miner] In cooldown until block " << resumeAt
+                              << " (current: " << height << ", cooldown: " << cd << " blocks)"
+                              << std::endl;
 
                 // Wait for new block, or timeout after 2 minutes so a solo miner
                 // (cooldown=0 with MIN_COOLDOWN=0) never deadlocks if it somehow
@@ -260,8 +265,9 @@ void CVDFMiner::MiningLoop()
         // 4. Run VDF computation (blocking, ~200s mainnet / ~10s testnet)
         // ---------------------------------------------------------------
         m_abort = false;
-        std::cout << "[VDF Miner] Computing VDF for block " << height
-                  << " (" << m_iterations << " iterations)..." << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[VDF Miner] Computing VDF for block " << height
+                      << " (" << m_iterations << " iterations)..." << std::endl;
 
         auto startTime = std::chrono::steady_clock::now();
 
@@ -274,8 +280,10 @@ void CVDFMiner::MiningLoop()
                 // Progress reporting (can't truly abort chiavdf mid-computation,
                 // but we'll check the flag after compute() returns)
                 if (current > 0 && current % 10'000'000 == 0) {
-                    double pct = 100.0 * current / total;
-                    std::cout << "[VDF Miner] Progress: " << pct << "%" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed)) {
+                        double pct = 100.0 * current / total;
+                        std::cout << "[VDF Miner] Progress: " << pct << "%" << std::endl;
+                    }
                 }
             });
 
@@ -286,16 +294,18 @@ void CVDFMiner::MiningLoop()
         // 5. Check if epoch changed during computation
         // ---------------------------------------------------------------
         if (m_abort.load() || !m_running) {
-            std::cout << "[VDF Miner] Computation for block " << height
-                      << " discarded (new block arrived after "
-                      << static_cast<int>(elapsedSec) << "s)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[VDF Miner] Computation for block " << height
+                          << " discarded (new block arrived after "
+                          << static_cast<int>(elapsedSec) << "s)" << std::endl;
             std::lock_guard<std::mutex> lock(m_epochMutex);
             m_epochChanged = false;
             continue;
         }
 
-        std::cout << "[VDF Miner] VDF computed in " << elapsedSec << "s"
-                  << " (proof: " << result.proof.size() << " bytes)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[VDF Miner] VDF computed in " << elapsedSec << "s"
+                      << " (proof: " << result.proof.size() << " bytes)" << std::endl;
 
         // ---------------------------------------------------------------
         // 6. Finalize VDF block
@@ -310,8 +320,9 @@ void CVDFMiner::MiningLoop()
         // 7. Final epoch check (block may have arrived during finalization)
         // ---------------------------------------------------------------
         if (m_abort.load() || !m_running) {
-            std::cout << "[VDF Miner] Block discarded after finalization (epoch changed)"
-                      << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[VDF Miner] Block discarded after finalization (epoch changed)"
+                          << std::endl;
             std::lock_guard<std::mutex> lock(m_epochMutex);
             m_epochChanged = false;
             continue;
@@ -332,19 +343,23 @@ void CVDFMiner::MiningLoop()
                 uint256 ourOutput;
                 std::memcpy(ourOutput.data, result.output.data(), 32);
                 if (!HashLessThan(ourOutput, tipVdfOutput)) {
-                    std::cout << "[VDF Miner] Our output is NOT lower than tip -- skipping"
-                              << std::endl;
-                    std::cout << "  Our output: " << ourOutput.GetHex().substr(0, 16) << "..." << std::endl;
-                    std::cout << "  Tip output: " << tipVdfOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed)) {
+                        std::cout << "[VDF Miner] Our output is NOT lower than tip -- skipping"
+                                  << std::endl;
+                        std::cout << "  Our output: " << ourOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                        std::cout << "  Tip output: " << tipVdfOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                    }
                     std::unique_lock<std::mutex> lk(m_epochMutex);
                     m_epochCV.wait_for(lk, std::chrono::seconds(10),
                         [this] { return m_epochChanged || !m_running; });
                     m_epochChanged = false;
                     continue;
                 }
-                std::cout << "[VDF Miner] Our output is LOWER than tip -- submitting!" << std::endl;
-                std::cout << "  Our output: " << ourOutput.GetHex().substr(0, 16) << "..." << std::endl;
-                std::cout << "  Tip output: " << tipVdfOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed)) {
+                    std::cout << "[VDF Miner] Our output is LOWER than tip -- submitting!" << std::endl;
+                    std::cout << "  Our output: " << ourOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                    std::cout << "  Tip output: " << tipVdfOutput.GetHex().substr(0, 16) << "..." << std::endl;
+                }
             }
         }
 
@@ -360,9 +375,10 @@ void CVDFMiner::MiningLoop()
         if (!stallBypassed && m_cooldownTracker && m_cooldownTracker->IsInCooldown(cooldownId, height, candidateTimestamp)) {
             int cd = m_cooldownTracker->GetCooldownBlocks();
             int lastWin = m_cooldownTracker->GetLastWinHeight(cooldownId);
-            std::cout << "[VDF Miner] Cooldown changed during computation -- skipping submission"
-                      << " (last win: " << lastWin << ", cooldown: " << cd
-                      << ", height: " << height << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[VDF Miner] Cooldown changed during computation -- skipping submission"
+                          << " (last win: " << lastWin << ", cooldown: " << cd
+                          << ", height: " << height << ")" << std::endl;
             std::unique_lock<std::mutex> lk(m_epochMutex);
             m_epochCV.wait_for(lk, std::chrono::seconds(10),
                                [this] { return m_epochChanged || !m_running; });
@@ -385,9 +401,10 @@ void CVDFMiner::MiningLoop()
             int graceRemaining = minGap - static_cast<int>(sinceHeight);
 
             if (graceRemaining > 0) {
-                std::cout << "[VDF Miner] Grace period: waiting " << graceRemaining
-                          << "s for block timestamp validity (gap=" << minGap << "s)"
-                          << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[VDF Miner] Grace period: waiting " << graceRemaining
+                              << "s for block timestamp validity (gap=" << minGap << "s)"
+                              << std::endl;
                 std::unique_lock<std::mutex> lock(m_epochMutex);
                 m_epochCV.wait_for(lock, std::chrono::seconds(graceRemaining),
                     [this] { return m_epochChanged || !m_running; });

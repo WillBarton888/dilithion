@@ -71,11 +71,13 @@ void CIbdCoordinator::Tick() {
     // When blocks fail MIK validation, it means we got headers from a peer on a different
     // chain. We need to switch to a different headers sync peer.
     if (g_node_context.headers_chain_invalid.exchange(false)) {
-        std::cout << "[IBD] Headers chain invalid flag set - switching headers sync peer" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] Headers chain invalid flag set - switching headers sync peer" << std::endl;
 
         // Mark current sync peer as bad - they sent us headers leading to invalid blocks
         if (m_headers_sync_peer != -1) {
-            std::cout << "[IBD] Marking peer " << m_headers_sync_peer << " as bad (sent invalid chain headers)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Marking peer " << m_headers_sync_peer << " as bad (sent invalid chain headers)" << std::endl;
             m_headers_bad_peers.insert(m_headers_sync_peer);
         }
 
@@ -211,8 +213,9 @@ void CIbdCoordinator::Tick() {
         if (!m_initial_request_done && header_height <= 0 && peer_height > 0) {
             // Initial request - kick off the pipeline via SSOT entry point
             m_initial_request_done = true;
-            std::cout << "[IBD] Initial header request from sync peer " << m_headers_sync_peer
-                      << " (peer_height=" << peer_height << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Initial header request from sync peer " << m_headers_sync_peer
+                          << " (peer_height=" << peer_height << ")" << std::endl;
             if (m_node_context.headers_manager->SyncHeadersFromPeer(m_headers_sync_peer, peer_height)) {
                 m_headers_in_flight = true;
             }
@@ -518,8 +521,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     static size_t download_call_count = 0;
     if (++download_call_count % 100 == 0 && m_node_context.headers_manager) {
         if (m_node_context.headers_manager->HasCompetingForks()) {
-            std::cout << "[IBD] Fork status: " << m_node_context.headers_manager->GetForkCount()
-                      << " competing chain tips detected" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Fork status: " << m_node_context.headers_manager->GetForkCount()
+                          << " competing chain tips detected" << std::endl;
         }
     }
 
@@ -787,8 +791,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                     }
                 }
                 if (requested > 0) {
-                    std::cout << "[IBD] Post-cancel: Requested " << requested
-                              << " missing parent blocks for stranded orphans" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[IBD] Post-cancel: Requested " << requested
+                                  << " missing parent blocks for stranded orphans" << std::endl;
                 }
             }
         }
@@ -839,16 +844,18 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             int max_stalls = (sync_node && sync_node->fManual) ? 45 : MAX_CAPACITY_STALLS_BEFORE_CLEAR;
             if (m_consecutive_capacity_stalls >= max_stalls &&
                 m_blocks_sync_peer != -1) {
-                std::cout << "[IBD] Peer " << m_blocks_sync_peer
-                          << " at capacity for " << m_consecutive_capacity_stalls
-                          << "s without delivering blocks - disconnecting unresponsive peer"
-                          << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] Peer " << m_blocks_sync_peer
+                              << " at capacity for " << m_consecutive_capacity_stalls
+                              << "s without delivering blocks - disconnecting unresponsive peer"
+                              << std::endl;
                 if (g_node_context.block_tracker) {
                     auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
                     if (!cleared.empty()) {
-                        std::cout << "[IBD] Cleared " << cleared.size()
-                                  << " stale in-flight blocks from peer "
-                                  << m_blocks_sync_peer << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[IBD] Cleared " << cleared.size()
+                                      << " stale in-flight blocks from peer "
+                                      << m_blocks_sync_peer << std::endl;
                     }
                 }
                 // Disconnect the unresponsive peer - forces TCP reconnection
@@ -956,8 +963,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             now_orphan_scan - chain_stall_start).count();
 
         if (orphan_count > 0) {
-            std::cout << "[IBD] Orphan pool: " << orphan_count << " blocks waiting for parents"
-                      << " (stall=" << stall_seconds << "s)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Orphan pool: " << orphan_count << " blocks waiting for parents"
+                          << " (stall=" << stall_seconds << "s)" << std::endl;
         }
 
         // Only attempt aggressive orphan resolution when chain is actually stalled.
@@ -978,9 +986,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                 uint256 tipHash = pTip->GetBlockHash();
                 std::vector<uint256> children = g_node_context.orphan_manager->GetOrphanChildren(tipHash);
                 if (!children.empty()) {
-                    std::cout << "[IBD] ORPHAN-RESOLVE: Found " << children.size()
-                              << " orphan children of chain tip (height " << chain_height_snap
-                              << ") - resolving after " << stall_seconds << "s stall" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[IBD] ORPHAN-RESOLVE: Found " << children.size()
+                                  << " orphan children of chain tip (height " << chain_height_snap
+                                  << ") - resolving after " << stall_seconds << "s stall" << std::endl;
                     for (const uint256& orphanHash : children) {
                         CBlock orphanBlock;
                         if (g_node_context.orphan_manager->GetOrphanBlock(orphanHash, orphanBlock)) {
@@ -988,9 +997,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                             uint256 oHash = orphanBlock.GetHash();
                             auto result = ProcessNewBlock(m_node_context, *m_node_context.blockchain_db,
                                                           -1, orphanBlock, &oHash);
-                            std::cout << "[IBD] ORPHAN-RESOLVE: Block "
-                                      << oHash.GetHex().substr(0, 16) << "... result="
-                                      << BlockProcessResultToString(result) << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] ORPHAN-RESOLVE: Block "
+                                          << oHash.GetHex().substr(0, 16) << "... result="
+                                          << BlockProcessResultToString(result) << std::endl;
                         }
                     }
                 }
@@ -1048,12 +1058,14 @@ bool CIbdCoordinator::FetchBlocks() {
     if (m_blocks_sync_peer != -1) {
         CNode* node = m_node_context.peer_manager->GetNode(m_blocks_sync_peer);
         if (!node || !node->IsConnected()) {
-            std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer << " disconnected" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer << " disconnected" << std::endl;
             if (g_node_context.block_tracker) {
                 auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
                 if (!cleared.empty()) {
-                    std::cout << "[IBD] Cleared " << cleared.size()
-                              << " stale in-flight blocks from disconnected peer " << m_blocks_sync_peer << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[IBD] Cleared " << cleared.size()
+                                  << " stale in-flight blocks from disconnected peer " << m_blocks_sync_peer << std::endl;
                 }
             }
             m_blocks_sync_peer = -1;
@@ -1067,9 +1079,10 @@ bool CIbdCoordinator::FetchBlocks() {
             // This helps when better peers connect while we're stuck on a lower-height peer
             bool should_reselect = false;
             if (peer_height <= chain_height) {
-                std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
-                          << " height (" << peer_height << ") too low (need > " << chain_height
-                          << "), reselecting" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
+                              << " height (" << peer_height << ") too low (need > " << chain_height
+                              << "), reselecting" << std::endl;
                 should_reselect = true;
             } else if (peer_height < header_height && (header_height - peer_height) > 10) {
                 // Current peer can't serve all headers - check if better peer exists
@@ -1093,16 +1106,18 @@ bool CIbdCoordinator::FetchBlocks() {
                     }
                 }
                 if (better_peer_id != -1) {
-                    std::cout << "[IBD] Found better peer " << better_peer_id << " (height=" << better_peer_height
-                              << ") vs current sync peer " << m_blocks_sync_peer
-                              << " (height=" << peer_height << "), switching directly" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[IBD] Found better peer " << better_peer_id << " (height=" << better_peer_height
+                                  << ") vs current sync peer " << m_blocks_sync_peer
+                                  << " (height=" << peer_height << "), switching directly" << std::endl;
 
                     // BUG FIX: Clear in-flight blocks from old peer before switching
                     if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
                         auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
                         if (!cleared.empty()) {
-                            std::cout << "[IBD] Cleared " << cleared.size()
-                                      << " stale in-flight blocks from old peer " << m_blocks_sync_peer << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] Cleared " << cleared.size()
+                                          << " stale in-flight blocks from old peer " << m_blocks_sync_peer << std::endl;
                         }
                     }
 
@@ -1120,8 +1135,9 @@ bool CIbdCoordinator::FetchBlocks() {
                 if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
                     auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
                     if (!cleared.empty()) {
-                        std::cout << "[IBD] Cleared " << cleared.size()
-                                  << " stale in-flight blocks from reselected peer " << m_blocks_sync_peer << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[IBD] Cleared " << cleared.size()
+                                      << " stale in-flight blocks from reselected peer " << m_blocks_sync_peer << std::endl;
                     }
                 }
                 m_blocks_sync_peer = -1;
@@ -1140,7 +1156,7 @@ bool CIbdCoordinator::FetchBlocks() {
         bool has_active_fork = forkMgr.HasActiveFork();
 
         // BUG #249 DEBUG: Log available peers during fork
-        if (has_active_fork) {
+        if (has_active_fork && g_verbose.load(std::memory_order_relaxed)) {
             std::cout << "[IBD-FORK] Selecting fork block peer (chain=" << chain_height << " peers=" << peers.size() << ")" << std::endl;
         }
 
@@ -1155,8 +1171,9 @@ bool CIbdCoordinator::FetchBlocks() {
                     continue;  // Still in cooldown, skip this peer
                 } else {
                     // Cooldown expired, clear the timed-out peer tracking
-                    std::cout << "[IBD] Peer " << m_timed_out_peer << " cooldown expired after "
-                              << elapsed_sec << " seconds, eligible for selection again" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[IBD] Peer " << m_timed_out_peer << " cooldown expired after "
+                                  << elapsed_sec << " seconds, eligible for selection again" << std::endl;
                     m_timed_out_peer = -1;
                 }
             }
@@ -1165,7 +1182,7 @@ bool CIbdCoordinator::FetchBlocks() {
             if (peer_height == 0) peer_height = peer->start_height;
 
             // BUG #249 DEBUG: Log peer heights during fork
-            if (has_active_fork && peer_height > chain_height) {
+            if (has_active_fork && peer_height > chain_height && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[IBD-FORK]   peer=" << peer->id << " height=" << peer_height
                           << " (best_known=" << peer->best_known_height << " start=" << peer->start_height << ")" << std::endl;
             }
@@ -1219,8 +1236,9 @@ bool CIbdCoordinator::FetchBlocks() {
                 best_peer = peer->id;
                 best_height = header_height;  // Assume they have up to header height
                 m_node_context.peer_manager->UpdatePeerBestKnownHeight(peer->id, header_height);
-                std::cout << "[IBD] No peer with known height > chain, trying peer "
-                          << peer->id << " (stale height fallback)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] No peer with known height > chain, trying peer "
+                              << peer->id << " (stale height fallback)" << std::endl;
                 break;
             }
         }
@@ -1231,8 +1249,9 @@ bool CIbdCoordinator::FetchBlocks() {
             m_consecutive_capacity_stalls = 0;  // Reset capacity stall counter - new peer gets full window
             m_sync_peer_futile_batches = 0;  // BUG #272: Reset wrong-fork counter
             m_sync_peer_chain_height_at_start = chain_height;
-            std::cout << "[IBD] Selected blocks sync peer " << m_blocks_sync_peer
-                      << " (height=" << best_height << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Selected blocks sync peer " << m_blocks_sync_peer
+                          << " (height=" << best_height << ")" << std::endl;
         } else {
             // BUG #246b FIX: Before giving up, check for stale in-flight blocks from
             // disconnected peers. This can happen when a peer disconnects after being
@@ -1254,8 +1273,9 @@ bool CIbdCoordinator::FetchBlocks() {
                         if (!pnode || !pnode->IsConnected()) {
                             auto cleared = g_node_context.block_tracker->OnPeerDisconnected(peer_id);
                             if (!cleared.empty()) {
-                                std::cout << "[IBD] Cleared " << cleared.size()
-                                          << " stale in-flight blocks from orphaned peer " << peer_id << std::endl;
+                                if (g_verbose.load(std::memory_order_relaxed))
+                                    std::cout << "[IBD] Cleared " << cleared.size()
+                                              << " stale in-flight blocks from orphaned peer " << peer_id << std::endl;
                             }
                         }
                     }
@@ -1275,8 +1295,9 @@ bool CIbdCoordinator::FetchBlocks() {
         if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
             auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
             if (!cleared.empty()) {
-                std::cout << "[IBD] Cleared " << cleared.size()
-                          << " stale in-flight blocks from gone peer " << m_blocks_sync_peer << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] Cleared " << cleared.size()
+                              << " stale in-flight blocks from gone peer " << m_blocks_sync_peer << std::endl;
             }
         }
         m_blocks_sync_peer = -1;
@@ -1308,7 +1329,7 @@ bool CIbdCoordinator::FetchBlocks() {
         peer_capacity, chain_height, header_height);
 
     // Diagnostic: show what we're about to request
-    if (!blocks_to_request.empty() && (header_height - chain_height) > 5) {
+    if (!blocks_to_request.empty() && (header_height - chain_height) > 5 && g_verbose.load(std::memory_order_relaxed)) {
         std::cout << "[IBD] FetchBlocks: chain=" << chain_height << " headers=" << header_height
                   << " peer=" << m_blocks_sync_peer << " inflight=" << in_flight_before
                   << " toRequest=" << blocks_to_request.size()
@@ -1336,8 +1357,9 @@ bool CIbdCoordinator::FetchBlocks() {
                     if (!pnode || !pnode->IsConnected()) {
                         auto cleared = g_node_context.block_tracker->OnPeerDisconnected(peer_id);
                         if (!cleared.empty()) {
-                            std::cout << "[IBD] Cleared " << cleared.size()
-                                      << " stale in-flight blocks from dead peer " << peer_id << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] Cleared " << cleared.size()
+                                          << " stale in-flight blocks from dead peer " << peer_id << std::endl;
                         }
                     }
                 }
@@ -1393,8 +1415,9 @@ bool CIbdCoordinator::FetchBlocks() {
                 if (fork) {
                     hash = fork->GetExpectedHashAtHeight(h);
                     if (!hash.IsNull()) {
-                        std::cout << "[IBD] Fork recovery: requesting block " << h
-                                  << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[IBD] Fork recovery: requesting block " << h
+                                      << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
                     }
                 }
             }
@@ -1445,8 +1468,9 @@ bool CIbdCoordinator::FetchBlocks() {
                             CBlock blockData;
                             if (m_node_context.blockchain_db &&
                                 m_node_context.blockchain_db->ReadBlock(hash, blockData)) {
-                                std::cout << "[IBD] Fork block at height " << h
-                                          << " already in DB - feeding to ForkManager for pre-validation" << std::endl;
+                                if (g_verbose.load(std::memory_order_relaxed))
+                                    std::cout << "[IBD] Fork block at height " << h
+                                              << " already in DB - feeding to ForkManager for pre-validation" << std::endl;
                                 forkMgr2.AddBlockToFork(blockData, hash, h);
                                 ForkBlock* forkBlock = fork2->GetBlockAtHeight(h);
                                 if (forkBlock && forkBlock->status == ForkBlockStatus::PENDING) {
@@ -1468,10 +1492,11 @@ bool CIbdCoordinator::FetchBlocks() {
                     if (m_node_context.blockchain_db->ReadBlock(hash, blockData)) {
                         CBlockIndex* pParent = m_chainstate.GetBlockIndex(blockData.hashPrevBlock);
                         if (pParent && (pParent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-                            std::cout << "[IBD] Orphan at height " << h
-                                      << " has connected parent (prevhash="
-                                      << blockData.hashPrevBlock.GetHex().substr(0, 16)
-                                      << "...) - queuing for re-processing" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] Orphan at height " << h
+                                          << " has connected parent (prevhash="
+                                          << blockData.hashPrevBlock.GetHex().substr(0, 16)
+                                          << "...) - queuing for re-processing" << std::endl;
                             orphans_to_reprocess.emplace_back(std::make_pair(hash, std::move(blockData)));
                         }
                     }
@@ -1500,10 +1525,11 @@ bool CIbdCoordinator::FetchBlocks() {
                                 s_parent_requests[parentHash] = now;
 
                                 int parent_h = h - 1;
-                                std::cout << "[IBD] BUG#279: Block " << h << " in DB but parent "
-                                          << parentHash.GetHex().substr(0, 16) << "... (height " << parent_h << ") "
-                                          << (pParent ? "NOT on active chain" : "MISSING from chainstate")
-                                          << " — requesting parent by hash from peer " << m_blocks_sync_peer << std::endl;
+                                if (g_verbose.load(std::memory_order_relaxed))
+                                    std::cout << "[IBD] BUG#279: Block " << h << " in DB but parent "
+                                              << parentHash.GetHex().substr(0, 16) << "... (height " << parent_h << ") "
+                                              << (pParent ? "NOT on active chain" : "MISSING from chainstate")
+                                              << " — requesting parent by hash from peer " << m_blocks_sync_peer << std::endl;
 
                                 if (m_node_context.block_fetcher->RequestBlockFromPeer(m_blocks_sync_peer, parent_h, parentHash)) {
                                     getdata.emplace_back(NetProtocol::MSG_BLOCK_INV, parentHash);
@@ -1529,11 +1555,13 @@ bool CIbdCoordinator::FetchBlocks() {
 
     // Diagnostic: log when heights have null hashes (indicates header chain gap)
     if (null_hash_count > 0) {
-        std::cout << "[IBD] WARNING: " << null_hash_count << " heights had null hashes (first=" << first_null_hash_height
-                  << " chain=" << chain_height << " headers=" << header_height << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] WARNING: " << null_hash_count << " heights had null hashes (first=" << first_null_hash_height
+                      << " chain=" << chain_height << " headers=" << header_height << ")" << std::endl;
     }
     if (already_have_count > 0) {
-        std::cout << "[IBD] Skipped " << already_have_count << " blocks already in DB (orphans awaiting parents)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] Skipped " << already_have_count << " blocks already in DB (orphans awaiting parents)" << std::endl;
     }
 
     // =========================================================================
@@ -1552,8 +1580,9 @@ bool CIbdCoordinator::FetchBlocks() {
         ForkManager& forkMgr = ForkManager::GetInstance();
         if (forkMgr.HasActiveFork()) {
             m_fork_all_in_db_cycles++;
-            std::cout << "[IBD] BUG#273: All " << already_have_count << " fork blocks in DB but chain stuck"
-                      << " (cycle " << m_fork_all_in_db_cycles << "/" << MAX_FORK_ALL_IN_DB_CYCLES << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] BUG#273: All " << already_have_count << " fork blocks in DB but chain stuck"
+                          << " (cycle " << m_fork_all_in_db_cycles << "/" << MAX_FORK_ALL_IN_DB_CYCLES << ")" << std::endl;
 
             if (m_fork_all_in_db_cycles >= MAX_FORK_ALL_IN_DB_CYCLES) {
                 auto activeFork = forkMgr.GetActiveFork();
@@ -1687,8 +1716,9 @@ bool CIbdCoordinator::FetchBlocks() {
                     if (m_node_context.blockchain_db->ReadBlock(hash, blockData)) {
                         CBlockIndex* pParent = m_chainstate.GetBlockIndex(blockData.hashPrevBlock);
                         if (pParent && (pParent->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-                            std::cout << "[IBD] Re-queuing cleared block at height " << h
-                                      << " for re-validation" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] Re-queuing cleared block at height " << h
+                                          << " for re-validation" << std::endl;
                             orphans_to_reprocess.emplace_back(std::make_pair(hash, std::move(blockData)));
                         }
                     }
@@ -1696,12 +1726,14 @@ bool CIbdCoordinator::FetchBlocks() {
             }
         }
         if (cleared_count > 0) {
-            std::cout << "[IBD] Cleared failed flags on " << cleared_count << " blocks for re-validation"
-                      << " (chain=" << chain_height << " headers=" << header_height << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Cleared failed flags on " << cleared_count << " blocks for re-validation"
+                          << " (chain=" << chain_height << " headers=" << header_height << ")" << std::endl;
         }
         if (perm_failed_count > 0) {
-            std::cout << "[IBD] Skipped " << perm_failed_count
-                      << " permanently invalid blocks (already re-validated and failed)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Skipped " << perm_failed_count
+                          << " permanently invalid blocks (already re-validated and failed)" << std::endl;
         }
 
         // BUG #278: If ALL blocks in the range are permanently invalid and nothing
@@ -1747,17 +1779,19 @@ bool CIbdCoordinator::FetchBlocks() {
             if (g_node_context.block_tracker && m_blocks_sync_peer != -1) {
                 auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
                 if (!cleared.empty()) {
-                    std::cout << "[IBD] Cleared " << cleared.size()
-                              << " stale in-flight blocks from failed send peer " << m_blocks_sync_peer << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[IBD] Cleared " << cleared.size()
+                                  << " stale in-flight blocks from failed send peer " << m_blocks_sync_peer << std::endl;
                 }
             }
             m_blocks_sync_peer = -1;  // Force peer reselection on next call
             return false;
         }
 
-        std::cout << "[IBD] Requested " << getdata.size() << " blocks from peer " << m_blocks_sync_peer
-                  << " (in-flight=" << m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer)
-                  << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] Requested " << getdata.size() << " blocks from peer " << m_blocks_sync_peer
+                      << " (in-flight=" << m_node_context.block_fetcher->GetPeerBlocksInFlight(m_blocks_sync_peer)
+                      << "/" << MAX_BLOCKS_IN_TRANSIT_PER_PEER << ")" << std::endl;
 
         // BUG #272: Wrong-fork sync peer detection
         // If we keep sending full batches but the chain never advances, the sync peer
@@ -1766,10 +1800,11 @@ bool CIbdCoordinator::FetchBlocks() {
         if (m_sync_peer_chain_height_at_start >= 0 && chain_height == m_sync_peer_chain_height_at_start) {
             m_sync_peer_futile_batches++;
             if (m_sync_peer_futile_batches >= MAX_FUTILE_BATCHES) {
-                std::cout << "[IBD] BUG #272: Sync peer " << m_blocks_sync_peer
-                          << " delivered " << m_sync_peer_futile_batches
-                          << " batches without chain advancing (stuck at " << chain_height
-                          << ") - peer likely on different fork, switching" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] BUG #272: Sync peer " << m_blocks_sync_peer
+                              << " delivered " << m_sync_peer_futile_batches
+                              << " batches without chain advancing (stuck at " << chain_height
+                              << ") - peer likely on different fork, switching" << std::endl;
                 // Mark as timed out with short cooldown so we try a different peer
                 m_timed_out_peer = m_blocks_sync_peer;
                 m_timed_out_peer_time = std::chrono::steady_clock::now();
@@ -1795,14 +1830,16 @@ bool CIbdCoordinator::FetchBlocks() {
     // orphan resolution never triggers and the node permanently stalls.
     bool chain_advanced = false;
     if (!orphans_to_reprocess.empty()) {
-        std::cout << "[IBD] Re-processing " << orphans_to_reprocess.size()
-                  << " orphan blocks with connected parents" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] Re-processing " << orphans_to_reprocess.size()
+                      << " orphan blocks with connected parents" << std::endl;
         int chain_before = m_chainstate.GetHeight();
         for (auto& [orphan_hash, orphan_block] : orphans_to_reprocess) {
             auto result = ProcessNewBlock(m_node_context, *m_node_context.blockchain_db,
                                           -1, orphan_block, &orphan_hash);
-            std::cout << "[IBD] Orphan re-process result: " << BlockProcessResultToString(result)
-                      << " hash=" << orphan_hash.GetHex().substr(0, 16) << "..." << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Orphan re-process result: " << BlockProcessResultToString(result)
+                          << " hash=" << orphan_hash.GetHex().substr(0, 16) << "..." << std::endl;
             if (result == BlockProcessResult::ACCEPTED) {
                 // Successfully connected - mark height completed
                 if (g_node_context.block_tracker) {
@@ -1855,9 +1892,10 @@ bool CIbdCoordinator::FetchBlocks() {
                     if (wait_elapsed < PARENT_VALIDATION_TIMEOUT_SECS) {
                         // Still within timeout - give validation queue time to process
                         m_last_hang_cause = HangCause::WAITING_ON_PARENT_VALIDATION;
-                        std::cout << "[IBD] Block " << next_needed
-                                  << " is in DB awaiting validation (" << wait_elapsed << "s/"
-                                  << PARENT_VALIDATION_TIMEOUT_SECS << "s)" << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[IBD] Block " << next_needed
+                                      << " is in DB awaiting validation (" << wait_elapsed << "s/"
+                                      << PARENT_VALIDATION_TIMEOUT_SECS << "s)" << std::endl;
                     } else {
                         // Timeout expired - validation is stuck.
                         // BUG #279 FIX: Check if the block's parent is on the active chain.
@@ -1879,10 +1917,11 @@ bool CIbdCoordinator::FetchBlocks() {
                                 if (!parentOnActiveChain) {
                                     // Parent is missing or not on active chain — this is the VDF divergence case.
                                     // Request the PARENT block by hash from peers.
-                                    std::cout << "[IBD] VALIDATION TIMEOUT: Block " << next_needed
-                                              << " stuck — parent " << parentHash.GetHex().substr(0, 16) << "..."
-                                              << " is " << (pParent ? "NOT on active chain" : "MISSING from chainstate")
-                                              << ". Requesting parent from peers." << std::endl;
+                                    if (g_verbose.load(std::memory_order_relaxed))
+                                        std::cout << "[IBD] VALIDATION TIMEOUT: Block " << next_needed
+                                                  << " stuck — parent " << parentHash.GetHex().substr(0, 16) << "..."
+                                                  << " is " << (pParent ? "NOT on active chain" : "MISSING from chainstate")
+                                                  << ". Requesting parent from peers." << std::endl;
 
                                     if (m_blocks_sync_peer != -1 && m_node_context.block_fetcher && m_node_context.connman) {
                                         int parent_height = next_needed - 1;  // Parent is at height below
@@ -1891,8 +1930,9 @@ bool CIbdCoordinator::FetchBlocks() {
                                                 {{NetProtocol::MSG_BLOCK_INV, parentHash}});
                                             m_node_context.connman->PushMessage(m_blocks_sync_peer, parent_msg);
                                             parent_fetched = true;
-                                            std::cout << "[IBD] Requested missing parent block " << parentHash.GetHex().substr(0, 16)
-                                                      << "... (height " << parent_height << ") from peer " << m_blocks_sync_peer << std::endl;
+                                            if (g_verbose.load(std::memory_order_relaxed))
+                                                std::cout << "[IBD] Requested missing parent block " << parentHash.GetHex().substr(0, 16)
+                                                          << "... (height " << parent_height << ") from peer " << m_blocks_sync_peer << std::endl;
                                         }
                                     }
                                 }
@@ -1900,9 +1940,10 @@ bool CIbdCoordinator::FetchBlocks() {
                         }
 
                         if (!parent_fetched) {
-                            std::cout << "[IBD] VALIDATION TIMEOUT: Block " << next_needed
-                                      << " stuck in DB for " << wait_elapsed << "s - escalating to peer recovery"
-                                      << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] VALIDATION TIMEOUT: Block " << next_needed
+                                          << " stuck in DB for " << wait_elapsed << "s - escalating to peer recovery"
+                                          << std::endl;
                         }
                         m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
                     }
@@ -1920,15 +1961,17 @@ bool CIbdCoordinator::FetchBlocks() {
                     if (m_node_context.blockchain_db && m_node_context.blockchain_db->BlockExists(next_hash)) {
                         CBlock db_block;
                         if (m_node_context.blockchain_db->ReadBlock(next_hash, db_block)) {
-                            std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
-                                      << " found in DB - re-processing directly" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
+                                          << " found in DB - re-processing directly" << std::endl;
                             auto result = ProcessNewBlock(m_node_context, *m_node_context.blockchain_db,
                                                           -1, db_block, &next_hash);
                             if (result == BlockProcessResult::ACCEPTED) {
                                 resolved_from_db = true;
                                 chain_advanced = true;
-                                std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
-                                          << " accepted from DB" << std::endl;
+                                if (g_verbose.load(std::memory_order_relaxed))
+                                    std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
+                                              << " accepted from DB" << std::endl;
                             }
                         }
                     }
@@ -1946,13 +1989,15 @@ bool CIbdCoordinator::FetchBlocks() {
                             if (tracking_age >= 30) {
                                 // Clear the stale tracking entry first
                                 g_node_context.block_tracker->RemoveTimedOut(next_needed);
-                                std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
-                                          << " stale in tracker (" << tracking_age << "s) - clearing and re-requesting"
-                                          << std::endl;
+                                if (g_verbose.load(std::memory_order_relaxed))
+                                    std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
+                                              << " stale in tracker (" << tracking_age << "s) - clearing and re-requesting"
+                                              << std::endl;
                             } else {
-                                std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
-                                          << " missing from DB and tracker - force requesting from peer "
-                                          << m_blocks_sync_peer << std::endl;
+                                if (g_verbose.load(std::memory_order_relaxed))
+                                    std::cout << "[IBD] ORPHAN-PARENT PRIORITY: Block " << next_needed
+                                              << " missing from DB and tracker - force requesting from peer "
+                                              << m_blocks_sync_peer << std::endl;
                             }
                             // Only force-request if peer has capacity under the IBD scheduler limit
                             if (m_blocks_sync_peer != -1) {
@@ -1975,10 +2020,11 @@ bool CIbdCoordinator::FetchBlocks() {
                 m_waiting_parent_hash = uint256{};
                 m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
             }
-            std::cout << "[IBD] " << already_have_count
-                      << " orphan blocks awaiting parents (chain="
-                      << chain_height << " headers=" << header_height
-                      << " inflight=" << total_in_flight << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] " << already_have_count
+                          << " orphan blocks awaiting parents (chain="
+                          << chain_height << " headers=" << header_height
+                          << " inflight=" << total_in_flight << ")" << std::endl;
         } else if (total_in_flight > 0) {
             m_last_hang_cause = HangCause::PEERS_AT_CAPACITY;
         }
@@ -2015,8 +2061,9 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
             }
         }
         if (removed > 0) {
-            std::cout << "[PerBlock] Removed " << removed << " blocks stuck >" << timeout_seconds
-                      << "s from tracker (will re-request)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[PerBlock] Removed " << removed << " blocks stuck >" << timeout_seconds
+                          << "s from tracker (will re-request)" << std::endl;
         }
 
         // BAD PEER DETECTION: If current sync peer has consecutive timeout cycles, rotate to new peer
@@ -2025,16 +2072,18 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
         if (current_peer_timed_out && m_blocks_sync_peer != -1) {
             m_blocks_sync_peer_consecutive_timeouts++;
             if (m_blocks_sync_peer_consecutive_timeouts >= max_timeouts) {
-                std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
-                          << " not delivering blocks (" << m_blocks_sync_peer_consecutive_timeouts
-                          << " consecutive timeout cycles), forcing reselection" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] Blocks sync peer " << m_blocks_sync_peer
+                              << " not delivering blocks (" << m_blocks_sync_peer_consecutive_timeouts
+                              << " consecutive timeout cycles), forcing reselection" << std::endl;
 
                 // BUG #256: Track this peer to avoid re-selecting it for 1 hour
                 m_timed_out_peer = m_blocks_sync_peer;
                 m_timed_out_peer_time = std::chrono::steady_clock::now();
                 m_timed_out_peer_cooldown_sec = HARD_TIMEOUT_COOLDOWN_SEC;
-                std::cout << "[IBD] Peer " << m_timed_out_peer << " excluded from selection for "
-                          << m_timed_out_peer_cooldown_sec << " seconds" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] Peer " << m_timed_out_peer << " excluded from selection for "
+                              << m_timed_out_peer_cooldown_sec << " seconds" << std::endl;
 
                 // BUG FIX: Clear in-flight blocks from this peer before reselecting
                 // Without this, blocks would stay tracked until 60s timeout, causing
@@ -2042,8 +2091,9 @@ void CIbdCoordinator::RetryTimeoutsAndStalls() {
                 if (g_node_context.block_tracker) {
                     auto cleared = g_node_context.block_tracker->OnPeerDisconnected(m_blocks_sync_peer);
                     if (!cleared.empty()) {
-                        std::cout << "[IBD] Cleared " << cleared.size()
-                                  << " stale in-flight blocks from bad peer " << m_blocks_sync_peer << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[IBD] Cleared " << cleared.size()
+                                      << " stale in-flight blocks from bad peer " << m_blocks_sync_peer << std::endl;
                     }
                 }
 
@@ -2083,7 +2133,8 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
         return 0;
     }
 
-    std::cout << "[FORK-DETECT] Searching for fork point from height " << chain_height << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[FORK-DETECT] Searching for fork point from height " << chain_height << std::endl;
 
     // RACE CONDITION FIX: Get a thread-safe snapshot of the chain
     // This holds cs_main while copying the data, then releases it
@@ -2150,9 +2201,10 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
             // Multiple competing headers = fork point
             if (first_divergence < 0) {
                 first_divergence = h;
-                std::cout << "[FORK-DETECT] Competing forks at height " << h
-                          << " (" << headers_at_height.size() << " headers)"
-                          << " - treating as divergence point" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-DETECT] Competing forks at height " << h
+                              << " (" << headers_at_height.size() << " headers)"
+                              << " - treating as divergence point" << std::endl;
             }
             continue;  // Don't update last_common_height
         }
@@ -2164,13 +2216,15 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
             // Single header but doesn't match chainstate = divergence
             if (first_divergence < 0) {
                 first_divergence = h;
-                std::cout << "[FORK-DETECT] Chain diverges at height " << h
-                          << " local=" << local_hash.GetHex().substr(0, 16) << "..."
-                          << " header=" << headers_at_height[0].GetHex().substr(0, 16) << "..." << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-DETECT] Chain diverges at height " << h
+                              << " local=" << local_hash.GetHex().substr(0, 16) << "..."
+                              << " header=" << headers_at_height[0].GetHex().substr(0, 16) << "..." << std::endl;
             }
             if (logged_divergences < 5) {
-                std::cout << "[FORK-DETECT] Height " << h << " diverges: local="
-                          << local_hash.GetHex().substr(0, 16) << "..." << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-DETECT] Height " << h << " diverges: local="
+                              << local_hash.GetHex().substr(0, 16) << "..." << std::endl;
                 logged_divergences++;
             }
         }
@@ -2178,13 +2232,15 @@ int CIbdCoordinator::FindForkPoint(int chain_height) {
 
     if (first_divergence >= 0) {
         // Chains diverge - fork point is the last UNAMBIGUOUS common height
-        std::cout << "[FORK-DETECT] Found fork point at height " << last_common_height
-                  << " (first divergence/fork at " << first_divergence << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[FORK-DETECT] Found fork point at height " << last_common_height
+                      << " (first divergence/fork at " << first_divergence << ")" << std::endl;
         return last_common_height;
     }
 
     // No divergence found - chains match completely
-    std::cout << "[FORK-DETECT] No fork detected - chains match up to height " << chain_height << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[FORK-DETECT] No fork detected - chains match up to height " << chain_height << std::endl;
     return chain_height;
 }
 
@@ -2399,7 +2455,8 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
                 return false;
             }
         } else {
-            std::cout << "[FORK-DETECT] Fork already active, waiting for blocks..." << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[FORK-DETECT] Fork already active, waiting for blocks..." << std::endl;
             // BUG FIX: Set m_fork_detected so Layer 1 doesn't keep re-triggering,
             // and return false so DownloadBlocks falls through to FetchBlocks().
             // Previously returned true without setting m_fork_detected, which caused
@@ -2418,9 +2475,10 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
         auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
             std::chrono::steady_clock::now() - m_fork_cancel_time);
         if (elapsed.count() < FORK_COOLDOWN_SECS) {
-            std::cout << "[FORK-DETECT] Fork at point " << fork_point
-                      << " on cooldown (" << elapsed.count() << "s/"
-                      << FORK_COOLDOWN_SECS << "s) - skipping" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[FORK-DETECT] Fork at point " << fork_point
+                          << " on cooldown (" << elapsed.count() << "s/"
+                          << FORK_COOLDOWN_SECS << "s) - skipping" << std::endl;
             m_fork_stall_cycles.store(0);
             return false;
         }
@@ -2445,9 +2503,10 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
         for (const auto& tip : competingTips) {
             if (tip.height == headerTipHeight) {
                 forkTipHash = tip.hash;
-                std::cout << "[FORK-DETECT] Found fork tip from competing tips: "
-                          << forkTipHash.GetHex().substr(0, 16)
-                          << "... at height " << tip.height << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-DETECT] Found fork tip from competing tips: "
+                              << forkTipHash.GetHex().substr(0, 16)
+                              << "... at height " << tip.height << std::endl;
                 break;
             }
         }
@@ -2463,11 +2522,13 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
         }
     }
 
-    std::cout << "[FORK-DETECT] Creating fork staging candidate..." << std::endl;
-    std::cout << "[FORK-DETECT] Fork point=" << fork_point
-              << " chain=" << chain_height
-              << " expected_tip=" << headerTipHeight
-              << " expected_hashes=" << expectedHashes.size() << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "[FORK-DETECT] Creating fork staging candidate..." << std::endl;
+        std::cout << "[FORK-DETECT] Fork point=" << fork_point
+                  << " chain=" << chain_height
+                  << " expected_tip=" << headerTipHeight
+                  << " expected_hashes=" << expectedHashes.size() << std::endl;
+    }
 
     auto forkCandidate = forkMgr.CreateForkCandidate(
         forkTipHash,
@@ -2489,12 +2550,15 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
         if (m_node_context.block_fetcher) {
             int cleared = m_node_context.block_fetcher->ClearAboveHeight(fork_point);
             if (cleared > 0) {
-                std::cout << "[FORK-DETECT] Cleared " << cleared << " tracked blocks above fork point " << fork_point << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-DETECT] Cleared " << cleared << " tracked blocks above fork point " << fork_point << std::endl;
             }
         }
 
-        std::cout << "[FORK-DETECT] Fork candidate created, blocks will be staged for pre-validation" << std::endl;
-        std::cout << "[FORK-DETECT] Original chain remains ACTIVE until fork is fully validated" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed)) {
+            std::cout << "[FORK-DETECT] Fork candidate created, blocks will be staged for pre-validation" << std::endl;
+            std::cout << "[FORK-DETECT] Original chain remains ACTIVE until fork is fully validated" << std::endl;
+        }
     } else {
         std::cerr << "[FORK-DETECT] Failed to create fork candidate" << std::endl;
     }
@@ -2519,7 +2583,8 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
             }
         }
         // Sync peer disconnected, need to select a new one
-        std::cout << "[IBD] Headers sync peer " << m_headers_sync_peer << " disconnected" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] Headers sync peer " << m_headers_sync_peer << " disconnected" << std::endl;
         m_headers_sync_peer = -1;
     }
 
@@ -2563,8 +2628,9 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
         m_headers_sync_timeout = std::chrono::steady_clock::now() +
                                  std::chrono::milliseconds(timeout_ms);
 
-        std::cout << "[IBD] Selected headers sync peer " << best_peer
-                  << " (height=" << best_height << ", timeout=" << (timeout_ms/1000) << "s)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] Selected headers sync peer " << best_peer
+                      << " (height=" << best_height << ", timeout=" << (timeout_ms/1000) << "s)" << std::endl;
     }
 }
 
@@ -2638,8 +2704,9 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
 
     // Check for timeout
     if (now > m_headers_sync_timeout) {
-        std::cout << "[IBD] Headers sync peer " << m_headers_sync_peer
-                  << " STALLED (no progress, timeout reached)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] Headers sync peer " << m_headers_sync_peer
+                      << " STALLED (no progress, timeout reached)" << std::endl;
         return false;  // Stalled
     }
 
@@ -2653,9 +2720,10 @@ void CIbdCoordinator::SwitchHeadersSyncPeer() {
     if (old_peer != -1) {
         m_headers_sync_peer_consecutive_stalls++;
         if (m_headers_sync_peer_consecutive_stalls >= MAX_HEADERS_CONSECUTIVE_STALLS) {
-            std::cout << "[IBD] Headers sync peer " << old_peer
-                      << " repeatedly failed to deliver headers (" << m_headers_sync_peer_consecutive_stalls
-                      << " stalls), marking as bad peer" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Headers sync peer " << old_peer
+                          << " repeatedly failed to deliver headers (" << m_headers_sync_peer_consecutive_stalls
+                          << " stalls), marking as bad peer" << std::endl;
             m_headers_bad_peers.insert(old_peer);
             m_headers_sync_peer_consecutive_stalls = 0;
         }
@@ -2667,10 +2735,12 @@ void CIbdCoordinator::SwitchHeadersSyncPeer() {
 
     if (m_headers_sync_peer != -1) {
         if (m_headers_sync_peer != old_peer) {
-            std::cout << "[IBD] Switched headers sync peer: " << old_peer
-                      << " -> " << m_headers_sync_peer << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Switched headers sync peer: " << old_peer
+                          << " -> " << m_headers_sync_peer << std::endl;
         } else {
-            std::cout << "[IBD] Retrying headers sync with same peer " << m_headers_sync_peer << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Retrying headers sync with same peer " << m_headers_sync_peer << std::endl;
         }
 
         // BUG #195 FIX: Clear pending sync state when switching peers after a stall.

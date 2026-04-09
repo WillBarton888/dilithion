@@ -41,10 +41,12 @@ For critical vulnerabilities, you can also reach us via:
 ### Wallet Security
 
 - AES-256-CBC encryption for private keys at rest
-- PBKDF2-SHA3-512 key derivation (500,000 iterations)
-- Random salt and IV generation
-- Secure memory wiping for sensitive data
+- PBKDF2-HMAC-SHA3-256 key derivation (100,000 iterations)
+- Random salt and IV generation (32-byte salt, BCryptGenRandom on Windows)
+- RAII-based secure memory management for entropy and key material
+- `memory_cleanse()` guarantees zeroization (not optimized away by compilers)
 - Keys never logged or exposed in memory unnecessarily
+- HD wallet with BIP39 mnemonic and BIP32/BIP44 derivation
 
 ### Network Security
 
@@ -59,7 +61,31 @@ For critical vulnerabilities, you can also reach us via:
 
 - **DFMP (Dynamic Fair Mining Protocol):** Anti-concentration mechanism preventing mining centralization
 - **VDF (Verifiable Delay Function):** Future-scheduled sequential proof system (chiavdf-based)
-- **Digital DNA:** Hardware identity fingerprinting for Sybil resistance
+- **Digital DNA:** 8-dimensional hardware identity fingerprinting for Sybil resistance (Latency, Timing, Perspective, Memory, ClockDrift, Bandwidth, Thermal, Behavioral)
+- **Dual Chain:** DIL (RandomX PoW, ~4 min blocks) and DilV (Pure VDF, ~45s blocks)
+
+### Bridge Security (DIL/DilV to Base L2)
+
+- **Trust Model:** Custodial bridge — operator controls minting on Base. Planned migration to Gnosis Safe 3-of-5 multisig for contract ownership.
+- **Contracts:** WrappedDIL (wDIL) and WrappedDilV (wDILV) ERC-20 tokens on Base, built with OpenZeppelin v5.1.0 (Ownable, Pausable, ERC20)
+- **Rate Limiting:** Daily mint caps and per-deposit maximum enforced on-chain. Minimum burn amounts prevent dust attacks.
+- **Replay Protection:** Each native chain txid tracked via `mapping(bytes32 => bool) minted` — prevents double-minting
+- **Crash Safety:** Relayer uses a durable attempt ledger with CAS (Compare-And-Swap) state transitions. All RPC send exceptions are treated as ambiguous (transport failures can occur after server processes the send). Stuck transactions are resolved by periodic reconciliation (every ~5 minutes) using on-chain verification and time-windowed wallet history matching. Manual review escalation for sends unresolved after 30 minutes.
+- **Reorg Detection:** Block hash history stored for walkback; auto-pauses bridge on backing invariant breach (minted deposits reorged away) or catastrophic reorgs (>100 blocks)
+- **Invariant Monitor:** Every cycle verifies `native_balance >= wrapped_supply`. WARNING-level alerts on breach (reserves may be split across wallets). Configurable policy: warn or pause.
+- **Address Validation:** Native addresses validated via full base58check (RPC) before any withdrawal send; on-chain validation checks length, prefix, and character set
+- **Known Limitation:** Contract ownership is currently a single EOA. Multisig migration is in progress.
+
+### RPC Security
+
+- **Cookie-based authentication by default**: When no `rpcuser`/`rpcpassword` are configured, the node auto-generates a 256-bit random credential written to `<datadir>/.cookie` (permissions 0600 on Linux). RPC is never unauthenticated.
+- PBKDF2-HMAC-SHA3-256 password hashing (100,000 iterations)
+- Constant-time password and username comparison (prevents timing attacks)
+- Role-based access control (RBAC) with granular permission bits (READ_BLOCKCHAIN, WRITE_WALLET, ADMIN_SERVER, etc.)
+- Per-method rate limiting
+- Dynamic fee estimation based on mempool congestion
+- Public API mode (`--public-api`) requires explicit authentication — refuses to start without credentials
+- Request/response audit logging
 
 ---
 
@@ -77,17 +103,18 @@ For critical vulnerabilities, you can also reach us via:
 
 ### Key Exposure
 - **Risk:** MEDIUM — Keys encrypted at rest, never logged
-- PBKDF2-SHA3-512 key derivation with 500,000 iterations
-- Secure memory wiping after key operations
+- PBKDF2-HMAC-SHA3-256 key derivation with 100,000 iterations
+- RAII-based secure memory wiping after key operations
 
 ### Implementation Bugs
 - **Risk:** MEDIUM — Uses well-tested reference implementation
-- Comprehensive unit tests (200+ tests)
-- Actively seeking professional crypto audit
+- Comprehensive unit tests (300+ tests across 59 test suites, including fuzz campaigns)
+- Preparing for professional security audit by Hacken
 
 ### Random Number Generation
-- **Risk:** LOW — Uses system CSPRNG (`/dev/urandom`, `CryptGenRandom`)
+- **Risk:** LOW — Uses system CSPRNG (`/dev/urandom`, `BCryptGenRandom` on Windows)
 - No custom RNG implementation
+- Falls back to `CryptGenRandom` only if `BCryptGenRandom` unavailable (legacy Windows)
 
 ---
 
@@ -164,6 +191,6 @@ We publicly acknowledge security researchers who report vulnerabilities responsi
 
 ---
 
-**Last updated:** February 13, 2026
+**Last updated:** April 9, 2026
 
 **Thank you for helping make Dilithion more secure!**

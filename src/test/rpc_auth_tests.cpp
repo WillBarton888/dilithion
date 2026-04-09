@@ -268,6 +268,61 @@ void TestEdgeCases() {
     std::cout << "  ✓ Empty password rejected" << std::endl;
 }
 
+void TestCookieAuthentication() {
+    std::cout << "\nTesting cookie-based authentication..." << std::endl;
+
+    // Simulate cookie generation (same logic as dilithion-node.cpp)
+    std::vector<uint8_t> cookie_bytes(32);
+    assert(GenerateSalt(cookie_bytes));
+
+    // Convert to hex string
+    std::string cookie_password;
+    for (auto b : cookie_bytes) {
+        char hex[3];
+        snprintf(hex, sizeof(hex), "%02x", b);
+        cookie_password += hex;
+    }
+
+    // Cookie password should be 64 hex characters
+    assert(cookie_password.size() == 64);
+    std::cout << "  ✓ Cookie password is 64 hex chars" << std::endl;
+
+    // All characters should be valid hex
+    for (char c : cookie_password) {
+        assert((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'));
+    }
+    std::cout << "  ✓ Cookie password is valid hex" << std::endl;
+
+    // Cookie should be usable as RPC credentials
+    assert(InitializeAuth("__cookie__", cookie_password));
+    assert(AuthenticateRequest("__cookie__", cookie_password));
+    std::cout << "  ✓ Cookie credentials authenticate successfully" << std::endl;
+
+    // Wrong cookie should fail
+    assert(!AuthenticateRequest("__cookie__", "wrong_password"));
+    std::cout << "  ✓ Wrong cookie password rejected" << std::endl;
+
+    // Each generation should produce different cookies
+    std::vector<uint8_t> cookie2(32);
+    assert(GenerateSalt(cookie2));
+    std::string cookie_password2;
+    for (auto b : cookie2) {
+        char hex[3];
+        snprintf(hex, sizeof(hex), "%02x", b);
+        cookie_password2 += hex;
+    }
+    assert(cookie_password != cookie_password2);
+    std::cout << "  ✓ Each cookie generation is unique" << std::endl;
+
+    // Test cookie file format parsing (username:password)
+    std::string cookie_line = "__cookie__:" + cookie_password;
+    size_t colon = cookie_line.find(':');
+    assert(colon != std::string::npos);
+    assert(cookie_line.substr(0, colon) == "__cookie__");
+    assert(cookie_line.substr(colon + 1) == cookie_password);
+    std::cout << "  ✓ Cookie file format parses correctly" << std::endl;
+}
+
 void TestSecurityProperties() {
     std::cout << "\nTesting security properties..." << std::endl;
 
@@ -318,6 +373,7 @@ int main() {
         TestAuthenticationSystem();
         TestSecureCompare();
         TestEdgeCases();
+        TestCookieAuthentication();
         TestSecurityProperties();
 
         std::cout << std::endl;

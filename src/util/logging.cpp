@@ -21,6 +21,9 @@
 // Global verbose flag - default to false for cleaner output
 std::atomic<bool> g_verbose{false};
 
+// Global quiet flag - default to false (show operator-level messages)
+std::atomic<bool> g_quiet{false};
+
 // CLoggingConfig implementation
 CLoggingConfig& CLoggingConfig::GetInstance() {
     static CLoggingConfig instance;

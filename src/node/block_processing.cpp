@@ -30,6 +30,8 @@
 #include <miner/controller.h>
 #include <wallet/wallet.h>
 
+#include <util/logging.h>
+
 #include <algorithm>
 #include <chrono>
 #include <iostream>
@@ -275,9 +277,10 @@ static void ResolveOrphanChildren(
     std::vector<uint256> children = ctx.orphan_manager->GetOrphanChildren(parentHash);
     if (children.empty()) return;
 
-    std::cout << "[ForkOrphan] Resolving " << children.size()
-              << " orphan children of " << parentHash.GetHex().substr(0, 16)
-              << "..." << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[ForkOrphan] Resolving " << children.size()
+                  << " orphan children of " << parentHash.GetHex().substr(0, 16)
+                  << "..." << std::endl;
 
     for (const uint256& orphanHash : children) {
         CBlock orphanBlock;
@@ -285,8 +288,9 @@ static void ResolveOrphanChildren(
             // Erase from orphan pool BEFORE processing to avoid re-entry
             ctx.orphan_manager->EraseOrphanBlock(orphanHash);
             uint256 orphanBlockHash = orphanBlock.GetHash();
-            std::cout << "[ForkOrphan] Processing orphan child "
-                      << orphanBlockHash.GetHex().substr(0, 16) << "..." << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ForkOrphan] Processing orphan child "
+                          << orphanBlockHash.GetHex().substr(0, 16) << "..." << std::endl;
             ProcessNewBlock(ctx, db, -1, orphanBlock, &orphanBlockHash);
         }
     }
@@ -313,8 +317,10 @@ BlockProcessResult ProcessNewBlock(
     const CBlock& block,
     const uint256* precomputed_hash)
 {
-    std::cout << "[ProcessNewBlock] ENTRY peer=" << peer_id << std::endl;
-    std::cout.flush();
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "[ProcessNewBlock] ENTRY peer=" << peer_id << std::endl;
+        std::cout.flush();
+    }
     auto handler_start = std::chrono::steady_clock::now();
 
     // =========================================================================
@@ -333,7 +339,8 @@ BlockProcessResult ProcessNewBlock(
     // Use precomputed hash if provided (e.g., from compact block reconstruction)
     if (precomputed_hash && !precomputed_hash->IsNull()) {
         blockHash = *precomputed_hash;
-        std::cout << "[ProcessNewBlock] Using precomputed hash: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[ProcessNewBlock] Using precomputed hash: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
     } else if (ctx.headers_manager) {
         // ALWAYS look up hash from headers first (both above and below checkpoint)
         int expectedHeight = -1;
@@ -353,7 +360,7 @@ BlockProcessResult ProcessNewBlock(
         // 2. Look up our hash from headers manager
         if (expectedHeight > 0) {
             blockHash = ctx.headers_manager->GetRandomXHashAtHeight(expectedHeight);
-            if (!blockHash.IsNull()) {
+            if (!blockHash.IsNull() && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[ProcessNewBlock] Hash from headers (height " << expectedHeight << "): "
                           << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
             }
@@ -362,14 +369,18 @@ BlockProcessResult ProcessNewBlock(
 
     // Fallback: compute hash if not found in headers
     if (blockHash.IsNull()) {
-        std::cout << "[ProcessNewBlock] Computing block hash (RandomX)..." << std::endl;
-        std::cout.flush();
+        if (g_verbose.load(std::memory_order_relaxed)) {
+            std::cout << "[ProcessNewBlock] Computing block hash (RandomX)..." << std::endl;
+            std::cout.flush();
+        }
         auto hash_start = std::chrono::steady_clock::now();
         blockHash = block.GetHash();
         auto hash_end = std::chrono::steady_clock::now();
         auto hash_ms = std::chrono::duration_cast<std::chrono::milliseconds>(hash_end - hash_start).count();
-        std::cout << "[ProcessNewBlock] Hash computed in " << hash_ms << "ms: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout.flush();
+        if (g_verbose.load(std::memory_order_relaxed)) {
+            std::cout << "[ProcessNewBlock] Hash computed in " << hash_ms << "ms: " << blockHash.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cout.flush();
+        }
     }
 
     // =========================================================================
@@ -426,9 +437,10 @@ BlockProcessResult ProcessNewBlock(
     };
     BlockTrackerGuard tracker_guard{ctx, peer_id, blockHash};
 
-    std::cout << "[ProcessNewBlock] Processing block: " << blockHash.GetHex().substr(0, 16) << "..."
-              << " (chainHeight=" << currentChainHeight << ", checkpoint=" << checkpointHeight
-              << ", skipPoWCheck=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[ProcessNewBlock] Processing block: " << blockHash.GetHex().substr(0, 16) << "..."
+                  << " (chainHeight=" << currentChainHeight << ", checkpoint=" << checkpointHeight
+                  << ", skipPoWCheck=" << (skipPoWCheck ? "yes" : "no") << ")" << std::endl;
 
     // =========================================================================
     // PHASE 1.5: FORK BLOCK PRE-VALIDATION (Validate-Before-Disconnect)
@@ -466,13 +478,15 @@ BlockProcessResult ProcessNewBlock(
                 if (fork->IsExpectedBlock(blockHash, blockHeight)) {
                     isForkBlock = true;
 
-                    if (fork->HasExpectedHashes()) {
-                        std::cout << "[ProcessNewBlock] Block VERIFIED as fork member (height "
-                                  << blockHeight << ", hash matches expected)" << std::endl;
-                    } else {
-                        std::cout << "[ProcessNewBlock] Block in fork range (height "
-                                  << blockHeight << " in " << (forkPoint + 1) << "-" << forkTip
-                                  << ", no hash verification available)" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed)) {
+                        if (fork->HasExpectedHashes()) {
+                            std::cout << "[ProcessNewBlock] Block VERIFIED as fork member (height "
+                                      << blockHeight << ", hash matches expected)" << std::endl;
+                        } else {
+                            std::cout << "[ProcessNewBlock] Block in fork range (height "
+                                      << blockHeight << " in " << (forkPoint + 1) << "-" << forkTip
+                                      << ", no hash verification available)" << std::endl;
+                        }
                     }
 
                     // Add block to fork tracking
@@ -502,12 +516,14 @@ BlockProcessResult ProcessNewBlock(
                             // Fork blocks may appear invalid due to our incorrect chain state.
                             // Banning prevents the peer from helping us recover.
                             // Just cancel the fork and let the node try again.
-                            std::cout << "[ProcessNewBlock] Fork cancelled, NOT banning peer (fork recovery mode)" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[ProcessNewBlock] Fork cancelled, NOT banning peer (fork recovery mode)" << std::endl;
 
                             return BlockProcessResult::INVALID_POW;
                         }
                         forkPreValidated = true;  // Track successful pre-validation
-                        std::cout << "[ProcessNewBlock] Fork block pre-validated successfully (PoW + MIK)" << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[ProcessNewBlock] Fork block pre-validated successfully (PoW + MIK)" << std::endl;
                     }
                 } else if (inForkRange) {
                     // BUG #256 FIX: Block is in fork height range but hash doesn't match expected
@@ -577,8 +593,9 @@ BlockProcessResult ProcessNewBlock(
         }
 
         // Debug: Show height derivation
-        std::cout << "[ProcessNewBlock] DFMP height=" << blockHeight
-                  << " (source=" << heightSource << ", chainHeight=" << currentChainHeight << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[ProcessNewBlock] DFMP height=" << blockHeight
+                      << " (source=" << heightSource << ", chainHeight=" << currentChainHeight << ")" << std::endl;
 
         // BUG #246c/248 FIX: Skip DFMP validation when parent not connected
         // MIK validation requires registration blocks to be processed first.
@@ -633,12 +650,14 @@ BlockProcessResult ProcessNewBlock(
                 std::cerr << "[ProcessNewBlock] ERROR: Block has invalid basic PoW (parent not on active chain)" << std::endl;
                 return BlockProcessResult::INVALID_POW;
             }
-            if (pParent == nullptr) {
-                std::cout << "[ProcessNewBlock] Orphan block at height " << blockHeight
-                          << " (chainHeight=" << currentChainHeight << ") - deferring MIK validation until parent connects" << std::endl;
-            } else {
-                std::cout << "[ProcessNewBlock] Block at height " << blockHeight
-                          << " has parent on competing chain - deferring MIK validation" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                if (pParent == nullptr) {
+                    std::cout << "[ProcessNewBlock] Orphan block at height " << blockHeight
+                              << " (chainHeight=" << currentChainHeight << ") - deferring MIK validation until parent connects" << std::endl;
+                } else {
+                    std::cout << "[ProcessNewBlock] Block at height " << blockHeight
+                              << " has parent on competing chain - deferring MIK validation" << std::endl;
+                }
             }
             // Skip DFMP check - will run when block is reprocessed after parent is on active chain
         }
@@ -705,7 +724,8 @@ BlockProcessResult ProcessNewBlock(
             return BlockProcessResult::INVALID_POW;
         }
     } else if (forkPreValidated) {
-        std::cout << "[ProcessNewBlock] Fork block - skipping DFMP check (MIK validated in PreValidateBlock)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[ProcessNewBlock] Fork block - skipping DFMP check (MIK validated in PreValidateBlock)" << std::endl;
     }
 
     // =========================================================================
@@ -833,9 +853,10 @@ BlockProcessResult ProcessNewBlock(
                     return BlockProcessResult::VALIDATION_ERROR;
                 }
             }
-            std::cout << "[ProcessNewBlock] Fee calc unreliable at height " << blockHeight
-                      << " (txs=" << transactions.size() << ", utxo=" << (utxoSet ? "yes" : "no")
-                      << ") — deferring coinbase value check to ConnectTip" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Fee calc unreliable at height " << blockHeight
+                          << " (txs=" << transactions.size() << ", utxo=" << (utxoSet ? "yes" : "no")
+                          << ") — deferring coinbase value check to ConnectTip" << std::endl;
         }
     }
 
@@ -861,9 +882,10 @@ BlockProcessResult ProcessNewBlock(
 
         // Check if block is actually on main chain (BLOCK_VALID_CHAIN flag)
         if (pindex->nStatus & CBlockIndex::BLOCK_VALID_CHAIN) {
-            std::cout << "[ProcessNewBlock] Block already in chain and connected, skipping"
-                      << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
-                      << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Block already in chain and connected, skipping"
+                          << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
+                          << std::endl;
             // BUG #167 FIX: Use per-block tracking
             tracker_guard.released = true;
             if (ctx.block_fetcher) {
@@ -873,25 +895,29 @@ BlockProcessResult ProcessNewBlock(
         }
 
         // BUG #150 FIX: Block has data but is NOT connected - try to activate it
-        std::cout << "[ProcessNewBlock] Block in chainstate but not connected, trying to activate"
-                  << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
-                  << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[ProcessNewBlock] Block in chainstate but not connected, trying to activate"
+                      << " height=" << pindex->nHeight << " hash=" << blockHash.GetHex().substr(0, 16)
+                      << std::endl;
 
         // BUG #243 FIX: Ensure block data is saved to database before activation
         // HaveData() flag may be stale if block was deleted during fork recovery
         if (!db.BlockExists(blockHash)) {
-            std::cout << "[ProcessNewBlock] Block not in database - saving before activation" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Block not in database - saving before activation" << std::endl;
             if (!db.WriteBlock(blockHash, block)) {
                 std::cerr << "[ProcessNewBlock] ERROR: Failed to save block to database" << std::endl;
                 return BlockProcessResult::DB_ERROR;
             }
-            std::cout << "[ProcessNewBlock] Block saved to database" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Block saved to database" << std::endl;
         }
 
         bool reorgOccurred = false;
         if (g_chainstate.ActivateBestChain(pindex, block, reorgOccurred)) {
-            std::cout << "[ProcessNewBlock] Successfully activated previously stuck block at height "
-                      << pindex->nHeight << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Successfully activated previously stuck block at height "
+                          << pindex->nHeight << std::endl;
             tracker_guard.released = true;
             if (ctx.block_fetcher) {
                 ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
@@ -926,7 +952,8 @@ BlockProcessResult ProcessNewBlock(
         if (!g_chainstate.HasBlockIndex(blockHash)) {
             CBlockIndex* pParent = g_chainstate.GetBlockIndex(block.hashPrevBlock);
             if (pParent != nullptr) {
-                std::cout << "[BUG88-FIX] Block in DB but not chainstate, parent now available - connecting" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[BUG88-FIX] Block in DB but not chainstate, parent now available - connecting" << std::endl;
                 // Don't return - fall through to create block index and connect
             } else {
                 // BUG #149 FIX: Check if parent is on a competing fork
@@ -958,9 +985,10 @@ BlockProcessResult ProcessNewBlock(
                         std::chrono::duration_cast<std::chrono::seconds>(now - it->second).count() > 30) {
                         s_requested_parents[block.hashPrevBlock] = now;
 
-                        std::cout << "[ProcessNewBlock] Parent " << block.hashPrevBlock.GetHex().substr(0, 16)
-                                  << "... (height " << parent_height << ") NOT in chainstate"
-                                  << " — requesting by hash from peer " << peer_id << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[ProcessNewBlock] Parent " << block.hashPrevBlock.GetHex().substr(0, 16)
+                                      << "... (height " << parent_height << ") NOT in chainstate"
+                                      << " — requesting by hash from peer " << peer_id << std::endl;
 
                         std::vector<NetProtocol::CInv> getdata_inv;
                         getdata_inv.emplace_back(NetProtocol::MSG_BLOCK_INV, block.hashPrevBlock);
@@ -970,17 +998,19 @@ BlockProcessResult ProcessNewBlock(
                 }
 
                 // Diagnostic: why can't we find the parent?
-                std::cout << "[ProcessNewBlock] Block in DB but parent still missing"
-                          << " prevBlock=" << block.hashPrevBlock.GetHex().substr(0, 16) << "..."
-                          << " parentHeight=" << parent_height
-                          << " chainTip=" << currentChainHeight << std::endl;
-                // Check what hash we actually have at the expected parent height
-                if (ctx.headers_manager && parent_height > 0) {
-                    uint256 expected_parent = ctx.headers_manager->GetRandomXHashAtHeight(parent_height);
-                    if (!expected_parent.IsNull() && expected_parent != block.hashPrevBlock) {
-                        std::cout << "[ProcessNewBlock] FORK: prevBlock doesn't match header chain at height " << parent_height
-                                  << " header=" << expected_parent.GetHex().substr(0, 16) << "..."
-                                  << " block.prev=" << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed)) {
+                    std::cout << "[ProcessNewBlock] Block in DB but parent still missing"
+                              << " prevBlock=" << block.hashPrevBlock.GetHex().substr(0, 16) << "..."
+                              << " parentHeight=" << parent_height
+                              << " chainTip=" << currentChainHeight << std::endl;
+                    // Check what hash we actually have at the expected parent height
+                    if (ctx.headers_manager && parent_height > 0) {
+                        uint256 expected_parent = ctx.headers_manager->GetRandomXHashAtHeight(parent_height);
+                        if (!expected_parent.IsNull() && expected_parent != block.hashPrevBlock) {
+                            std::cout << "[ProcessNewBlock] FORK: prevBlock doesn't match header chain at height " << parent_height
+                                      << " header=" << expected_parent.GetHex().substr(0, 16) << "..."
+                                      << " block.prev=" << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                        }
                     }
                 }
                 // Notify IBD coordinator of orphan block for Layer 2 fork detection
@@ -999,7 +1029,8 @@ BlockProcessResult ProcessNewBlock(
                 return BlockProcessResult::ORPHAN;
             }
         } else {
-            std::cout << "[ProcessNewBlock] Block already in chainstate, skipping" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Block already in chainstate, skipping" << std::endl;
             return BlockProcessResult::ALREADY_HAVE;
         }
     }
@@ -1011,7 +1042,7 @@ BlockProcessResult ProcessNewBlock(
         std::cerr << "[ProcessNewBlock] ERROR: Failed to save block to database" << std::endl;
         return BlockProcessResult::DB_ERROR;
     }
-    if (!blockInDb) {
+    if (!blockInDb && g_verbose.load(std::memory_order_relaxed)) {
         std::cout << "[ProcessNewBlock] Block saved to database" << std::endl;
     }
 
@@ -1029,8 +1060,10 @@ BlockProcessResult ProcessNewBlock(
     pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
     if (pblockIndex->pprev == nullptr) {
         // BUG #12 FIX (Phase 4.3): Orphan block handling
-        std::cout << "[ProcessNewBlock] Parent block not found: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
-        std::cout << "[ProcessNewBlock] Storing block as orphan and requesting parent" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed)) {
+            std::cout << "[ProcessNewBlock] Parent block not found: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+            std::cout << "[ProcessNewBlock] Storing block as orphan and requesting parent" << std::endl;
+        }
 
         // CRITICAL-3 FIX: Validate orphan block before storing
         CBlockValidator validator;
@@ -1101,8 +1134,9 @@ BlockProcessResult ProcessNewBlock(
             }
 
             if (parent_in_flight) {
-                std::cout << "[ProcessNewBlock] Orphan block stored - parent height " << parent_height
-                          << " already in-flight" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[ProcessNewBlock] Orphan block stored - parent height " << parent_height
+                              << " already in-flight" << std::endl;
             } else if (parent_height <= 0) {
                 // BUG #149 FIX: Parent is not in our header chain (competing fork)
                 // Instead of requesting one block at a time (inefficient for deep forks),
@@ -1141,7 +1175,8 @@ BlockProcessResult ProcessNewBlock(
                     }
                 } else {
                     // Header sync already in progress - skip redundant request
-                    std::cout << "[ProcessNewBlock] Fork header sync already in progress - skipping redundant request" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[ProcessNewBlock] Fork header sync already in progress - skipping redundant request" << std::endl;
                 }
             } else {
                 // BUG #279 FIX: Parent hash is known in headers but NOT in chainstate.
@@ -1151,16 +1186,18 @@ BlockProcessResult ProcessNewBlock(
                 // height, so it will never request this specific hash. Fetch it directly.
                 bool parent_in_chainstate = (g_chainstate.GetBlockIndex(block.hashPrevBlock) != nullptr);
                 if (!parent_in_chainstate && peer_id >= 0 && ctx.block_fetcher && ctx.connman) {
-                    std::cout << "[ProcessNewBlock] Parent " << block.hashPrevBlock.GetHex().substr(0, 16)
-                              << "... (height " << parent_height << ") not in chainstate — requesting by hash from peer "
-                              << peer_id << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[ProcessNewBlock] Parent " << block.hashPrevBlock.GetHex().substr(0, 16)
+                                  << "... (height " << parent_height << ") not in chainstate — requesting by hash from peer "
+                                  << peer_id << std::endl;
                     if (ctx.block_fetcher->RequestBlockFromPeer(peer_id, parent_height, block.hashPrevBlock)) {
                         CNetMessage parent_msg = ctx.message_processor->CreateGetDataMessage(
                             {{NetProtocol::MSG_BLOCK_INV, block.hashPrevBlock}});
                         ctx.connman->PushMessage(peer_id, parent_msg);
                     }
                 } else {
-                    std::cout << "[ProcessNewBlock] Orphan block stored - IBD coordinator will handle block request" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[ProcessNewBlock] Orphan block stored - IBD coordinator will handle block request" << std::endl;
                 }
             }
         } else {
@@ -1202,7 +1239,8 @@ BlockProcessResult ProcessNewBlock(
     pblockIndex->nHeight = pblockIndex->pprev->nHeight + 1;
     pblockIndex->BuildChainWork();
 
-    std::cout << "[ProcessNewBlock] Block index created (height " << pblockIndex->nHeight << ")" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[ProcessNewBlock] Block index created (height " << pblockIndex->nHeight << ")" << std::endl;
 
     // Save block index to database
     if (!db.WriteBlockIndex(blockHash, *pblockIndex)) {
@@ -1242,15 +1280,18 @@ BlockProcessResult ProcessNewBlock(
         // Queue for async validation - returns immediately
         int expected_height = pblockIndexPtr->nHeight;
         if (ctx.validation_queue->QueueBlock(peer_id, block, expected_height, blockHash, pblockIndexPtr)) {
-            std::cout << "[ProcessNewBlock] Block queued for async validation (height " << expected_height
-                      << ", queue depth: " << ctx.validation_queue->GetQueueDepth() << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Block queued for async validation (height " << expected_height
+                          << ", queue depth: " << ctx.validation_queue->GetQueueDepth() << ")" << std::endl;
             // IBD HANG FIX: Mark block as received IMMEDIATELY
             tracker_guard.released = true;
             ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
             ctx.block_fetcher->OnBlockReceived(peer_id, expected_height, blockHash);
-            auto handler_end = std::chrono::steady_clock::now();
-            auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
-            std::cout << "[ProcessNewBlock] EXIT (async) total=" << handler_ms << "ms" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                auto handler_end = std::chrono::steady_clock::now();
+                auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
+                std::cout << "[ProcessNewBlock] EXIT (async) total=" << handler_ms << "ms" << std::endl;
+            }
             return BlockProcessResult::ACCEPTED_ASYNC;
         } else {
             std::cerr << "[ProcessNewBlock] WARNING: Failed to queue block for async validation, falling back to sync" << std::endl;
@@ -1269,7 +1310,8 @@ BlockProcessResult ProcessNewBlock(
         auto fork = forkMgr.GetActiveFork();
 
         if (fork) {
-            std::cout << "[ProcessNewBlock] Fork block stored with index, checking if ready to switch..." << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Fork block stored with index, checking if ready to switch..." << std::endl;
 
             // ROBUST FIX: Switch when fork has more work, not when ALL blocks received
             // This prevents the race condition where fast blocks cause the fork to never complete
@@ -1287,22 +1329,26 @@ BlockProcessResult ProcessNewBlock(
 
                     if (forkIndex && currentTip) {
                         forkHasMoreWork = (currentTip->nChainWork < forkIndex->nChainWork);
-                        std::cout << "[ProcessNewBlock] Chainwork comparison: fork="
-                                  << forkIndex->nChainWork.GetHex().substr(0, 16) << " current="
-                                  << currentTip->nChainWork.GetHex().substr(0, 16)
-                                  << " forkHasMore=" << (forkHasMoreWork ? "yes" : "no") << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[ProcessNewBlock] Chainwork comparison: fork="
+                                      << forkIndex->nChainWork.GetHex().substr(0, 16) << " current="
+                                      << currentTip->nChainWork.GetHex().substr(0, 16)
+                                      << " forkHasMore=" << (forkHasMoreWork ? "yes" : "no") << std::endl;
                     }
                 }
             }
 
             // Switch if: all received blocks are prevalidated AND fork has more chainwork
             if (allReceivedPrevalidated && forkHasMoreWork) {
-                std::cout << "[ProcessNewBlock] Fork has more work and all received blocks prevalidated!" << std::endl;
-                std::cout << "[ProcessNewBlock] Triggering early chain switch (height " << highestPrevalidated << ")..." << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed)) {
+                    std::cout << "[ProcessNewBlock] Fork has more work and all received blocks prevalidated!" << std::endl;
+                    std::cout << "[ProcessNewBlock] Triggering early chain switch (height " << highestPrevalidated << ")..." << std::endl;
+                }
 
                 // Trigger chain switch - this uses ActivateBestChain with the fork tip
                 if (forkMgr.TriggerChainSwitch(ctx, db)) {
-                    std::cout << "[ProcessNewBlock] Fork chain switch SUCCESSFUL!" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[ProcessNewBlock] Fork chain switch SUCCESSFUL!" << std::endl;
                     g_node_context.fork_detected.store(false);
                     g_metrics.ClearForkDetected();
 
@@ -1333,9 +1379,11 @@ BlockProcessResult ProcessNewBlock(
                         ctx.peer_mik_tracker->RecordMIKRelay(peer_id, blockMikHex);
                     }
 
-                    auto handler_end = std::chrono::steady_clock::now();
-                    auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
-                    std::cout << "[ProcessNewBlock] EXIT (fork switch) total=" << handler_ms << "ms" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed)) {
+                        auto handler_end = std::chrono::steady_clock::now();
+                        auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
+                        std::cout << "[ProcessNewBlock] EXIT (fork switch) total=" << handler_ms << "ms" << std::endl;
+                    }
                     return BlockProcessResult::ACCEPTED;
                 } else {
                     std::cerr << "[ProcessNewBlock] Fork chain switch FAILED!" << std::endl;
@@ -1344,10 +1392,11 @@ BlockProcessResult ProcessNewBlock(
                 }
             } else {
                 // Not ready to switch yet
-                std::cout << "[ProcessNewBlock] Fork block staged, waiting for more work..."
-                          << " (stats: " << fork->GetStats() << ")"
-                          << " allPrevalidated=" << (allReceivedPrevalidated ? "yes" : "no")
-                          << " forkHasMoreWork=" << (forkHasMoreWork ? "yes" : "no") << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[ProcessNewBlock] Fork block staged, waiting for more work..."
+                              << " (stats: " << fork->GetStats() << ")"
+                              << " allPrevalidated=" << (allReceivedPrevalidated ? "yes" : "no")
+                              << " forkHasMoreWork=" << (forkHasMoreWork ? "yes" : "no") << std::endl;
 
                 // FORK ORPHAN FIX: Resolve orphan children of this newly-indexed fork block.
                 // Without this, out-of-order arrivals during fork recovery leave orphans
@@ -1363,23 +1412,29 @@ BlockProcessResult ProcessNewBlock(
                     ctx.block_fetcher->OnBlockReceived(peer_id, pblockIndexPtr->nHeight, blockHash);
                 }
 
-                auto handler_end = std::chrono::steady_clock::now();
-                auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
-                std::cout << "[ProcessNewBlock] EXIT (fork staging) total=" << handler_ms << "ms" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed)) {
+                    auto handler_end = std::chrono::steady_clock::now();
+                    auto handler_ms = std::chrono::duration_cast<std::chrono::milliseconds>(handler_end - handler_start).count();
+                    std::cout << "[ProcessNewBlock] EXIT (fork staging) total=" << handler_ms << "ms" << std::endl;
+                }
                 return BlockProcessResult::ACCEPTED_ASYNC;
             }
         }
     }
 
     // Normal block processing (non-fork blocks)
-    std::cout << "[ProcessNewBlock] Calling ActivateBestChain synchronously..." << std::endl;
-    std::cout.flush();
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "[ProcessNewBlock] Calling ActivateBestChain synchronously..." << std::endl;
+        std::cout.flush();
+    }
     auto activate_start = std::chrono::steady_clock::now();
     bool reorgOccurred = false;
     if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
-        auto activate_end = std::chrono::steady_clock::now();
-        auto activate_ms = std::chrono::duration_cast<std::chrono::milliseconds>(activate_end - activate_start).count();
-        std::cout << "[ProcessNewBlock] ActivateBestChain succeeded in " << activate_ms << "ms" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed)) {
+            auto activate_end = std::chrono::steady_clock::now();
+            auto activate_ms = std::chrono::duration_cast<std::chrono::milliseconds>(activate_end - activate_start).count();
+            std::cout << "[ProcessNewBlock] ActivateBestChain succeeded in " << activate_ms << "ms" << std::endl;
+        }
 
         // A1 FIX: Notify IBD coordinator that a block connected successfully
         // Resets orphan streak counter (Layer 2 fork detection) and updates block-flow timestamp
@@ -1433,14 +1488,16 @@ BlockProcessResult ProcessNewBlock(
 
                     if (!relay_peer_ids.empty()) {
                         if (ctx.async_broadcaster->BroadcastBlock(blockHash, block, relay_peer_ids)) {
-                            std::cout << "[ProcessNewBlock] Relaying distribution-winning block to "
-                                      << relay_peer_ids.size() << " peer(s)" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[ProcessNewBlock] Relaying distribution-winning block to "
+                                          << relay_peer_ids.size() << " peer(s)" << std::endl;
                         }
                     }
                 }
             }
         } else {
-            std::cout << "[ProcessNewBlock] Block activated successfully" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Block activated successfully" << std::endl;
             g_metrics.blocks_accepted_total++;
 
             // Clear stale fork detection when active chain advances normally
@@ -1456,7 +1513,8 @@ BlockProcessResult ProcessNewBlock(
 
             // Check if this became the new tip
             if (g_chainstate.GetTip() == pblockIndexPtr) {
-                std::cout << "[ProcessNewBlock] Updated best block to height " << pblockIndexPtr->nHeight << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[ProcessNewBlock] Updated best block to height " << pblockIndexPtr->nHeight << std::endl;
                 g_node_state.new_block_found = true;
 
                 // BUG #32 FIX: Notify callback to update mining template
@@ -1495,15 +1553,17 @@ BlockProcessResult ProcessNewBlock(
 
                     if (!relay_peer_ids.empty()) {
                         if (ctx.async_broadcaster->BroadcastBlock(blockHash, block, relay_peer_ids)) {
-                            std::cout << "[ProcessNewBlock] Relaying block to " << relay_peer_ids.size()
-                                      << " peer(s) (excluding sender peer " << peer_id << ")" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[ProcessNewBlock] Relaying block to " << relay_peer_ids.size()
+                                          << " peer(s) (excluding sender peer " << peer_id << ")" << std::endl;
                         } else {
                             std::cerr << "[ProcessNewBlock] ERROR: Failed to queue block relay" << std::endl;
                         }
                     }
                 }
             } else {
-                std::cout << "[ProcessNewBlock] Block is valid but not on best chain" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[ProcessNewBlock] Block is valid but not on best chain" << std::endl;
             }
         }
 

@@ -168,7 +168,31 @@ std::string CRestAPI::HandleBalance(const std::string& address, const std::strin
         return true;  // Continue iteration
     });
 
-    // TODO: Add unconfirmed balance from mempool
+    // Add unconfirmed balance from mempool transactions
+    if (m_mempool) {
+        auto mempool_txs = m_mempool->GetOrderedTxs();
+        for (const auto& tx : mempool_txs) {
+            for (const auto& vout : tx->vout) {
+                if (!vout.IsNull() && vout.scriptPubKey.size() >= 20) {
+                    const std::vector<uint8_t>& script = vout.scriptPubKey;
+                    const std::vector<uint8_t>& addrData = addr.GetData();
+                    if (addrData.size() >= 21) {
+                        bool matches = false;
+                        if (script.size() == 25 &&
+                            script[0] == 0x76 && script[1] == 0xa9 && script[2] == 0x14 &&
+                            script[23] == 0x88 && script[24] == 0xac) {
+                            matches = std::equal(addrData.begin() + 1, addrData.begin() + 21, script.begin() + 3);
+                        } else if (script.size() == 20) {
+                            matches = std::equal(addrData.begin() + 1, addrData.begin() + 21, script.begin());
+                        }
+                        if (matches) {
+                            unconfirmed += vout.nValue;
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // Build response
     std::ostringstream oss;
@@ -442,8 +466,8 @@ std::string CRestAPI::HandleInfo(const std::string& clientIP) {
         return BuildErrorResponse(503, 2004, "Failed to read best block");
     }
 
-    // Get chain name
-    std::string chain = "main";  // TODO: Get from chain params
+    // Get chain name from configuration
+    std::string chain = m_testnet ? "test" : "main";
 
     // Calculate difficulty
     double difficulty = 1.0;
@@ -485,12 +509,22 @@ std::string CRestAPI::HandleFee(const std::string& clientIP) {
         return BuildRateLimitResponse();
     }
 
-    // Fee estimation (ions per KB)
-    // For now, return static values based on consensus params
-    int64_t recommended = 1000;  // 0.00001 DIL per KB
-    int64_t minimum = 500;       // 0.000005 DIL per KB
+    // Fee estimation (ions per KB) — dynamic based on mempool state
+    int64_t recommended = 1000;  // default: 0.00001 DIL per KB
+    int64_t minimum = 500;       // default: 0.000005 DIL per KB
 
-    // TODO: Dynamic fee estimation based on mempool congestion
+    if (m_mempool) {
+        size_t pool_size = 0, pool_bytes = 0;
+        double min_fee_rate = 0.0, max_fee_rate = 0.0;
+        m_mempool->GetStats(pool_size, pool_bytes, min_fee_rate, max_fee_rate);
+
+        if (pool_size > 0 && min_fee_rate > 0) {
+            // Use mempool fee rates: minimum is the floor, recommended
+            // is 2x the current minimum to ensure priority confirmation.
+            minimum = std::max(static_cast<int64_t>(min_fee_rate * 1000), int64_t(500));
+            recommended = std::max(minimum * 2, int64_t(1000));
+        }
+    }
 
     std::ostringstream oss;
     oss << "{";

@@ -32,7 +32,7 @@
 #endif
 
 // BUG #28 FIX: RAII wrapper for RandomX VM (prevents leaks)
-// BUG #XXX FIX: Support auto-upgrade from LIGHT to FULL mode
+// LIGHT→FULL auto-upgrade implemented via TryUpgrade() (checked every 1000 hashes)
 namespace {
     class RandomXVMGuard {
     private:
@@ -1088,19 +1088,10 @@ std::optional<CBlockTemplate> CMiningController::CreateBlockTemplate(
         return std::nullopt;
     }
 
-    // NOTE: Median-Time-Past (MTP) validation should be performed here
-    // MTP = median of past 11 blocks' timestamps
-    // Block timestamp must be > MTP to prevent timestamp manipulation
-    // This requires access to blockchain history (previous blocks)
-    //
-    // Proper implementation would be:
-    //   uint32_t medianTimePast = CalculateMedianTimePast(prevBlocks);
-    //   if (currentTime <= medianTimePast) {
-    //       error = "Block timestamp must be greater than median-time-past";
-    //       return std::nullopt;
-    //   }
-    //
-    // TODO: Add parameter for blockchain access to enable MTP validation
+    // NOTE: MTP validation is performed at the call site (BuildMiningTemplate)
+    // where CBlockIndex* is available. If the current time is behind the
+    // Median-Time-Past, the timestamp is bumped to MTP + 1 before this
+    // function is called. Consensus also enforces MTP in CheckBlockHeader().
 
     block.nTime = static_cast<uint32_t>(currentTime);
 

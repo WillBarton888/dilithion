@@ -181,19 +181,18 @@ bool CMnemonic::Generate(size_t entropy_bits, std::string& mnemonic) {
     }
 
     size_t entropy_bytes = entropy_bits / 8;
-    uint8_t* entropy = new uint8_t[entropy_bytes];
+    std::vector<uint8_t> entropy(entropy_bytes);
 
     // Generate random entropy
-    randombytes(entropy, entropy_bytes);
+    randombytes(entropy.data(), entropy_bytes);
 
     // Convert to mnemonic
-    bool result = FromEntropy(entropy, entropy_bytes, mnemonic);
+    bool result = FromEntropy(entropy.data(), entropy_bytes, mnemonic);
 
-    // WL-004 FIX: Use memory_cleanse to prevent compiler optimization
-    // std::memset can be optimized away by compiler as "dead store elimination"
-    // memory_cleanse guarantees memory is wiped (prevents timing attacks on entropy)
-    memory_cleanse(entropy, entropy_bytes);
-    delete[] entropy;
+    // WL-004 FIX: Use memory_cleanse to prevent compiler optimization.
+    // std::vector destructor does NOT guarantee zeroization — explicit
+    // cleanse is required before the vector goes out of scope.
+    memory_cleanse(entropy.data(), entropy_bytes);
 
     return result;
 }
@@ -279,8 +278,7 @@ bool CMnemonic::Validate(const std::string& mnemonic) {
 
     // Extract entropy bytes
     size_t entropy_bytes = entropy_bits / 8;
-    uint8_t* entropy = new uint8_t[entropy_bytes];
-    std::memset(entropy, 0, entropy_bytes);
+    std::vector<uint8_t> entropy(entropy_bytes, 0);
 
     for (size_t i = 0; i < entropy_bits; i++) {
         size_t byte_index = i / 8;
@@ -297,11 +295,10 @@ bool CMnemonic::Validate(const std::string& mnemonic) {
     }
 
     // Calculate actual checksum
-    uint8_t checksum_actual = ComputeChecksum(entropy, entropy_bytes, checksum_bits);
+    uint8_t checksum_actual = ComputeChecksum(entropy.data(), entropy_bytes, checksum_bits);
 
-    // WL-004 FIX: Use memory_cleanse to prevent compiler optimization
-    memory_cleanse(entropy, entropy_bytes);
-    delete[] entropy;
+    // WL-004 FIX: Use memory_cleanse — vector destructor won't zero memory
+    memory_cleanse(entropy.data(), entropy_bytes);
 
     // Verify checksum
     return checksum_expected == checksum_actual;

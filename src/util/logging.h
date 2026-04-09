@@ -16,6 +16,10 @@
 // When false (default), debug output is hidden for cleaner miner experience
 extern std::atomic<bool> g_verbose;
 
+// Global quiet flag - controlled by --quiet/-q command line option
+// When true, suppress all operator-level console output (errors/warnings only)
+extern std::atomic<bool> g_quiet;
+
 /**
  * Bitcoin Core-style logging system
  *

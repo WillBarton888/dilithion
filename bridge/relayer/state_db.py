@@ -93,6 +93,69 @@ class StateDB:
             self.conn.commit()
             logger.info("Migrated deposits table: added refund_txid column")
 
+        # Phase 0: Refund idempotency — tentative refund txid
+        try:
+            self.conn.execute("SELECT tentative_refund_txid FROM deposits LIMIT 1")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE deposits ADD COLUMN tentative_refund_txid TEXT")
+            self.conn.commit()
+            logger.info("Migrated deposits table: added tentative_refund_txid column")
+
+        # Phase 0: Withdrawal crash-safety — durable attempt ledger
+        try:
+            self.conn.execute("SELECT tentative_txid FROM withdrawals LIMIT 1")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE withdrawals ADD COLUMN tentative_txid TEXT")
+            self.conn.commit()
+            logger.info("Migrated withdrawals table: added tentative_txid column")
+
+        try:
+            self.conn.execute("SELECT attempt_id FROM withdrawals LIMIT 1")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE withdrawals ADD COLUMN attempt_id TEXT")
+            self.conn.commit()
+            logger.info("Migrated withdrawals table: added attempt_id column")
+
+        try:
+            self.conn.execute("SELECT sent_intent_at FROM withdrawals LIMIT 1")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE withdrawals ADD COLUMN sent_intent_at TIMESTAMP")
+            self.conn.commit()
+            logger.info("Migrated withdrawals table: added sent_intent_at column")
+
+        try:
+            self.conn.execute("SELECT retry_count FROM withdrawals LIMIT 1")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE withdrawals ADD COLUMN retry_count INTEGER DEFAULT 0")
+            self.conn.commit()
+            logger.info("Migrated withdrawals table: added retry_count column")
+
+        # Phase 1: Block hash history for reorg detection
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS block_hashes (
+                chain TEXT NOT NULL,
+                height INTEGER NOT NULL,
+                block_hash TEXT NOT NULL,
+                PRIMARY KEY(chain, height)
+            )
+        """)
+        self.conn.commit()
+
+        # Phase 3b: Invariant check history
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS invariant_checks (
+                id INTEGER PRIMARY KEY,
+                chain TEXT NOT NULL,
+                timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                native_balance INTEGER NOT NULL,
+                wrapped_supply INTEGER NOT NULL,
+                inflight_withdrawals INTEGER DEFAULT 0,
+                status TEXT NOT NULL,
+                delta INTEGER NOT NULL
+            )
+        """)
+        self.conn.commit()
+
     # ── Sync state ───────────────────────────────────────────────────
 
     def get_sync_state(self, chain: str):
@@ -137,6 +200,31 @@ class StateDB:
             logger.debug(f"Duplicate deposit ignored: {native_txid}:{native_vout}")
             return False
 
+    def mark_deposit_refunding(self, deposit_id: int) -> bool:
+        """Atomic CAS: transition from 'over_limit' to 'refunding'.
+
+        Returns True if transition succeeded, False if deposit was not
+        in 'over_limit' state.
+        """
+        cursor = self.conn.execute(
+            """UPDATE deposits SET status = 'refunding',
+               updated_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND status = 'over_limit'""",
+            (deposit_id,)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def update_deposit_tentative_refund_txid(self, deposit_id: int,
+                                              tentative_txid: str):
+        """Record the refund txid immediately after RPC send."""
+        self.conn.execute(
+            """UPDATE deposits SET tentative_refund_txid = ?,
+               updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (tentative_txid, deposit_id)
+        )
+        self.conn.commit()
+
     def mark_deposit_refunded(self, deposit_id: int, refund_txid: str):
         """Mark deposit as refunded (coins sent back to sender)."""
         self.conn.execute(
@@ -146,10 +234,27 @@ class StateDB:
         )
         self.conn.commit()
 
+    def reset_deposit_to_over_limit(self, deposit_id: int):
+        """Reset a stuck 'refunding' deposit back to 'over_limit' for retry."""
+        self.conn.execute(
+            """UPDATE deposits SET status = 'over_limit',
+               tentative_refund_txid = NULL,
+               retry_count = COALESCE(retry_count, 0) + 1,
+               updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (deposit_id,)
+        )
+        self.conn.commit()
+
     def get_pending_refunds(self):
         """Get deposits marked for refund that haven't been sent yet."""
         return self.conn.execute(
             "SELECT * FROM deposits WHERE status = 'over_limit'"
+        ).fetchall()
+
+    def get_refunding_deposits(self):
+        """Get deposits in 'refunding' state (in-flight or crashed)."""
+        return self.conn.execute(
+            "SELECT * FROM deposits WHERE status = 'refunding'"
         ).fetchall()
 
     def get_pending_deposits(self, chain: str = None):
@@ -280,11 +385,59 @@ class StateDB:
         )
         self.conn.commit()
 
+    def mark_withdrawal_sending(self, withdrawal_id: int, attempt_id: str) -> bool:
+        """Atomic CAS: transition from 'confirmed' to 'sending'.
+
+        Returns True if transition succeeded, False if withdrawal was not
+        in 'confirmed' state (already being processed or already sent).
+        """
+        cursor = self.conn.execute(
+            """UPDATE withdrawals
+               SET status = 'sending', attempt_id = ?,
+                   sent_intent_at = CURRENT_TIMESTAMP,
+                   updated_at = CURRENT_TIMESTAMP
+               WHERE id = ? AND status = 'confirmed'""",
+            (attempt_id, withdrawal_id)
+        )
+        self.conn.commit()
+        return cursor.rowcount > 0
+
+    def update_withdrawal_tentative_txid(self, withdrawal_id: int,
+                                         tentative_txid: str):
+        """Record the native txid immediately after RPC send, before
+        finalizing.  This is the durable intent record that survives crashes."""
+        self.conn.execute(
+            """UPDATE withdrawals SET tentative_txid = ?,
+               updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (tentative_txid, withdrawal_id)
+        )
+        self.conn.commit()
+
+    def get_sending_withdrawals(self):
+        """Get withdrawals in 'sending' state (in-flight or crashed)."""
+        return self.conn.execute(
+            "SELECT * FROM withdrawals WHERE status = 'sending'"
+        ).fetchall()
+
     def mark_withdrawal_sent(self, withdrawal_id: int, native_txid: str):
+        """Finalize a withdrawal as sent. Works from both 'sending' and
+        'confirmed' states (the latter for reconciliation recovery)."""
         self.conn.execute(
             """UPDATE withdrawals SET status = 'sent', native_txid = ?,
                updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
             (native_txid, withdrawal_id)
+        )
+        self.conn.commit()
+
+    def reset_withdrawal_to_confirmed(self, withdrawal_id: int):
+        """Reset a stuck 'sending' withdrawal back to 'confirmed' for retry.
+        Clears attempt metadata so it gets a fresh attempt."""
+        self.conn.execute(
+            """UPDATE withdrawals SET status = 'confirmed',
+               attempt_id = NULL, tentative_txid = NULL,
+               sent_intent_at = NULL, retry_count = COALESCE(retry_count, 0) + 1,
+               updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
+            (withdrawal_id,)
         )
         self.conn.commit()
 
@@ -299,6 +452,7 @@ class StateDB:
     def mark_withdrawal_failed(self, withdrawal_id: int, error: str):
         self.conn.execute(
             """UPDATE withdrawals SET status = 'failed', error_msg = ?,
+               retry_count = COALESCE(retry_count, 0) + 1,
                updated_at = CURRENT_TIMESTAMP WHERE id = ?""",
             (error, withdrawal_id)
         )
@@ -329,6 +483,73 @@ class StateDB:
 
     # ── Stats ────────────────────────────────────────────────────────
 
+    # ── Block hash history (reorg detection) ───────────────────────
+
+    def store_block_hash(self, chain: str, height: int, block_hash: str):
+        """Store a block hash for reorg detection walkback."""
+        self.conn.execute(
+            """INSERT INTO block_hashes (chain, height, block_hash)
+               VALUES (?, ?, ?)
+               ON CONFLICT(chain, height) DO UPDATE SET
+                   block_hash = excluded.block_hash""",
+            (chain, height, block_hash)
+        )
+        self.conn.commit()
+
+    def get_block_hash(self, chain: str, height: int):
+        """Lookup a stored block hash. Returns hash string or None."""
+        row = self.conn.execute(
+            "SELECT block_hash FROM block_hashes WHERE chain = ? AND height = ?",
+            (chain, height)
+        ).fetchone()
+        return row["block_hash"] if row else None
+
+    def prune_block_hashes(self, chain: str, keep_last: int = 200):
+        """Remove old block hashes, keeping the most recent N."""
+        self.conn.execute(
+            """DELETE FROM block_hashes
+               WHERE chain = ? AND height < (
+                   SELECT MAX(height) - ? FROM block_hashes WHERE chain = ?
+               )""",
+            (chain, keep_last, chain)
+        )
+        self.conn.commit()
+
+    def get_minted_deposits_above_height(self, chain: str, min_height: int):
+        """Get deposits that were already minted but are at or above min_height.
+        Used to detect backing invariant breach during reorgs."""
+        return self.conn.execute(
+            """SELECT * FROM deposits
+               WHERE chain = ? AND block_height >= ? AND status = 'minted'""",
+            (chain, min_height)
+        ).fetchall()
+
+    # ── Invariant checks ────────────────────────────────────────────
+
+    def record_invariant_check(self, chain: str, native_balance: int,
+                               wrapped_supply: int, inflight: int,
+                               status: str, delta: int):
+        """Record a backing invariant check result."""
+        self.conn.execute(
+            """INSERT INTO invariant_checks
+               (chain, native_balance, wrapped_supply, inflight_withdrawals,
+                status, delta)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (chain, native_balance, wrapped_supply, inflight, status, delta)
+        )
+        self.conn.commit()
+
+    def get_inflight_withdrawal_total(self, chain: str) -> int:
+        """Sum of amounts for withdrawals in sending/confirmed state."""
+        row = self.conn.execute(
+            """SELECT COALESCE(SUM(amount), 0) as total FROM withdrawals
+               WHERE chain = ? AND status IN ('confirmed', 'sending')""",
+            (chain,)
+        ).fetchone()
+        return row["total"]
+
+    # ── Stats ────────────────────────────────────────────────────────
+
     def get_stats(self):
         """Get summary statistics for health monitoring."""
         stats = {}
@@ -345,7 +566,7 @@ class StateDB:
         ).fetchone()
         stats["deposits_cap_deferred"] = row["cnt"]
 
-        for status in ('pending', 'confirmed', 'sent', 'completed', 'failed'):
+        for status in ('pending', 'confirmed', 'sending', 'sent', 'completed', 'failed'):
             row = self.conn.execute(
                 "SELECT COUNT(*) as cnt FROM withdrawals WHERE status = ?", (status,)
             ).fetchone()

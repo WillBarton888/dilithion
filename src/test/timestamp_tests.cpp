@@ -291,6 +291,105 @@ void TestPostForkTimestamp() {
     Dilithion::g_chainParams = prevParams;
 }
 
+/**
+ * Test: MTP bump-forward logic used in BuildMiningTemplate()
+ *
+ * When creating a block template, if the current time is at or below
+ * the Median-Time-Past, the timestamp must be bumped to MTP + 1.
+ * This prevents mining blocks that consensus would reject.
+ *
+ * This test exercises the same logic as dilithion-node.cpp and
+ * dilv-node.cpp in BuildMiningTemplate(), without needing a full
+ * node context.
+ */
+void TestMTPBumpForward() {
+    std::cout << "\nTesting MTP bump-forward (template builder logic)..." << std::endl;
+
+    // Create a chain of 15 blocks
+    std::vector<CBlockIndex> chain(15);
+    int64_t baseTime = 1700000000; // Fixed base for determinism
+    for (size_t i = 0; i < chain.size(); i++) {
+        chain[i].nTime = baseTime + i * 600;
+        chain[i].nHeight = i;
+        chain[i].pprev = (i > 0) ? &chain[i - 1] : nullptr;
+    }
+
+    CBlockIndex* pindexPrev = &chain[14];
+    int64_t mtp = GetMedianTimePast(pindexPrev);
+
+    // Scenario 1: Current time is well ahead of MTP — no bump needed
+    {
+        uint32_t blockTime = static_cast<uint32_t>(mtp + 3600);
+        // Apply same logic as BuildMiningTemplate
+        if (static_cast<int64_t>(blockTime) <= mtp) {
+            blockTime = static_cast<uint32_t>(mtp + 1);
+        }
+        assert(blockTime == static_cast<uint32_t>(mtp + 3600));
+        std::cout << "  ✓ Normal case: time ahead of MTP, no bump" << std::endl;
+    }
+
+    // Scenario 2: Current time equals MTP — must bump to MTP + 1
+    {
+        uint32_t blockTime = static_cast<uint32_t>(mtp);
+        if (static_cast<int64_t>(blockTime) <= mtp) {
+            blockTime = static_cast<uint32_t>(mtp + 1);
+        }
+        assert(blockTime == static_cast<uint32_t>(mtp + 1));
+        std::cout << "  ✓ Edge case: time == MTP, bumped to MTP + 1" << std::endl;
+    }
+
+    // Scenario 3: Current time is below MTP (clock skew) — must bump
+    {
+        uint32_t blockTime = static_cast<uint32_t>(mtp - 100);
+        if (static_cast<int64_t>(blockTime) <= mtp) {
+            blockTime = static_cast<uint32_t>(mtp + 1);
+        }
+        assert(blockTime == static_cast<uint32_t>(mtp + 1));
+        std::cout << "  ✓ Clock skew: time < MTP, bumped to MTP + 1" << std::endl;
+    }
+
+    // Scenario 4: Current time is MTP + 1 — exactly valid, no bump
+    {
+        uint32_t blockTime = static_cast<uint32_t>(mtp + 1);
+        if (static_cast<int64_t>(blockTime) <= mtp) {
+            blockTime = static_cast<uint32_t>(mtp + 1);
+        }
+        assert(blockTime == static_cast<uint32_t>(mtp + 1));
+        std::cout << "  ✓ Boundary: time == MTP + 1, no bump needed" << std::endl;
+    }
+
+    // Scenario 5: Bumped timestamp should pass consensus validation
+    {
+        CBlockHeader block;
+        block.nTime = static_cast<uint32_t>(mtp + 1);
+        assert(CheckBlockTimestamp(block, pindexPrev) == true);
+        std::cout << "  ✓ Bumped timestamp passes CheckBlockTimestamp()" << std::endl;
+    }
+
+    // Scenario 6: Un-bumped MTP timestamp would fail consensus
+    {
+        CBlockHeader block;
+        block.nTime = static_cast<uint32_t>(mtp);
+        assert(CheckBlockTimestamp(block, pindexPrev) == false);
+        std::cout << "  ✓ Un-bumped MTP timestamp correctly rejected by consensus" << std::endl;
+    }
+
+    // Scenario 7: Genesis block (pindexPrev == nullptr) — no MTP check
+    {
+        uint32_t blockTime = 1000; // Arbitrary old time
+        CBlockIndex* nullPrev = nullptr;
+        // BuildMiningTemplate guard: if (pindexPrev) { ... }
+        if (nullPrev) {
+            int64_t nMedianTimePast = GetMedianTimePast(nullPrev);
+            if (static_cast<int64_t>(blockTime) <= nMedianTimePast) {
+                blockTime = static_cast<uint32_t>(nMedianTimePast + 1);
+            }
+        }
+        assert(blockTime == 1000); // Unchanged
+        std::cout << "  ✓ Genesis: no pindexPrev, timestamp unchanged" << std::endl;
+    }
+}
+
 int main() {
     std::cout << "======================================" << std::endl;
     std::cout << "Block Timestamp Validation Tests" << std::endl;
@@ -305,6 +404,7 @@ int main() {
         TestEdgeCases();
         TestRealisticChain();
         TestPostForkTimestamp();
+        TestMTPBumpForward();
 
         std::cout << std::endl;
         std::cout << "======================================" << std::endl;

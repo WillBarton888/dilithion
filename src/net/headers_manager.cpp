@@ -55,9 +55,10 @@ CHeadersManager::CHeadersManager()
     hashBestHeader = genesisHash;
     nBestHeight = 0;
 
-    std::cout << "[HeadersManager] Genesis added to mapHeaders: " << genesisHash.GetHex().substr(0, 16)
-              << " chainWork=" << genesisWork.GetHex().substr(genesisWork.GetHex().length() > 16 ? genesisWork.GetHex().length() - 16 : 0)
-              << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Genesis added to mapHeaders: " << genesisHash.GetHex().substr(0, 16)
+                  << " chainWork=" << genesisWork.GetHex().substr(genesisWork.GetHex().length() > 16 ? genesisWork.GetHex().length() - 16 : 0)
+                  << std::endl;
 }
 
 CHeadersManager::~CHeadersManager()
@@ -89,8 +90,9 @@ CHeadersManager::~CHeadersManager()
 
 bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader>& headers)
 {
-    std::cout << "[HeadersManager] ProcessHeaders called: peer=" << peer
-              << ", count=" << headers.size() << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] ProcessHeaders called: peer=" << peer
+                  << ", count=" << headers.size() << std::endl;
 
     // DEADLOCK FIX: Get chainstate tip BEFORE acquiring cs_headers
     // This is needed because GetLocatorImpl may be called while holding cs_headers,
@@ -99,20 +101,24 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
     int chainstateHeightPreFetched = (pTipPreFetched && pTipPreFetched->nHeight > 0) ? pTipPreFetched->nHeight : 0;
 
     std::lock_guard<std::mutex> lock(cs_headers);
-    std::cout << "[HeadersManager] Lock acquired" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Lock acquired" << std::endl;
 
     if (headers.empty()) {
-        std::cout << "[HeadersManager] Empty headers, returning true" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] Empty headers, returning true" << std::endl;
         return true;  // Empty is valid (no new headers)
     }
 
     if (headers.size() > MAX_HEADERS_BUFFER) {
-        std::cout << "[HeadersManager] Too many headers (" << headers.size()
-                  << " > " << MAX_HEADERS_BUFFER << "), returning false" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] Too many headers (" << headers.size()
+                      << " > " << MAX_HEADERS_BUFFER << "), returning false" << std::endl;
         return false;
     }
 
-    std::cout << "[HeadersManager] Processing " << headers.size() << " headers" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Processing " << headers.size() << " headers" << std::endl;
 
     // COMMON ANCESTOR OPTIMIZATION: Find where incoming chain diverges from ours.
     // Headers below the common ancestor are identical on both chains - skip hash computation.
@@ -127,8 +133,9 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         if (parentIt != mapHeaders.end()) {
             commonAncestorHeight = parentIt->second.height;
             commonAncestor = &parentIt->second;
-            std::cout << "[HeadersManager] Common ancestor found at height " << commonAncestorHeight
-                      << " - will skip hash computation for heights <= " << commonAncestorHeight << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[HeadersManager] Common ancestor found at height " << commonAncestorHeight
+                          << " - will skip hash computation for heights <= " << commonAncestorHeight << std::endl;
         }
     }
 
@@ -217,8 +224,9 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
         // Skip if this hash was previously rejected (block failed validation)
         if (m_rejectedHashes.count(storageHash)) {
-            std::cout << "[HeadersManager] Skipping rejected header at height " << expectedHeight
-                      << " hash=" << storageHash.GetHex().substr(0, 16) << "..." << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[HeadersManager] Skipping rejected header at height " << expectedHeight
+                          << " hash=" << storageHash.GetHex().substr(0, 16) << "..." << std::endl;
             continue;
         }
 
@@ -246,8 +254,9 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
         // FORK DETECTION: Only relevant above checkpoint
         if (heightHasHeaders && expectedHeight > highestCheckpoint) {
-            std::cout << "[HeadersManager] Fork header received at height " << expectedHeight
-                      << " - processing competing chain" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[HeadersManager] Fork header received at height " << expectedHeight
+                          << " - processing competing chain" << std::endl;
         }
 
         // SIMPLIFIED PARENT LOOKUP: With RandomX-only storage, hashPrevBlock directly
@@ -256,7 +265,7 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // Check if parent is genesis block
         uint256 genesisHash = Genesis::GetGenesisHash();
         if (header.hashPrevBlock == genesisHash || header.hashPrevBlock.IsNull()) {
-            if (i == 0) {
+            if (i == 0 && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[HeadersManager] Parent is genesis, startHeight=1 (prevBlock="
                           << header.hashPrevBlock.GetHex().substr(0, 16) << ", genesisHash="
                           << genesisHash.GetHex().substr(0, 16) << ")" << std::endl;
@@ -621,9 +630,11 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
     // Prepend hashStart if it's not already first in locator
     if (!hashStart.IsNull() && (locator.empty() || locator[0] != hashStart)) {
         locator.insert(locator.begin(), hashStart);
-        std::cout << "[IBD] RequestHeaders: Prepended hashStart to exponential locator" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] RequestHeaders: Prepended hashStart to exponential locator" << std::endl;
     } else {
-        std::cout << "[IBD] RequestHeaders: Using exponential locator (size=" << locator.size() << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] RequestHeaders: Using exponential locator (size=" << locator.size() << ")" << std::endl;
     }
 
     auto* connman = g_node_context.connman.get();
@@ -636,7 +647,8 @@ void CHeadersManager::RequestHeaders(NodeId peer, const uint256& hashStart)
             std::lock_guard<std::mutex> lock(cs_headers);
             m_last_header_request_time = std::chrono::steady_clock::now();
         }
-        std::cout << "[IBD] RequestHeaders: Sent GETHEADERS to peer " << peer << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[IBD] RequestHeaders: Sent GETHEADERS to peer " << peer << std::endl;
     }
 }
 
@@ -676,9 +688,10 @@ bool CHeadersManager::SyncHeadersFromPeer(NodeId peer, int peer_height, bool for
             m_last_sent_locator_hash = request_from;
         }
 
-        std::cout << "[SYNCED] Requesting headers from peer " << peer
-                  << " (peer_height=" << peer_height
-                  << ", locator=" << request_from.GetHex().substr(0, 16) << "...)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[SYNCED] Requesting headers from peer " << peer
+                      << " (peer_height=" << peer_height
+                      << ", locator=" << request_from.GetHex().substr(0, 16) << "...)" << std::endl;
 
         RequestHeaders(peer, request_from);
         return true;
@@ -711,9 +724,10 @@ bool CHeadersManager::SyncHeadersFromPeer(NodeId peer, int peer_height, bool for
         request_from = m_last_request_hash.IsNull() ? hashBestHeader : m_last_request_hash;
     }
 
-    std::cout << "[IBD-SYNC] Requesting headers (requested=" << requested
-              << " -> " << expected_new_height << ", peer_height=" << peer_height
-              << ", locator=" << request_from.GetHex().substr(0, 16) << "...)" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[IBD-SYNC] Requesting headers (requested=" << requested
+                  << " -> " << expected_new_height << ", peer_height=" << peer_height
+                  << ", locator=" << request_from.GetHex().substr(0, 16) << "...)" << std::endl;
 
     RequestHeaders(peer, request_from);
     return true;
@@ -825,8 +839,9 @@ void CHeadersManager::BulkLoadHeaders(const std::vector<CBlockIndex*>& chain)
         InvalidateBestChainCache();
     }
 
-    std::cout << "  [OK] Bulk-loaded " << chain.size()
-              << " headers (height 0 to " << nBestHeight << ")" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "  [OK] Bulk-loaded " << chain.size()
+                  << " headers (height 0 to " << nBestHeight << ")" << std::endl;
 }
 
 std::vector<uint256> CHeadersManager::GetLocator(const uint256& hashTip)
@@ -1030,7 +1045,7 @@ void CHeadersManager::ClearPendingSync()
     // 2. Pass the dedup check (m_last_sent_locator_hash won't match the new locator)
     // 3. Make IsHeaderSyncInProgress() return false until new headers arrive
 
-    if (!m_last_request_hash.IsNull()) {
+    if (!m_last_request_hash.IsNull() && g_verbose.load(std::memory_order_relaxed)) {
         std::cout << "[HeadersManager] Clearing pending sync state (was: "
                   << m_last_request_hash.GetHex().substr(0, 16) << "...)" << std::endl;
     }
@@ -1205,7 +1220,8 @@ void CHeadersManager::ClearAboveHeight(int keepHeight, const uint256& preferredH
 {
     std::lock_guard<std::mutex> lock(cs_headers);
 
-    std::cout << "[HeadersManager] Clearing headers above height " << keepHeight << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Clearing headers above height " << keepHeight << std::endl;
 
     // Collect hashes to remove (heights > keepHeight)
     std::vector<uint256> hashesToRemove;
@@ -1226,7 +1242,8 @@ void CHeadersManager::ClearAboveHeight(int keepHeight, const uint256& preferredH
         mapHeaders.erase(hash);
     }
 
-    std::cout << "[HeadersManager] Removed " << hashesToRemove.size() << " headers above height " << keepHeight << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Removed " << hashesToRemove.size() << " headers above height " << keepHeight << std::endl;
 
     // Find the new best header at or below keepHeight
     hashBestHeader = uint256();
@@ -1239,25 +1256,28 @@ void CHeadersManager::ClearAboveHeight(int keepHeight, const uint256& preferredH
         // This ensures we select the header matching chainstate, not arbitrary hash order
         if (!preferredHash.IsNull() && heightIt->second.count(preferredHash) > 0) {
             hashBestHeader = preferredHash;
-            std::cout << "[HeadersManager] Using preferred hash (chainstate match) at height " << keepHeight << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[HeadersManager] Using preferred hash (chainstate match) at height " << keepHeight << std::endl;
         } else {
             // Fall back to first hash (original behavior)
             hashBestHeader = *heightIt->second.begin();
-            if (heightIt->second.size() > 1) {
+            if (heightIt->second.size() > 1 && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[HeadersManager] WARNING: Multiple headers at height " << keepHeight
                           << ", selecting " << hashBestHeader.GetHex().substr(0, 16) << "... (no preferred hash provided)" << std::endl;
             }
         }
         nBestHeight = keepHeight;
-        std::cout << "[HeadersManager] New best header at height " << nBestHeight
-                  << " hash=" << hashBestHeader.GetHex().substr(0, 16) << "..." << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] New best header at height " << nBestHeight
+                      << " hash=" << hashBestHeader.GetHex().substr(0, 16) << "..." << std::endl;
     } else {
         // Fall back to finding the highest header below keepHeight
         for (auto it = mapHeightIndex.rbegin(); it != mapHeightIndex.rend(); ++it) {
             if (it->first <= keepHeight && !it->second.empty()) {
                 hashBestHeader = *it->second.begin();
                 nBestHeight = it->first;
-                std::cout << "[HeadersManager] Best header found at height " << nBestHeight << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[HeadersManager] Best header found at height " << nBestHeight << std::endl;
                 break;
             }
         }
@@ -1278,8 +1298,9 @@ void CHeadersManager::ClearAboveHeight(int keepHeight, const uint256& preferredH
     m_headers_requested_height.store(nBestHeight);
     m_last_request_hash = hashBestHeader;
 
-    std::cout << "[HeadersManager] Headers pruned to height " << nBestHeight
-              << ", mapHeaders.size=" << mapHeaders.size() << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Headers pruned to height " << nBestHeight
+                  << ", mapHeaders.size=" << mapHeaders.size() << std::endl;
 }
 
 // ============================================================================
@@ -1354,9 +1375,10 @@ bool CHeadersManager::BuildForkAncestryHashes(const uint256& tipHash, int32_t fo
         return false;
     }
 
-    std::cout << "[HeadersManager] BuildForkAncestryHashes: built " << ancestryHashes.size()
-              << " hashes from height " << forkPointHeight + 1
-              << " to " << ancestryHashes.rbegin()->first << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] BuildForkAncestryHashes: built " << ancestryHashes.size()
+                  << " hashes from height " << forkPointHeight + 1
+                  << " to " << ancestryHashes.rbegin()->first << std::endl;
 
     return true;
 }
@@ -1439,9 +1461,10 @@ size_t CHeadersManager::PruneOrphanedHeaders()
     }
 
     if (pruned > 0) {
-        std::cout << "[HeadersManager] Pruned " << pruned << " orphaned headers"
-                  << " (below height " << minHeightToKeep << " or <"
-                  << ORPHAN_HEADER_MIN_WORK_PERCENT << "% best work)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] Pruned " << pruned << " orphaned headers"
+                      << " (below height " << minHeightToKeep << " or <"
+                      << ORPHAN_HEADER_MIN_WORK_PERCENT << "% best work)" << std::endl;
         InvalidateBestChainCache();  // Cache may be affected
     }
 
@@ -1495,8 +1518,9 @@ size_t CHeadersManager::InvalidateHeader(const uint256& hash)
     auto it = mapHeaders.find(hash);
     if (it != mapHeaders.end()) {
         int invalidHeight = it->second.height;
-        std::cout << "[HeadersManager] Invalidating header at height " << invalidHeight
-                  << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] Invalidating header at height " << invalidHeight
+                      << " hash=" << hash.GetHex().substr(0, 16) << "..." << std::endl;
 
         // Find all descendants (headers whose hashPrevBlock is this hash or any descendant)
         std::vector<uint256> toRemove;
@@ -1566,7 +1590,7 @@ size_t CHeadersManager::InvalidateHeader(const uint256& hash)
                 }
             }
 
-            if (!hashBestHeader.IsNull()) {
+            if (!hashBestHeader.IsNull() && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[HeadersManager] Best header updated after invalidation: height="
                           << nBestHeight << " hash=" << hashBestHeader.GetHex().substr(0, 16)
                           << "..." << std::endl;
@@ -1604,8 +1628,9 @@ size_t CHeadersManager::InvalidateHeader(const uint256& hash)
         }
     }
 
-    std::cout << "[HeadersManager] Removed " << removedCount
-              << " header(s) (rejected " << m_rejectedHashes.size() << " total)" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Removed " << removedCount
+                  << " header(s) (rejected " << m_rejectedHashes.size() << " total)" << std::endl;
 
     return removedCount;
 }
@@ -1772,7 +1797,7 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
     auto it = mapHeaders.find(hash);
     if (it == mapHeaders.end()) {
         static int notfound_count = 0;
-        if (notfound_count++ < 5) {
+        if (notfound_count++ < 5 && g_verbose.load(std::memory_order_relaxed)) {
             std::cout << "[UpdateBestHeader] Header not found: " << hash.GetHex().substr(0, 16) << "..." << std::endl;
         }
         return false;
@@ -1785,7 +1810,8 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
 
     // Check if this header has more work than current best
     if (hashBestHeader.IsNull()) {
-        std::cout << "[UpdateBestHeader] First header: height=" << newHeight << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[UpdateBestHeader] First header: height=" << newHeight << std::endl;
         hashBestHeader = hash;
         nBestHeight = newHeight;
         return true;
@@ -1793,7 +1819,8 @@ bool CHeadersManager::UpdateBestHeader(const uint256& hash)
 
     auto bestIt = mapHeaders.find(hashBestHeader);
     if (bestIt == mapHeaders.end()) {
-        std::cout << "[UpdateBestHeader] Best header missing, updating: height=" << newHeight << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[UpdateBestHeader] Best header missing, updating: height=" << newHeight << std::endl;
         hashBestHeader = hash;
         nBestHeight = newHeight;
         return true;
@@ -1986,7 +2013,7 @@ void CHeadersManager::AddToHeightIndex(const uint256& hash, int height)
     mapHeightIndex[height].insert(hash);
 
     // Log when multiple headers exist at same height
-    if (mapHeightIndex[height].size() > 1) {
+    if (mapHeightIndex[height].size() > 1 && g_verbose.load(std::memory_order_relaxed)) {
         size_t count = mapHeightIndex[height].size();
         if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) {
             // DilV: competing VDF blocks at same height is normal — all miners produce one
@@ -2135,8 +2162,9 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         return ProcessHeaders(peer, headers);
     }
 
-    std::cout << "[HeadersManager] Queueing " << headers.size()
-              << " headers for async validation from peer " << peer << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Queueing " << headers.size()
+                  << " headers for async validation from peer " << peer << std::endl;
 
     if (headers.empty()) {
         return true;
@@ -2198,23 +2226,26 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             //
             // Cost: ~50ms to compute 2000 hashes in parallel (acceptable)
             // Benefit: Fork safety - nodes can always sync to best chain
-            if (nBestHeight > 0) {
+            if (nBestHeight > 0 && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[HeadersManager] Headers start from genesis, nBestHeight="
                           << nBestHeight << " - processing to check for forks" << std::endl;
             }
 
-            std::cout << "[HeadersManager] Parent is genesis, startHeight=1" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[HeadersManager] Parent is genesis, startHeight=1" << std::endl;
         } else {
             // DEBUG: Log the parent lookup attempt
-            std::cout << "[HeadersManager] Looking up parent: " << headers[0].hashPrevBlock.GetHex().substr(0, 16)
-                      << "... mapHeaders.size=" << mapHeaders.size() << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[HeadersManager] Looking up parent: " << headers[0].hashPrevBlock.GetHex().substr(0, 16)
+                          << "... mapHeaders.size=" << mapHeaders.size() << std::endl;
 
             auto parentIt = mapHeaders.find(headers[0].hashPrevBlock);
             if (parentIt != mapHeaders.end()) {
                 startHeight = parentIt->second.height + 1;
                 prevHash = headers[0].hashPrevBlock;
-                std::cout << "[HeadersManager] Parent found at height " << parentIt->second.height
-                          << ", startHeight=" << startHeight << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[HeadersManager] Parent found at height " << parentIt->second.height
+                              << ", startHeight=" << startHeight << std::endl;
 
                 // BUG FIX: Skip stale fork header batches below last checkpoint
                 // Headers below checkpoints are guaranteed by checkpoint validation.
@@ -2224,8 +2255,9 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 int chainstateHeight = g_chainstate.GetHeight();
                 if (lastCheckpointHeight > 0 && startHeight < lastCheckpointHeight &&
                     chainstateHeight >= lastCheckpointHeight) {
-                    std::cout << "[HeadersManager] Skipping stale fork header batch starting at height "
-                              << startHeight << " (below checkpoint " << lastCheckpointHeight << ")" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[HeadersManager] Skipping stale fork header batch starting at height "
+                                  << startHeight << " (below checkpoint " << lastCheckpointHeight << ")" << std::endl;
                     return true;  // Not an error, just nothing useful to process
                 }
             } else {
@@ -2315,8 +2347,9 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
         if (allMatch) {
             skipHashComputation = true;
-            std::cout << "[HeadersManager] OPTIMIZATION: Skipping hash computation for heights "
-                      << startHeight << "-" << endHeight << " (shared history)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[HeadersManager] OPTIMIZATION: Skipping hash computation for heights "
+                          << startHeight << "-" << endHeight << " (shared history)" << std::endl;
         }
     }
 
@@ -2330,11 +2363,13 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
             std::lock_guard<std::mutex> lock(cs_headers);
             m_last_request_hash = storedHashAtEndHeight;
             m_last_header_request_time = std::chrono::steady_clock::now();
-            std::cout << "[HeadersManager] FAST PATH: Updated m_last_request_hash to stored hash at height "
-                      << endHeight << " (" << storedHashAtEndHeight.GetHex().substr(0, 16) << "...)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[HeadersManager] FAST PATH: Updated m_last_request_hash to stored hash at height "
+                          << endHeight << " (" << storedHashAtEndHeight.GetHex().substr(0, 16) << "...)" << std::endl;
         }
-        std::cout << "[HeadersManager] FAST PATH: Skipped " << headers.size()
-                  << " shared history headers (already stored)" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] FAST PATH: Skipped " << headers.size()
+                      << " shared history headers (already stored)" << std::endl;
 
         // BUG FIX #183 Part 2: Request more headers NOW with the updated m_last_request_hash
         // The previous GETHEADERS was sent before this update, so we need to send another.
@@ -2421,17 +2456,20 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     auto genesisIt = mapHeaders.find(genesisHash);
                     if (genesisIt != mapHeaders.end()) {
                         pprev = &genesisIt->second;
-                        std::cout << "[HeadersManager] Batch 0: Genesis found, chainWork="
-                                  << pprev->chainWork.GetHex().substr(pprev->chainWork.GetHex().length() > 16 ? pprev->chainWork.GetHex().length() - 16 : 0)
-                                  << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[HeadersManager] Batch 0: Genesis found, chainWork="
+                                      << pprev->chainWork.GetHex().substr(pprev->chainWork.GetHex().length() > 16 ? pprev->chainWork.GetHex().length() - 16 : 0)
+                                      << std::endl;
                     } else {
-                        std::cout << "[HeadersManager] Batch 0: Genesis not in mapHeaders, pprev=NULL" << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[HeadersManager] Batch 0: Genesis not in mapHeaders, pprev=NULL" << std::endl;
                     }
                 } else {
                     auto parentIt = mapHeaders.find(headers[0].hashPrevBlock);
                     if (parentIt != mapHeaders.end()) {
                         pprev = &parentIt->second;
-                        std::cout << "[HeadersManager] Batch 0: Parent found at height " << pprev->height << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[HeadersManager] Batch 0: Parent found at height " << pprev->height << std::endl;
                     } else {
                         // BUG: This should have been caught by the initial lookup!
                         std::cerr << "[HeadersManager] BUG: Batch 0 parent lookup failed but initial lookup succeeded!" << std::endl;
@@ -2502,7 +2540,8 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
                 // FORK DETECTION: Only relevant above checkpoint
                 if (heightHasHeaders && expectedHeight > checkpointHeight) {
-                    std::cout << "[HeadersManager] Fork header queued at height " << expectedHeight << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[HeadersManager] Fork header queued at height " << expectedHeight << std::endl;
                 }
 
                 // Quick validate (structure only - fast, fork-aware timestamp limit)
@@ -2546,7 +2585,7 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         }
 
         // Log batch progress
-        if (batchStart > 0 && batchStart % 500 == 0) {
+        if (batchStart > 0 && batchStart % 500 == 0 && g_verbose.load(std::memory_order_relaxed)) {
             std::cout << "[HeadersManager] Batch progress: " << totalProcessed
                       << "/" << headers.size() << " headers stored" << std::endl;
         }
@@ -2568,8 +2607,9 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
 
     auto total_end = std::chrono::steady_clock::now();
     auto total_ms = std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start).count();
-    std::cout << "[HeadersManager] Progressive processing complete: " << totalProcessed
-              << " headers stored in " << total_ms << "ms (hashes: " << hash_ms << "ms)" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Progressive processing complete: " << totalProcessed
+                  << " headers stored in " << total_ms << "ms (hashes: " << hash_ms << "ms)" << std::endl;
 
     // Note: m_headers_processed_count already updated incrementally in batch loop above.
     // Final update for any remainder not covered by batch boundaries.
@@ -2583,8 +2623,9 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
         std::lock_guard<std::mutex> lock(cs_headers);
         m_last_request_hash = prevHash;
         m_last_header_request_time = std::chrono::steady_clock::now();
-        std::cout << "[HeadersManager] Updated m_last_request_hash to last stored hash: "
-                  << prevHash.GetHex().substr(0, 16) << "..." << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] Updated m_last_request_hash to last stored hash: "
+                      << prevHash.GetHex().substr(0, 16) << "..." << std::endl;
     }
 
     // BUG FIX #184: Request more headers AFTER processing completes (SSOT)
@@ -2626,8 +2667,9 @@ bool CHeadersManager::StartValidationThread()
         m_hash_worker_count = 8;
     }
 
-    std::cout << "[HeadersManager] Starting " << m_hash_worker_count
-              << " hash worker threads (Phase 2 parallel validation)..." << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Starting " << m_hash_worker_count
+                  << " hash worker threads (Phase 2 parallel validation)..." << std::endl;
 
     m_validation_running.store(true);
     m_processor_running.store(true);
@@ -2638,11 +2680,13 @@ bool CHeadersManager::StartValidationThread()
         for (size_t i = 0; i < m_hash_worker_count; ++i) {
             m_hash_workers.emplace_back(&CHeadersManager::ValidationWorkerThread, this);
         }
-        std::cout << "[HeadersManager] " << m_hash_worker_count << " hash workers started" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] " << m_hash_worker_count << " hash workers started" << std::endl;
 
         // Start header processor thread (offloads P2P thread)
         m_header_processor_thread = std::thread(&CHeadersManager::HeaderProcessorThread, this);
-        std::cout << "[HeadersManager] Header processor thread started" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] Header processor thread started" << std::endl;
 
         return true;
     } catch (const std::exception& e) {
@@ -2670,8 +2714,9 @@ void CHeadersManager::StopValidationThread()
         return;
     }
 
-    std::cout << "[HeadersManager] Stopping " << m_hash_workers.size()
-              << " hash worker threads and header processor..." << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Stopping " << m_hash_workers.size()
+                  << " hash worker threads and header processor..." << std::endl;
 
     // Stop all threads
     m_validation_running.store(false);
@@ -2706,9 +2751,10 @@ void CHeadersManager::StopValidationThread()
         }
     }
 
-    std::cout << "[HeadersManager] All threads stopped. Validated: "
-              << m_validated_count.load() << ", Failures: "
-              << m_validation_failures.load() << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] All threads stopped. Validated: "
+                  << m_validated_count.load() << ", Failures: "
+                  << m_validation_failures.load() << std::endl;
 }
 
 void CHeadersManager::PauseHeaderProcessing()
@@ -2717,8 +2763,10 @@ void CHeadersManager::PauseHeaderProcessing()
         return;  // Already paused
     }
 
-    std::cout << "[HeadersManager] Pausing header processing for fork recovery..." << std::endl;
-    std::cout.flush();
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "[HeadersManager] Pausing header processing for fork recovery..." << std::endl;
+        std::cout.flush();
+    }
 
     // Set paused flag - workers will check this before starting new work
     m_processing_paused.store(true);
@@ -2737,7 +2785,8 @@ void CHeadersManager::PauseHeaderProcessing()
         }
     }
 
-    std::cout << "[HeadersManager] Header processing paused" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Header processing paused" << std::endl;
 }
 
 void CHeadersManager::ResumeHeaderProcessing()
@@ -2746,7 +2795,8 @@ void CHeadersManager::ResumeHeaderProcessing()
         return;  // Not paused
     }
 
-    std::cout << "[HeadersManager] Resuming header processing..." << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Resuming header processing..." << std::endl;
     m_processing_paused.store(false);
 
     // Wake up any waiting workers
@@ -2812,7 +2862,7 @@ void CHeadersManager::ValidationWorkerThread()
 
             // Log progress periodically
             size_t count = m_validated_count.load();
-            if (count % 100 == 0) {
+            if (count % 100 == 0 && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[HeadersManager] Validated " << count << " headers (height "
                           << pending.height << ")" << std::endl;
             }
@@ -2826,7 +2876,8 @@ void CHeadersManager::ValidationWorkerThread()
         }
     }
 
-    std::cout << "[HeadersManager] Validation worker thread stopped" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Validation worker thread stopped" << std::endl;
 }
 
 // ============================================================================
@@ -2843,8 +2894,9 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
     }
 
     size_t header_count = headers.size();
-    std::cout << "[HeadersManager] Queueing " << header_count
-              << " raw headers from peer " << peer << " for async processing" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Queueing " << header_count
+                  << " raw headers from peer " << peer << " for async processing" << std::endl;
 
     // Note: We no longer compute the last header's hash here.
     // m_last_request_hash is updated by AddHeaders AFTER validation.
@@ -2867,7 +2919,8 @@ bool CHeadersManager::QueueRawHeadersForProcessing(NodeId peer, std::vector<CBlo
 
 void CHeadersManager::HeaderProcessorThread()
 {
-    std::cout << "[HeadersManager] Header processor thread started" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Header processor thread started" << std::endl;
 
     while (m_processor_running.load()) {
         // Check if paused for fork recovery - wait until unpaused
@@ -2904,8 +2957,9 @@ void CHeadersManager::HeaderProcessorThread()
 
         // Process headers - hash computation happens HERE, not in P2P thread
         // This calls QueueHeadersForValidation which does hash computation + stores headers
-        std::cout << "[HeadersManager] Processing " << pending.headers.size()
-                  << " headers from peer " << pending.peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[HeadersManager] Processing " << pending.headers.size()
+                      << " headers from peer " << pending.peer_id << std::endl;
 
         bool success = QueueHeadersForValidation(pending.peer_id, pending.headers);
 
@@ -2919,7 +2973,8 @@ void CHeadersManager::HeaderProcessorThread()
             // Update peer's best known tip (height + hash) for fork divergence detection
             int bestHeight = GetBestHeight();
             uint256 bestHash = GetBestHash();
-            std::cout << "[HeadersManager] Headers processed. Best height: " << bestHeight << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[HeadersManager] Headers processed. Best height: " << bestHeight << std::endl;
 
             // Update peer tip tracking for FetchBlocks and fork detection
             if (g_node_context.peer_manager) {
@@ -2931,5 +2986,6 @@ void CHeadersManager::HeaderProcessorThread()
         }
     }
 
-    std::cout << "[HeadersManager] Header processor thread stopped" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[HeadersManager] Header processor thread stopped" << std::endl;
 }
