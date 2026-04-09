@@ -344,6 +344,65 @@ bool CWallet::GetKeyUnlocked(const CDilithiumAddress& address, CKey& keyOut) con
     return true;
 }
 
+bool CWallet::ImportKey(const CKey& key, const CDilithiumAddress& address) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+
+    // Check key not already in wallet
+    if (mapKeys.count(address) || mapCryptedKeys.count(address)) {
+        return false;  // Already exists
+    }
+
+    // Validate key
+    if (!key.IsValid()) {
+        return false;
+    }
+
+    if (!mapCryptedKeys.empty()) {
+        // Wallet is encrypted — encrypt the key before storing
+        if (!fWalletUnlocked) {
+            return false;  // Must unlock wallet first
+        }
+
+        CEncryptedKey encKey;
+        encKey.vchPubKey = key.vchPubKey;
+
+        // Generate unique IV (same pattern as key generation)
+        if (!GenerateUniqueIV_Locked(encKey.vchIV)) {
+            return false;
+        }
+
+        // Encrypt private key with master key
+        CCrypter crypter;
+        std::vector<uint8_t> masterKeyVec(vMasterKey.data_ptr(),
+                                          vMasterKey.data_ptr() + vMasterKey.size());
+        if (!crypter.SetKey(masterKeyVec, encKey.vchIV)) {
+            memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
+            return false;
+        }
+
+        if (!crypter.Encrypt(key.vchPrivKey, encKey.vchCryptedKey)) {
+            memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
+            return false;
+        }
+
+        memory_cleanse(masterKeyVec.data(), masterKeyVec.size());
+        mapCryptedKeys[address] = encKey;
+    } else {
+        // Wallet not encrypted — store key directly
+        mapKeys[address] = key;
+    }
+
+    // Add to address list
+    vchAddresses.push_back(address);
+
+    // Save wallet to disk
+    if (!SaveUnlocked(m_walletFile)) {
+        return false;
+    }
+
+    return true;
+}
+
 bool CWallet::SignHash(const CDilithiumAddress& address, const uint256& hash,
                        std::vector<uint8_t>& signature) {
     CKey key;

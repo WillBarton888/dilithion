@@ -121,6 +121,8 @@ void CRPCPermissions::InitializeMethodPermissions() {
     m_methodPermissions["walletlock"]         = adminWallet;
     m_methodPermissions["walletpassphrasechange"] = adminWallet;
     m_methodPermissions["exportmnemonic"]     = adminWallet;
+    m_methodPermissions["dumpprivkey"]        = adminWallet;
+    m_methodPermissions["importprivkey"]      = adminWallet;
 
     // ========================================================================
     // Admin Server Methods (ADMIN_SERVER = 0x0200)
@@ -258,12 +260,13 @@ bool CRPCPermissions::ParseJSONConfig(const std::string& json) {
     // Simplified parsing: Extract username entries
     // For production implementation, use jsoncpp
 
-    std::cout << "[RPC-PERMISSIONS] Parsing users (simplified parser - upgrade to jsoncpp for production)" << std::endl;
+    // JSON permissions file parsing is not yet implemented.
+    // Return false so callers know the file was NOT loaded and will
+    // fall back to legacy single-user authentication mode.
+    std::cerr << "[RPC-PERMISSIONS] WARNING: JSON permissions file parsing not implemented. "
+              << "Using legacy single-user authentication mode." << std::endl;
 
-    // TODO: Implement full JSON parsing with jsoncpp
-    // For now, return true and let legacy mode handle authentication
-
-    return true;
+    return false;
 }
 
 bool CRPCPermissions::InitializeLegacyMode(const std::string& username,

@@ -467,6 +467,16 @@ public:
     bool GetKey(const CDilithiumAddress& address, CKey& keyOut) const;
 
     /**
+     * Import an external private key into the wallet.
+     * Handles encryption if wallet is encrypted.
+     * Saves wallet to disk after import.
+     * @param key Key to import (pubkey + privkey must be set)
+     * @param address Address derived from the key's pubkey
+     * @return true if imported successfully
+     */
+    bool ImportKey(const CKey& key, const CDilithiumAddress& address);
+
+    /**
      * Sign a message hash with address's private key
      * @param address Address whose key to use
      * @param hash Message hash to sign

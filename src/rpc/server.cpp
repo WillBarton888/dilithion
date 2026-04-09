@@ -226,6 +226,8 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["createhdwallet"] = [this](const std::string& p) { return RPC_CreateHDWallet(p); };
     m_handlers["restorehdwallet"] = [this](const std::string& p) { return RPC_RestoreHDWallet(p); };
     m_handlers["exportmnemonic"] = [this](const std::string& p) { return RPC_ExportMnemonic(p); };
+    m_handlers["dumpprivkey"] = [this](const std::string& p) { return RPC_DumpPrivKey(p); };
+    m_handlers["importprivkey"] = [this](const std::string& p) { return RPC_ImportPrivKey(p); };
     m_handlers["gethdwalletinfo"] = [this](const std::string& p) { return RPC_GetHDWalletInfo(p); };
     m_handlers["listhdaddresses"] = [this](const std::string& p) { return RPC_ListHDAddresses(p); };
     m_handlers["rescanwallet"] = [this](const std::string& p) { return RPC_RescanWallet(p); };
@@ -1467,6 +1469,7 @@ void CRPCServer::HandleClient(int clientSocket) {
                   << " - ERROR: " << rpcResp.error.substr(0, 100) << std::endl;
     } else if (rpcReq.method == "sendtoaddress" || rpcReq.method == "encryptwallet" ||
                rpcReq.method == "walletpassphrase" || rpcReq.method == "exportmnemonic" ||
+               rpcReq.method == "dumpprivkey" || rpcReq.method == "importprivkey" ||
                rpcReq.method == "stop") {
         // Log sensitive operations
         std::cout << "[RPC-AUDIT] " << clientIP << " called " << rpcReq.method
@@ -3928,6 +3931,151 @@ std::string CRPCServer::RPC_ExportMnemonic(const std::string& params) {
     std::ostringstream oss;
     oss << "{"
         << "\"mnemonic\":\"" << EscapeJSON(mnemonic) << "\""
+        << "}";
+
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_DumpPrivKey(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    // Parse address parameter
+    std::string addrStr;
+    if (!params.empty()) {
+        try {
+            auto j = nlohmann::json::parse(params);
+            if (j.is_object() && j.contains("address")) {
+                addrStr = j["address"].get<std::string>();
+            }
+        } catch (...) {}
+    }
+    if (addrStr.empty()) {
+        throw std::runtime_error("Missing required parameter: address");
+    }
+
+    // Validate address
+    CDilithiumAddress address;
+    if (!address.SetString(addrStr)) {
+        throw std::runtime_error("Invalid address: " + addrStr);
+    }
+
+    // Check wallet has the key
+    if (!m_wallet->HasKey(address)) {
+        throw std::runtime_error("Address not found in wallet: " + addrStr);
+    }
+
+    // Get the key (handles decryption for encrypted wallets)
+    CKey key;
+    if (!m_wallet->GetKey(address, key)) {
+        throw std::runtime_error("Failed to retrieve key (wallet may be locked)");
+    }
+
+    // Base64 encode the key data
+    std::string privkeyB64 = RPCAuth::Base64Encode(key.vchPrivKey.data(), key.vchPrivKey.size());
+    std::string pubkeyB64 = RPCAuth::Base64Encode(key.vchPubKey.data(), key.vchPubKey.size());
+
+    // Wipe sensitive key data from memory
+    key.Clear();
+
+    // Build response
+    std::ostringstream oss;
+    oss << "{"
+        << "\"address\":\"" << EscapeJSON(addrStr) << "\","
+        << "\"privkey\":\"" << EscapeJSON(privkeyB64) << "\","
+        << "\"pubkey\":\"" << EscapeJSON(pubkeyB64) << "\""
+        << "}";
+
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_ImportPrivKey(const std::string& params) {
+    if (!m_wallet) {
+        throw std::runtime_error("Wallet not initialized");
+    }
+
+    // Parse parameters
+    std::string privkeyB64, pubkeyB64;
+    if (!params.empty()) {
+        try {
+            auto j = nlohmann::json::parse(params);
+            if (j.is_object()) {
+                if (j.contains("privkey")) privkeyB64 = j["privkey"].get<std::string>();
+                if (j.contains("pubkey")) pubkeyB64 = j["pubkey"].get<std::string>();
+            }
+        } catch (...) {}
+    }
+    if (privkeyB64.empty() || pubkeyB64.empty()) {
+        throw std::runtime_error("Missing required parameters: privkey, pubkey (base64 encoded)");
+    }
+
+    // Base64 decode
+    std::vector<uint8_t> privkeyBytes, pubkeyBytes;
+    if (!RPCAuth::Base64Decode(privkeyB64, privkeyBytes)) {
+        throw std::runtime_error("Invalid base64 encoding for privkey");
+    }
+    if (!RPCAuth::Base64Decode(pubkeyB64, pubkeyBytes)) {
+        throw std::runtime_error("Invalid base64 encoding for pubkey");
+    }
+
+    // Validate key sizes
+    if (privkeyBytes.size() != DILITHIUM_SECRETKEY_SIZE) {
+        throw std::runtime_error(
+            "Invalid private key size: expected " +
+            std::to_string(DILITHIUM_SECRETKEY_SIZE) + " bytes, got " +
+            std::to_string(privkeyBytes.size()));
+    }
+    if (pubkeyBytes.size() != DILITHIUM_PUBLICKEY_SIZE) {
+        throw std::runtime_error(
+            "Invalid public key size: expected " +
+            std::to_string(DILITHIUM_PUBLICKEY_SIZE) + " bytes, got " +
+            std::to_string(pubkeyBytes.size()));
+    }
+
+    // Construct CKey
+    CKey key;
+    key.vchPubKey = pubkeyBytes;
+    key.vchPrivKey.assign(privkeyBytes.begin(), privkeyBytes.end());
+
+    if (!key.IsValid()) {
+        memory_cleanse(privkeyBytes.data(), privkeyBytes.size());
+        throw std::runtime_error("Key validation failed");
+    }
+
+    // Derive address from pubkey
+    CDilithiumAddress address(pubkeyBytes);
+    if (!address.IsValid()) {
+        memory_cleanse(privkeyBytes.data(), privkeyBytes.size());
+        key.Clear();
+        throw std::runtime_error("Failed to derive address from public key");
+    }
+
+    // Check if key already exists
+    if (m_wallet->HasKey(address)) {
+        memory_cleanse(privkeyBytes.data(), privkeyBytes.size());
+        key.Clear();
+        throw std::runtime_error("Key already exists in wallet for address: " + address.ToString());
+    }
+
+    // Import the key
+    if (!m_wallet->ImportKey(key, address)) {
+        memory_cleanse(privkeyBytes.data(), privkeyBytes.size());
+        key.Clear();
+        throw std::runtime_error("Failed to import key (wallet may be locked or save failed)");
+    }
+
+    // Wipe sensitive data
+    memory_cleanse(privkeyBytes.data(), privkeyBytes.size());
+    key.Clear();
+
+    std::string addrStr = address.ToString();
+
+    // Build response
+    std::ostringstream oss;
+    oss << "{"
+        << "\"address\":\"" << EscapeJSON(addrStr) << "\","
+        << "\"success\":true"
         << "}";
 
     return oss.str();

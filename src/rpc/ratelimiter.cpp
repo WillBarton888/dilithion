@@ -35,6 +35,8 @@ const std::map<std::string, CRateLimiter::MethodRateLimit> CRateLimiter::METHOD_
     {"createhdwallet",         {20.0, 0.333, 1.0}},  // 20/min - wallet state manipulation
     {"restorehdwallet",        {20.0, 0.333, 1.0}},  // 20/min - wallet state manipulation
     {"exportmnemonic",         {20.0, 0.333, 1.0}},  // 20/min - sensitive data export
+    {"dumpprivkey",            {5.0,  0.083, 1.0}},  // 5/min - sensitive key export
+    {"importprivkey",          {5.0,  0.083, 1.0}},  // 5/min - wallet key import
 
     // === HIGH: Mining Control (20/min) ===
     {"startmining",            {20.0, 0.333, 1.0}},  // 20/min - resource intensive

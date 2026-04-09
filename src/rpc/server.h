@@ -330,6 +330,8 @@ private:
     std::string RPC_CreateHDWallet(const std::string& params);
     std::string RPC_RestoreHDWallet(const std::string& params);
     std::string RPC_ExportMnemonic(const std::string& params);
+    std::string RPC_DumpPrivKey(const std::string& params);
+    std::string RPC_ImportPrivKey(const std::string& params);
     std::string RPC_GetHDWalletInfo(const std::string& params);
     std::string RPC_ListHDAddresses(const std::string& params);
     std::string RPC_RescanWallet(const std::string& params);
