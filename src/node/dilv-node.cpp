@@ -2090,6 +2090,22 @@ int main(int argc, char* argv[]) {
         std::cerr << "WARNING: Failed to install SIGTERM handler" << std::endl;
         LogPrintf(ALL, WARN, "Failed to install SIGTERM handler");
     }
+#ifdef _WIN32
+    // Windows console close handler — catches X button, logoff, shutdown.
+    // Without this, closing the console window kills the process immediately,
+    // leaving stale PID files and potentially corrupting LevelDB.
+    SetConsoleCtrlHandler([](DWORD dwCtrlType) -> BOOL {
+        if (dwCtrlType == CTRL_CLOSE_EVENT || dwCtrlType == CTRL_LOGOFF_EVENT ||
+            dwCtrlType == CTRL_SHUTDOWN_EVENT || dwCtrlType == CTRL_C_EVENT) {
+            std::cout << "\nWindows shutdown signal received, cleaning up..." << std::endl;
+            SignalHandler(SIGINT);
+            // Give the shutdown logic a few seconds to flush databases
+            std::this_thread::sleep_for(std::chrono::seconds(3));
+            return TRUE;
+        }
+        return FALSE;
+    }, TRUE);
+#endif
 
     // BUG #88: Windows startup crash diagnostics
     std::cerr.flush();
