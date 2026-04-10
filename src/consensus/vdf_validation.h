@@ -250,4 +250,19 @@ bool CheckRegistrationRateLimit(
     std::string& error
 );
 
+/**
+ * Option C preflight for VDF same-height replacement/tiebreak:
+ * checks replacement block against DFMP rules using simulated tracker state
+ * with the current tip height excluded.
+ */
+bool CheckVDFReplacementPreflight(
+    const CBlock& block,
+    const CBlockIndex* pindexNew,
+    const CBlockIndex* pindexTip,
+    CBlockchainDB* db,
+    int height,
+    CCooldownTracker& tracker,
+    std::string& error
+);
+
 #endif // DILITHION_CONSENSUS_VDF_VALIDATION_H

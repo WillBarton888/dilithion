@@ -150,7 +150,7 @@ CBlockIndex* CChainState::FindFork(CBlockIndex* pindex1, CBlockIndex* pindex2) {
 // VDF Distribution: ShouldReplaceVDFTip
 // ---------------------------------------------------------------------------
 
-bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
+bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew, const CBlock* pblockNew) const
 {
     // Must have chain params with distribution enabled
     if (!Dilithion::g_chainParams) return false;
@@ -181,6 +181,18 @@ bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew) const
     int gracePeriod = Dilithion::g_chainParams->vdfLotteryGracePeriod;
 
     if (elapsed > gracePeriod) return false;
+
+    // Option C preflight: if we have block data, validate cooldown against
+    // simulated post-replacement tracker state before mutating chain state.
+    if (pblockNew != nullptr) {
+        std::string preflightErr;
+        if (g_node_context.cooldown_tracker &&
+            !CheckVDFReplacementPreflight(*pblockNew, pindexNew, pindexTip, pdb, pindexNew->nHeight,
+                                          *g_node_context.cooldown_tracker, preflightErr)) {
+            std::cout << "[VDF Distribution] Replacement preflight rejected: " << preflightErr << std::endl;
+            return false;
+        }
+    }
 
     std::cout << "[VDF Distribution] Lower output wins -- replacing tip (grace: "
               << (gracePeriod - elapsed) << "s remaining)" << std::endl;
@@ -277,7 +289,7 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     }
 
     // Case 2.5: VDF Distribution — competing VDF block at same height with lower output
-    if (ShouldReplaceVDFTip(pindexNew)) {
+    if (ShouldReplaceVDFTip(pindexNew, &block)) {
         std::cout << "[Chain] VDF DISTRIBUTION REPLACEMENT -- 1-block reorg" << std::endl;
 
         // Disconnect current tip
@@ -348,6 +360,17 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     if (elapsed > gracePeriod) {
                         std::cout << "[VDF Distribution] Fork tiebreak: lower output but grace expired ("
                                   << elapsed << "s > " << gracePeriod << "s)" << std::endl;
+                        withinGrace = false;
+                    }
+                }
+
+                if (withinGrace) {
+                    std::string preflightErr;
+                    if (g_node_context.cooldown_tracker &&
+                        !CheckVDFReplacementPreflight(block, pindexNew, pindexTip, pdb, pindexNew->nHeight,
+                                                      *g_node_context.cooldown_tracker, preflightErr)) {
+                        std::cout << "[VDF Distribution] Fork tiebreak preflight rejected: "
+                                  << preflightErr << std::endl;
                         withinGrace = false;
                     }
                 }

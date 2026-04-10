@@ -883,3 +883,85 @@ bool CheckRegistrationRateLimit(
 
     return true;
 }
+
+bool CheckVDFReplacementPreflight(
+    const CBlock& block,
+    const CBlockIndex* pindexNew,
+    const CBlockIndex* pindexTip,
+    CBlockchainDB* db,
+    int height,
+    CCooldownTracker& tracker,
+    std::string& error)
+{
+    if (!block.IsVDFBlock()) return true;
+    if (!Dilithion::g_chainParams) return true;
+
+    const int excludeHeight = pindexTip ? pindexTip->nHeight : -1;
+
+    std::array<uint8_t, 20> mikId{};
+    if (!ExtractCoinbaseMIKIdentity(block, mikId)) {
+        error = "CheckVDFReplacementPreflight: cannot extract MIK identity";
+        return false;
+    }
+
+    if (height >= Dilithion::g_chainParams->dfmpCooldownConsensusHeight) {
+        int64_t ts = static_cast<int64_t>(block.nTime);
+        if (tracker.IsInCooldownExcludingHeight(mikId, height, ts, excludeHeight)) {
+            error = "CheckVDFReplacementPreflight: cooldown preflight failed";
+            return false;
+        }
+    }
+
+    if (height >= Dilithion::g_chainParams->consecutiveMinerCheckHeight) {
+        static constexpr int MAX_CONSECUTIVE_SAME_MINER = 3;
+        int activeMiners = tracker.GetActiveMinersExcludingHeight(height, excludeHeight);
+        if (activeMiners > 1) {
+            int consecutiveCount = 0;
+            const CBlockIndex* pWalk = pindexNew ? pindexNew->pprev : nullptr;
+            while (pWalk && consecutiveCount < MAX_CONSECUTIVE_SAME_MINER && db) {
+                CBlock prevBlock;
+                if (!db->ReadBlock(pWalk->GetBlockHash(), prevBlock)) break;
+                std::array<uint8_t, 20> prevMik{};
+                if (!ExtractCoinbaseMIKIdentity(prevBlock, prevMik)) break;
+                if (prevMik != mikId) break;
+                consecutiveCount++;
+                pWalk = pWalk->pprev;
+            }
+
+            if (consecutiveCount >= MAX_CONSECUTIVE_SAME_MINER) {
+                static constexpr int64_t CONSECUTIVE_STALL_THRESHOLD_SECS = 3600;
+                bool stallExempt = false;
+                if (pindexNew && pindexNew->pprev) {
+                    int64_t gap = static_cast<int64_t>(block.nTime) -
+                                  static_cast<int64_t>(pindexNew->pprev->nTime);
+                    if (gap >= CONSECUTIVE_STALL_THRESHOLD_SECS) stallExempt = true;
+                }
+                if (!stallExempt) {
+                    error = "CheckVDFReplacementPreflight: consecutive-miner preflight failed";
+                    return false;
+                }
+            }
+        }
+    }
+
+    int window = Dilithion::g_chainParams->mikWindowCapWindow;
+    int cap = Dilithion::g_chainParams->mikWindowCapFloor;
+    if (window > 0 && cap > 0 && height > 0) {
+        int activeMiners = tracker.GetActiveMinersExcludingHeight(height, excludeHeight);
+        if (activeMiners > 1) {
+            int livenessTimeout = Dilithion::g_chainParams->livenessTimeoutSec;
+            int64_t prevBlockTime = (pindexNew && pindexNew->pprev)
+                ? static_cast<int64_t>(pindexNew->pprev->nTime) : 0;
+            int64_t blockTime = static_cast<int64_t>(block.nTime);
+            if (!(livenessTimeout > 0 && prevBlockTime > 0 && (blockTime - prevBlockTime) >= livenessTimeout)) {
+                int count = tracker.GetBlockCountInWindow(mikId, height - 1, window);
+                if (count >= cap) {
+                    error = "CheckVDFReplacementPreflight: window-cap preflight failed";
+                    return false;
+                }
+            }
+        }
+    }
+
+    return true;
+}

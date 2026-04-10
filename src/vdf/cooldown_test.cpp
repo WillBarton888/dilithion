@@ -997,6 +997,30 @@ static void test_bug280_rollback_reconnect_passes()
     PASS();
 }
 
+static void test_option_c_excluding_height_preflight()
+{
+    TEST(option_c_excluding_height_preflight);
+    CCooldownTracker tracker(1920, 0, 0, 45);
+
+    // Build enough active miners so cooldown is non-trivial.
+    for (uint8_t i = 1; i <= 14; ++i) {
+        tracker.OnBlockConnected(240 + i, make_addr(i), 1774710000 + i * 45);
+    }
+
+    // Same miner wins at 256 and tries again at 259 (normally invalid).
+    tracker.OnBlockConnected(256, make_addr(1), 1774713166);
+    tracker.OnBlockConnected(257, make_addr(2), 1774713245);
+    tracker.OnBlockConnected(258, make_addr(3), 1774713368);
+    CHECK(tracker.IsInCooldown(make_addr(1), 259, 1774713414));
+
+    // Option C preflight should evaluate against state with 256 excluded.
+    // With the tip winner removed, miner 1's last win reverts to 241, so this passes.
+    CHECK(!tracker.IsInCooldownExcludingHeight(make_addr(1), 259, 1774713414, 256));
+    CHECK(tracker.GetActiveMinersExcludingHeight(259, 256) <= tracker.GetActiveMiners());
+
+    PASS();
+}
+
 int main()
 {
     std::cout << "\nCCooldownTracker Unit Tests\n";
@@ -1042,6 +1066,7 @@ int main()
     test_bug280_reorg_detects_cooldown_violation();
     test_bug280_reorg_tracker_matches_sequential();
     test_bug280_rollback_reconnect_passes();
+    test_option_c_excluding_height_preflight();
 
     std::cout << "\n" << passed << " passed, " << failed << " failed\n";
 

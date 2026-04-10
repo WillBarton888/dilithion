@@ -202,7 +202,7 @@ public:
      * Returns true if pindexNew has a lower vdfOutput (big-endian) AND we're within grace period.
      * Uses HashLessThan() for consensus-safe comparison (NOT uint256::operator<).
      */
-    bool ShouldReplaceVDFTip(CBlockIndex* pindexNew) const;
+    bool ShouldReplaceVDFTip(CBlockIndex* pindexNew, const CBlock* pblockNew = nullptr) const;
 
     /**
      * Connect a block to the active chain

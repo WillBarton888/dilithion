@@ -81,6 +81,121 @@ bool CCooldownTracker::IsInCooldown(const Address& addr, int height, int64_t cur
     return true;  // still in cooldown
 }
 
+bool CCooldownTracker::IsInCooldownExcludingHeight(const Address& addr, int height, int64_t currentTimestamp, int excludeHeight) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    // Fast path: nothing to exclude.
+    if (excludeHeight < 0 || m_heightToWinner.find(excludeHeight) == m_heightToWinner.end()) {
+        auto it = m_lastWinHeight.find(addr);
+        if (it == m_lastWinHeight.end()) return false;
+        int cooldown = ComputeEffectiveCooldown(height);
+        int blockGap = height - it->second;
+        if (blockGap >= cooldown) return false;
+        if (height >= m_stabilizationHeight && currentTimestamp > 0) {
+            auto tsIt = m_lastWinTimestamp.find(addr);
+            if (tsIt != m_lastWinTimestamp.end() && tsIt->second > 0) {
+                int64_t timeGap = currentTimestamp - tsIt->second;
+                int64_t timeCooldown = static_cast<int64_t>(cooldown) * m_targetBlockTime;
+                if (timeGap >= timeCooldown) return false;
+            }
+        }
+        return true;
+    }
+
+    // Simulate state with excludeHeight removed.
+    std::map<Address, int> simLastWin = m_lastWinHeight;
+    std::map<int, Address> simHeightToWinner = m_heightToWinner;
+    std::map<Address, int64_t> simLastWinTs = m_lastWinTimestamp;
+    std::map<int, int64_t> simHeightToTs = m_heightToTimestamp;
+
+    Address excludedWinner = simHeightToWinner[excludeHeight];
+    simHeightToWinner.erase(excludeHeight);
+    simHeightToTs.erase(excludeHeight);
+
+    int lastWin = -1;
+    for (auto rit = simHeightToWinner.rbegin(); rit != simHeightToWinner.rend(); ++rit) {
+        if (rit->second == excludedWinner) {
+            lastWin = rit->first;
+            break;
+        }
+    }
+    if (lastWin >= 0) {
+        simLastWin[excludedWinner] = lastWin;
+        auto tsIt = simHeightToTs.find(lastWin);
+        if (tsIt != simHeightToTs.end()) simLastWinTs[excludedWinner] = tsIt->second;
+        else simLastWinTs.erase(excludedWinner);
+    } else {
+        simLastWin.erase(excludedWinner);
+        simLastWinTs.erase(excludedWinner);
+    }
+
+    auto it = simLastWin.find(addr);
+    if (it == simLastWin.end()) return false;
+
+    // Recompute active miners at target height from simulated winner map.
+    int cutoff = height - m_activeWindow + 1;
+    std::set<Address> uniqueLong;
+    for (auto iter = simHeightToWinner.lower_bound(cutoff);
+         iter != simHeightToWinner.end() && iter->first <= height; ++iter) {
+        uniqueLong.insert(iter->second);
+    }
+    int longCooldown = CalculateCooldown(static_cast<int>(uniqueLong.size()));
+    int cooldown = longCooldown;
+
+    if (height >= m_stabilizationHeight && m_shortWindow > 0) {
+        int shortCutoff = height - m_shortWindow + 1;
+        std::set<Address> uniqueShort;
+        for (auto iter = simHeightToWinner.lower_bound(shortCutoff);
+             iter != simHeightToWinner.end() && iter->first <= height; ++iter) {
+            uniqueShort.insert(iter->second);
+        }
+        int shortCooldown = CalculateCooldown(static_cast<int>(uniqueShort.size()));
+        cooldown = std::min(longCooldown, shortCooldown);
+    }
+
+    int blockGap = height - it->second;
+    if (blockGap >= cooldown) return false;
+
+    if (height >= m_stabilizationHeight && currentTimestamp > 0) {
+        auto tsIt = simLastWinTs.find(addr);
+        if (tsIt != simLastWinTs.end() && tsIt->second > 0) {
+            int64_t timeGap = currentTimestamp - tsIt->second;
+            int64_t timeCooldown = static_cast<int64_t>(cooldown) * m_targetBlockTime;
+            if (timeGap >= timeCooldown) return false;
+        }
+    }
+
+    return true;
+}
+
+int CCooldownTracker::GetActiveMinersExcludingHeight(int height, int excludeHeight) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    // Fast path.
+    if (excludeHeight < 0 || m_heightToWinner.find(excludeHeight) == m_heightToWinner.end()) {
+        int cutoff = height - m_activeWindow + 1;
+        std::set<Address> unique;
+        for (auto it = m_heightToWinner.lower_bound(cutoff);
+             it != m_heightToWinner.end() && it->first <= height; ++it) {
+            unique.insert(it->second);
+        }
+        return static_cast<int>(unique.size());
+    }
+
+    std::map<int, Address> simHeightToWinner = m_heightToWinner;
+    simHeightToWinner.erase(excludeHeight);
+
+    int cutoff = height - m_activeWindow + 1;
+    std::set<Address> unique;
+    for (auto it = simHeightToWinner.lower_bound(cutoff);
+         it != simHeightToWinner.end() && it->first <= height; ++it) {
+        unique.insert(it->second);
+    }
+    return static_cast<int>(unique.size());
+}
+
 int CCooldownTracker::GetCooldownBlocks() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);

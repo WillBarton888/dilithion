@@ -78,6 +78,13 @@ public:
     /** Is this address currently in cooldown at the given height?
      *  currentTimestamp: block timestamp for time-based expiry (0 = disabled). */
     bool IsInCooldown(const Address& addr, int height, int64_t currentTimestamp = 0) const;
+    /** Option C simulation helper:
+     *  evaluate cooldown as if `excludeHeight` were disconnected first.
+     *  Used for VDF same-height replacement preflight checks. */
+    bool IsInCooldownExcludingHeight(const Address& addr, int height, int64_t currentTimestamp, int excludeHeight) const;
+    /** Option C simulation helper:
+     *  active miner count at `height` as if `excludeHeight` were disconnected first. */
+    int GetActiveMinersExcludingHeight(int height, int excludeHeight) const;
 
     /** Current cooldown length (long window only, clamped active miner count). */
     int GetCooldownBlocks() const;
