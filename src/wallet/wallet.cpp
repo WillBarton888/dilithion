@@ -28,6 +28,8 @@
 #include <iostream>
 #include <cstdio>   // For snprintf (thread-safe number formatting)
 #include <limits>
+#include <thread>
+#include <chrono>
 
 // FIX-002 (PERSIST-003): File permissions
 // FIX-004 (PERSIST-002): fsync for atomic writes
@@ -1291,9 +1293,12 @@ bool CWallet::EncryptWallet(const std::string& passphrase) {
     memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
     memory_cleanse(derivedKey.data(), derivedKey.size());
 
-    // Auto-save wallet if enabled (we already hold the lock)
+    // Save wallet to disk — encryption MUST be persisted
     if (m_autoSave && !m_walletFile.empty()) {
-        SaveUnlocked();
+        if (!SaveUnlocked()) {
+            std::cerr << "[Wallet] CRITICAL: Wallet encrypted in memory but failed to save to disk!" << std::endl;
+            return false;
+        }
     }
 
     return true;
@@ -1410,7 +1415,13 @@ bool CWallet::ChangePassphrase(const std::string& passphraseOld,
         return false;
     }
 
-    // Update master key
+    // Save old master key state in case disk write fails and we need to revert
+    auto oldCryptedKey = masterKey.vchCryptedKey;
+    auto oldSalt = masterKey.vchSalt;
+    auto oldMAC = masterKey.vchMAC;
+    auto oldIV = masterKey.vchIV;
+
+    // Update master key in memory
     masterKey.vchCryptedKey = newCryptedKey;
     masterKey.vchSalt = newSalt;
     masterKey.vchMAC = newMAC;  // FIX-008: Store MAC
@@ -1419,12 +1430,29 @@ bool CWallet::ChangePassphrase(const std::string& passphraseOld,
     // Wipe sensitive data
     memory_cleanse(derivedKeyOld.data(), derivedKeyOld.size());
     memory_cleanse(derivedKeyNew.data(), derivedKeyNew.size());
-    memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
 
-    // Auto-save wallet if enabled (we already hold the lock)
+    // Save wallet to disk — passphrase change MUST be persisted
     if (m_autoSave && !m_walletFile.empty()) {
-        SaveUnlocked();
+        if (!SaveUnlocked()) {
+            std::cerr << "[Wallet] CRITICAL: Passphrase changed in memory but failed to save to disk!" << std::endl;
+            std::cerr << "[Wallet] wallet.dat still has the OLD passphrase. Retrying..." << std::endl;
+
+            // Retry once after a brief pause (handles transient file locks on Windows)
+            std::this_thread::sleep_for(std::chrono::milliseconds(500));
+            if (!SaveUnlocked()) {
+                std::cerr << "[Wallet] CRITICAL: Retry failed. Reverting passphrase change." << std::endl;
+                // Revert so in-memory state matches what's on disk
+                masterKey.vchCryptedKey = oldCryptedKey;
+                masterKey.vchSalt = oldSalt;
+                masterKey.vchMAC = oldMAC;
+                masterKey.vchIV = oldIV;
+                memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
+                return false;
+            }
+        }
     }
+
+    memory_cleanse(vMasterKeyPlain.data(), vMasterKeyPlain.size());
 
     return true;
 }

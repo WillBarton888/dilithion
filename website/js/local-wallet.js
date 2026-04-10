@@ -113,7 +113,7 @@ class LocalWallet {
 
     /**
      * Create a new wallet
-     * @param {string} password - Wallet password
+     * @param {string|null} password - Wallet password (null for unencrypted)
      * @param {string[]} mnemonic - Optional mnemonic (generates new if not provided)
      * @returns {Promise<Object>} {walletId, mnemonic, addresses}
      */
@@ -124,8 +124,10 @@ class LocalWallet {
             throw new Error('Crypto module not available');
         }
 
-        // Validate password
-        if (!password || password.length < 8) {
+        const isEncrypted = password && password.length > 0;
+
+        // Validate password if provided
+        if (isEncrypted && password.length < 8) {
             throw new Error('Password must be at least 8 characters');
         }
 
@@ -139,8 +141,14 @@ class LocalWallet {
         // Convert mnemonic to seed
         const seed = await this.crypto.mnemonicToSeed(mnemonic);
 
-        // Encrypt seed with password
-        const encryptedSeed = await this.crypto.encrypt(seed, password);
+        // Encrypt seed with password, or store raw for unencrypted wallets
+        let storedSeed;
+        if (isEncrypted) {
+            storedSeed = await this.crypto.encrypt(seed, password);
+        } else {
+            // Store raw seed bytes (Uint8Array is stored directly in IndexedDB)
+            storedSeed = new Uint8Array(seed);
+        }
 
         // Generate wallet ID
         const walletId = this.generateUUID();
@@ -154,8 +162,8 @@ class LocalWallet {
         const wallet = {
             id: walletId,
             version: 1,
-            encrypted: true,
-            encryptedSeed: encryptedSeed,
+            encrypted: isEncrypted,
+            encryptedSeed: storedSeed,
             createdAt: Date.now(),
             accounts: [{
                 index: 0,
@@ -183,9 +191,11 @@ class LocalWallet {
         this.decryptedSeed = seed;
         this.isUnlocked = true;
         this.accounts = wallet.accounts;
-        this.startLockTimer();
+        if (isEncrypted) {
+            this.startLockTimer();
+        }
 
-        console.log('[LocalWallet] Wallet created:', walletId);
+        console.log('[LocalWallet] Wallet created:', walletId, isEncrypted ? '(encrypted)' : '(unencrypted)');
 
         return {
             walletId,
@@ -196,7 +206,7 @@ class LocalWallet {
 
     /**
      * Import wallet from mnemonic
-     * @param {string} password - New password
+     * @param {string|null} password - New password (null for unencrypted)
      * @param {string[]} mnemonic - 24-word mnemonic
      * @returns {Promise<Object>} {walletId, addresses}
      */
@@ -312,7 +322,7 @@ class LocalWallet {
 
     /**
      * Unlock wallet with password
-     * @param {string} password - Wallet password
+     * @param {string|null} password - Wallet password (null for unencrypted wallets)
      * @returns {Promise<boolean>} True if unlocked successfully
      */
     async unlock(password) {
@@ -324,11 +334,16 @@ class LocalWallet {
             throw new Error('No wallet found');
         }
 
-        // Decrypt seed
-        try {
-            this.decryptedSeed = await this.crypto.decrypt(wallet.encryptedSeed, password);
-        } catch (e) {
-            throw new Error('Wrong password');
+        if (wallet.encrypted) {
+            // Decrypt seed
+            try {
+                this.decryptedSeed = await this.crypto.decrypt(wallet.encryptedSeed, password);
+            } catch (e) {
+                throw new Error('Wrong password');
+            }
+        } else {
+            // Unencrypted wallet - seed is stored directly
+            this.decryptedSeed = new Uint8Array(wallet.encryptedSeed);
         }
 
         // Update state
@@ -336,14 +351,27 @@ class LocalWallet {
         this.isUnlocked = true;
         this.accounts = wallet.accounts;
 
-        // Start auto-lock timer
-        this.startLockTimer();
+        // Start auto-lock timer (only for encrypted wallets)
+        if (wallet.encrypted) {
+            this.startLockTimer();
+        }
 
         // Emit event
         this.emit('unlock', { walletId: this.walletId });
 
         console.log('[LocalWallet] Wallet unlocked');
         return true;
+    }
+
+    /**
+     * Check if the wallet is encrypted
+     * @returns {Promise<boolean|null>} True if encrypted, false if not, null if no wallet
+     */
+    async isWalletEncrypted() {
+        await this.init();
+        const wallet = await this.getWallet();
+        if (!wallet) return null;
+        return wallet.encrypted === true;
     }
 
     /**
@@ -540,9 +568,8 @@ class LocalWallet {
             throw new Error('Wrong password');
         }
 
-        // Note: We can't actually recover mnemonic from seed
-        // In production, store encrypted mnemonic separately
-        throw new Error('Mnemonic export not implemented. Please backup your original mnemonic.');
+        // Mnemonic is not stored in the browser for security reasons
+        throw new Error('Your recovery phrase was shown when you created your wallet. For security, it is not stored in the browser. Make sure to keep a backup of your wallet.dat file.');
     }
 
     /**
@@ -577,12 +604,12 @@ class LocalWallet {
 
     /**
      * Delete wallet (irreversible!)
-     * @param {string} password - Password to confirm
+     * @param {string} password - Password to confirm (ignored for unencrypted wallets)
      */
     async deleteWallet(password) {
-        // Verify password
+        // Verify password for encrypted wallets
         const wallet = await this.getWallet();
-        if (wallet) {
+        if (wallet && wallet.encrypted) {
             try {
                 await this.crypto.decrypt(wallet.encryptedSeed, password);
             } catch (e) {

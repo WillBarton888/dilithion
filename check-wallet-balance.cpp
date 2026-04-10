@@ -19,6 +19,7 @@
 #include <vector>
 #include <string>
 #include <cstdlib>
+#include <fstream>
 
 #ifdef _WIN32
     #include <windows.h>
@@ -74,12 +75,24 @@ std::string GetFullDataDir(const std::string& name) {
 // Coinbase maturity constant (must match consensus/params.h)
 static const unsigned int COINBASE_MATURITY = 100;
 
+// Detect chain from datadir path
+std::string DetectUnit(const std::string& datadir) {
+    // Check if path contains ".dilv" (DilV chain)
+    if (datadir.find(".dilv") != std::string::npos &&
+        datadir.find(".dilithion") == std::string::npos) {
+        return "DilV";
+    }
+    return "DIL";
+}
+
 void print_wallet_info(const std::string& datadir) {
 #ifdef _WIN32
     std::string wallet_file = datadir + "\\wallet.dat";
 #else
     std::string wallet_file = datadir + "/wallet.dat";
 #endif
+
+    std::string unit = DetectUnit(datadir);
 
     CWallet wallet;
 
@@ -124,10 +137,11 @@ void print_wallet_info(const std::string& datadir) {
         }
     }
 
-    double totalDIL = static_cast<double>(totalBalance) / 100000000.0;
-    double matureDIL = static_cast<double>(matureBalance) / 100000000.0;
-    double immatureDIL = static_cast<double>(immatureBalance) / 100000000.0;
+    double totalCoins = static_cast<double>(totalBalance) / 100000000.0;
+    double matureCoins = static_cast<double>(matureBalance) / 100000000.0;
+    double immatureCoins = static_cast<double>(immatureBalance) / 100000000.0;
 
+    std::cout << "  Chain: " << unit << std::endl;
     std::cout << "  Addresses: " << addresses.size() << std::endl;
     std::cout << "  UTXOs: " << utxos.size() << std::endl;
     if (bestHeight >= 0) {
@@ -136,11 +150,11 @@ void print_wallet_info(const std::string& datadir) {
     std::cout << std::endl;
     std::cout << "  Balance Breakdown:" << std::endl;
     std::cout << "    Total:    " << std::fixed << std::setprecision(8)
-              << totalDIL << " DIL" << std::endl;
+              << totalCoins << " " << unit << std::endl;
     std::cout << "    Mature:   " << std::fixed << std::setprecision(8)
-              << matureDIL << " DIL (spendable)" << std::endl;
+              << matureCoins << " " << unit << " (spendable)" << std::endl;
     std::cout << "    Immature: " << std::fixed << std::setprecision(8)
-              << immatureDIL << " DIL (needs " << COINBASE_MATURITY << " confirmations)" << std::endl;
+              << immatureCoins << " " << unit << " (needs " << COINBASE_MATURITY << " confirmations)" << std::endl;
 
     // Show first address
     std::cout << std::endl;
@@ -163,8 +177,36 @@ int main(int argc, char* argv[]) {
             datadirs.push_back(argv[i]);
         }
     } else {
-        // Use default mainnet datadir
-        datadirs.push_back(GetFullDataDir(".dilithion"));
+        // Auto-detect: check both DIL and DilV default datadirs
+        std::string dilDir = GetFullDataDir(".dilithion");
+        std::string dilvDir = GetFullDataDir(".dilv");
+
+#ifdef _WIN32
+        std::string dilWallet = dilDir + "\\wallet.dat";
+        std::string dilvWallet = dilvDir + "\\wallet.dat";
+#else
+        std::string dilWallet = dilDir + "/wallet.dat";
+        std::string dilvWallet = dilvDir + "/wallet.dat";
+#endif
+
+        // Check which wallets exist
+        bool hasDil = false, hasDilv = false;
+        {
+            std::ifstream f(dilWallet);
+            hasDil = f.good();
+        }
+        {
+            std::ifstream f(dilvWallet);
+            hasDilv = f.good();
+        }
+
+        if (hasDil) datadirs.push_back(dilDir);
+        if (hasDilv) datadirs.push_back(dilvDir);
+
+        if (datadirs.empty()) {
+            // Fallback to DIL default even if not found (will show error message)
+            datadirs.push_back(dilDir);
+        }
     }
 
     // Check each wallet

@@ -2132,12 +2132,14 @@ inline const std::string& GetWalletHTML() {
 
         // Active chain: 'dil' or 'dilv'
         let activeChain = 'dil';  // Always start on DIL
+        let chainSwitchGen = 0;   // Generation counter to discard stale async responses
         const chainPorts = { dil: 8332, dilv: 9332 };
         const chainUnits = { dil: 'DIL', dilv: 'DilV' };
 
         function switchChain(chain) {
             if (chain === activeChain) return;
             activeChain = chain;
+            const myGen = ++chainSwitchGen;  // Capture generation for stale detection
             localStorage.setItem('dilithionActiveChain', chain);
 
             // Update toggle buttons
@@ -2189,25 +2191,70 @@ inline const std::string& GetWalletHTML() {
                     }
                 }
             }
-            // Show loading state while switching
+
+            // Clear ALL stale data immediately and show loading state
             document.getElementById('totalBalance').textContent = '...';
             document.getElementById('matureBalance').textContent = '...';
             document.getElementById('immatureBalance').textContent = '...';
+            document.getElementById('availableForSend').textContent = '...';
+            document.getElementById('blockHeight').textContent = '-';
+            document.getElementById('recentTxList').innerHTML = '<div class="empty-state">Switching to ' + chainUnits[chain] + '...</div>';
+            const txListEl = document.getElementById('txList');
+            if (txListEl) txListEl.innerHTML = '';
 
-            // Reconnect with new chain
-            const isLightMode = connectionManager && connectionManager.getMode() === 'light';
-            if (isLightMode) {
-                connectionManager.connect().then(() => {
-                    setConnectionStatus(true, (chain === 'dilv' ? 'DilV' : 'DIL') + ' Light Wallet');
-                    refreshAll();
-                }).catch(() => {
+            // Show loading overlay
+            showChainSwitchOverlay(chain);
+
+            // Reconnect with new chain (async, guarded by generation counter)
+            (async () => {
+                try {
+                    const isLightMode = connectionManager && connectionManager.getMode() === 'light';
+                    if (isLightMode) {
+                        await connectionManager.connect();
+                        if (chainSwitchGen !== myGen) return;  // Stale — user switched again
+                        setConnectionStatus(true, (chain === 'dilv' ? 'DilV' : 'DIL') + ' Light Wallet');
+                        await refreshAll();
+                    } else {
+                        await connect();
+                        if (chainSwitchGen !== myGen) return;  // Stale
+                        await refreshAll();
+                    }
+                } catch (e) {
+                    if (chainSwitchGen !== myGen) return;  // Stale
                     setConnectionStatus(false, 'Connection failed');
                     document.getElementById('totalBalance').textContent = '0.00000000';
                     document.getElementById('matureBalance').textContent = '0.00000000';
                     document.getElementById('immatureBalance').textContent = '0.00000000';
-                });
-            } else {
-                connect();
+                    document.getElementById('availableForSend').textContent = '0.00000000';
+                } finally {
+                    if (chainSwitchGen === myGen) {
+                        hideChainSwitchOverlay();
+                    }
+                }
+            })();
+        }
+
+        function showChainSwitchOverlay(chain) {
+            console.log('[ChainSwitch] Showing overlay for', chain);
+            let overlay = document.getElementById('chainSwitchOverlay');
+            if (!overlay) {
+                overlay = document.createElement('div');
+                overlay.id = 'chainSwitchOverlay';
+                document.body.appendChild(overlay);
+            }
+            overlay.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.6);display:flex;align-items:center;justify-content:center;z-index:99999;';
+            overlay.innerHTML = '<div style="background:#1a1a18;padding:32px 48px;border-radius:12px;text-align:center;box-shadow:0 8px 32px rgba(0,0,0,0.6);border:1px solid rgba(200,162,78,0.3);">' +
+                '<div style="width:36px;height:36px;border:3px solid rgba(200,162,78,0.3);border-top-color:#C8A24E;border-radius:50%;animation:spin 0.8s linear infinite;margin:0 auto 16px;"></div>' +
+                '<div style="font-weight:600;font-size:1.1rem;color:#E8D5A0;">Switching to ' + chainUnits[chain] + '</div>' +
+                '<div style="color:#8a8a80;font-size:0.85rem;margin-top:8px;">Loading wallet data...</div>' +
+                '</div>';
+        }
+
+        function hideChainSwitchOverlay() {
+            console.log('[ChainSwitch] Hiding overlay');
+            const overlay = document.getElementById('chainSwitchOverlay');
+            if (overlay) {
+                overlay.remove();
             }
         }
 
@@ -2714,6 +2761,7 @@ inline const std::string& GetWalletHTML() {
 
         // Refresh balance
         async function refreshBalance() {
+            const balanceGen = chainSwitchGen;  // Capture for stale detection
             try {
                 const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
 
@@ -2722,6 +2770,7 @@ inline const std::string& GetWalletHTML() {
                     console.log('[Balance] Calling getbalance RPC...');
                     try {
                         const nodeBalance = await rpcCall('getbalance');
+                        if (chainSwitchGen !== balanceGen) return;  // Stale — chain switched during request
                         console.log('[Balance] Success:', nodeBalance);
                         const mature = nodeBalance.balance || 0;
                         const unconfirmed = nodeBalance.unconfirmed_balance || 0;
@@ -2767,12 +2816,14 @@ inline const std::string& GetWalletHTML() {
                     if (lockBtn) lockBtn.style.display = 'block';
 
                     const addresses = await localWallet.getAddresses();
+                    if (chainSwitchGen !== balanceGen) return;  // Stale
                     let confirmedBalance = 0;
                     let unconfirmedBalance = 0;
 
                     for (const addr of addresses) {
                         try {
                             const balanceInfo = await connectionManager.getBalance(addr.address);
+                            if (chainSwitchGen !== balanceGen) return;  // Stale
                             confirmedBalance += (balanceInfo.confirmed || 0) / 100000000;
                             unconfirmedBalance += (balanceInfo.unconfirmed || 0) / 100000000;
                         } catch (e) {
@@ -2800,6 +2851,7 @@ inline const std::string& GetWalletHTML() {
 
         // Refresh blockchain info
         async function refreshBlockchainInfo() {
+            const infoGen = chainSwitchGen;  // Capture for stale detection
             const wait = () => new Promise(r => setTimeout(r, 300));  // 300ms delay between calls
 
             // Check if we're in light wallet mode
@@ -2814,6 +2866,7 @@ inline const std::string& GetWalletHTML() {
                     // Full node mode: use RPC
                     info = await rpcCall('getblockchaininfo');
                 }
+                if (chainSwitchGen !== infoGen) return;  // Stale — chain switched during request
 
                 document.getElementById('networkName').textContent = info.chain || 'Unknown';
                 document.getElementById('blockHeight').textContent = info.blocks?.toLocaleString() || info.height?.toLocaleString() || '-';
@@ -3136,12 +3189,14 @@ inline const std::string& GetWalletHTML() {
         let lastTransactions = null;  // Cache last successful transaction load
         let txLoadAttempts = 0;       // Track load attempts
         async function refreshTransactions() {
+            const txGen = chainSwitchGen;  // Capture for stale detection
             const isFullNode = !connectionManager || connectionManager.getMode() === 'full';
 
             if (isFullNode && connected) {
                 // FULL NODE MODE: Get transactions directly from node's wallet via RPC
                 try {
                     const result = await rpcCall('listtransactions', {count: 50});
+                    if (chainSwitchGen !== txGen) return;  // Stale
                     const transactions = result.transactions || [];
 
                     if (transactions.length > 0) {

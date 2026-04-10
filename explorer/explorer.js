@@ -563,7 +563,7 @@ async function renderHome() {
             html += '<tr>';
             html += `<td data-sort-value="${height}"><a href="#/block/${height}">${formatNumber(height)}</a></td>`;
             html += `<td><a href="#/block/${escapeHtml(hash)}" class="hash">${escapeHtml(formatHash(hash, 10))}</a></td>`;
-            html += `<td data-sort-value="${time}" title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
+            html += `<td data-sort-value="${time}" title="${escapeHtml(formatTime(time))}">${escapeHtml(formatAbsoluteTime(time))}</td>`;
             html += `<td>${miner ? `<a href="#/address/${escapeHtml(miner)}" class="address">${escapeHtml(formatHash(miner, 8))}</a>` : '<span class="text-dim">Unknown</span>'}</td>`;
             html += `<td class="center" data-sort-value="${txCount}">${txCount}</td>`;
             html += `<td class="right amount" data-sort-value="${reward || 0}">${escapeHtml(formatAmount(reward))} ${UNIT}</td>`;
@@ -612,7 +612,7 @@ async function renderHome() {
                             rows += '<tr>';
                             rows += `<td><a href="#/block/${block.height}">${formatNumber(block.height)}</a></td>`;
                             rows += `<td><a href="#/block/${escapeHtml(block.hash)}" class="hash">${escapeHtml(formatHash(block.hash, 10))}</a></td>`;
-                            rows += `<td title="${escapeHtml(formatAbsoluteTime(block.time))}">${escapeHtml(formatTime(block.time))}</td>`;
+                            rows += `<td title="${escapeHtml(formatTime(block.time))}">${escapeHtml(formatAbsoluteTime(block.time))}</td>`;
                             rows += `<td>${miner ? `<a href="#/address/${escapeHtml(miner)}" class="address">${escapeHtml(formatHash(miner, 8))}</a>` : '<span class="text-dim">Unknown</span>'}</td>`;
                             rows += `<td class="center">${txCount}</td>`;
                             rows += `<td class="right amount">${escapeHtml(formatAmount(reward))} ${UNIT}</td>`;
@@ -1172,7 +1172,7 @@ async function renderBlockList(page) {
             html += '<tr>';
             html += `<td data-sort-value="${height}"><a href="#/block/${height}">${formatNumber(height)}</a></td>`;
             html += `<td><a href="#/block/${escapeHtml(hash)}" class="hash">${escapeHtml(formatHash(hash, 8))}</a></td>`;
-            html += `<td data-sort-value="${time}" title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
+            html += `<td data-sort-value="${time}" title="${escapeHtml(formatTime(time))}">${escapeHtml(formatAbsoluteTime(time))}</td>`;
             html += `<td>${miner ? `<a href="#/address/${escapeHtml(miner)}" class="address">${escapeHtml(formatHash(miner, 6))}</a>` : '<span class="text-dim">Unknown</span>'}</td>`;
             html += `<td class="center" data-sort-value="${txCount}">${txCount}</td>`;
             html += `<td class="right amount" data-sort-value="${reward || 0}">${reward != null ? escapeHtml(formatAmount(reward)) + ' ' + UNIT : ''}</td>`;
@@ -1592,7 +1592,7 @@ async function renderTransactions(page) {
             html += '<tr>';
             html += `<td><a href="#/tx/${escapeHtml(txid)}" class="hash">${escapeHtml(formatHash(txid, 10))}</a></td>`;
             html += `<td class="center" data-sort-value="${blockHeight}"><a href="#/block/${blockHeight}">${formatNumber(blockHeight)}</a></td>`;
-            html += `<td data-sort-value="${time}" title="${escapeHtml(formatAbsoluteTime(time))}">${escapeHtml(formatTime(time))}</td>`;
+            html += `<td data-sort-value="${time}" title="${escapeHtml(formatTime(time))}">${escapeHtml(formatAbsoluteTime(time))}</td>`;
             html += `<td class="center"><span class="badge ${isCoinbase ? 'badge-reward' : 'badge-tx'}">${isCoinbase ? 'Reward' : 'Transfer'}</span></td>`;
             html += `<td class="right amount" data-sort-value="${totalOutput}">${formatNumber(Math.floor(totalOutput / IONS_PER_DIL))} ${UNIT}</td>`;
             html += `<td>${primaryTo ? `<a href="#/address/${escapeHtml(primaryTo)}" class="address">${escapeHtml(formatHash(primaryTo, 8))}</a>` : '<span class="text-dim">-</span>'}</td>`;
