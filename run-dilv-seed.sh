@@ -6,7 +6,8 @@
 #
 # Usage: nohup ./run-dilv-seed.sh > /root/dilv-seed.log 2>&1 &
 
-BINARY="./dilv-node"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+BINARY="$SCRIPT_DIR/dilv-node"
 LOG="/root/dilv-node.log"
 
 # Auto-detect external IP for correct seed ID assignment.
@@ -15,7 +16,9 @@ LOG="/root/dilv-node.log"
 EXTERNAL_IP=$(hostname -I | awk '{print $1}')
 FLAGS="--relay-only --public-api --externalip=${EXTERNAL_IP}"
 
-echo "$(date): DilV seed node wrapper starting (externalip=${EXTERNAL_IP})"
+cd "$SCRIPT_DIR" || exit 1
+
+echo "$(date): DilV seed node wrapper starting (dir=$SCRIPT_DIR, externalip=${EXTERNAL_IP})"
 
 while true; do
     echo "$(date): Starting $BINARY $FLAGS"
