@@ -14,6 +14,11 @@
  *     --mine                Start VDF mining automatically
  */
 
+// Memory management: malloc_trim to combat glibc arena fragmentation
+#ifdef __linux__
+#include <malloc.h>  // malloc_trim()
+#endif
+
 #include <node/blockchain_storage.h>
 #include <node/block_processing.h>
 #include <node/mempool.h>
@@ -1877,6 +1882,13 @@ int main(int argc, char* argv[]) {
 #ifdef _WIN32
     // Register crash handler to log crash info before terminating
     SetUnhandledExceptionFilter(CrashHandler);
+#endif
+
+    // Limit glibc malloc arenas to reduce memory fragmentation.
+    // Default is 8*ncpus which causes RSS to grow unboundedly on long-running
+    // multi-threaded nodes (OOM after ~4 days on 4GB servers).
+#ifdef __linux__
+    mallopt(M_ARENA_MAX, 4);
 #endif
 
     // Quick Start Mode: If no arguments provided, use beginner-friendly defaults
@@ -5885,6 +5897,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // Feeler connections test addresses we haven't tried recently
                     // Phase 5: Re-enabled after CFeelerManager migration to CConnman
                     feeler_manager.ProcessFeelerConnections();
+
+                    // Periodic memory defragmentation (every 5 minutes).
+                    // glibc malloc arenas fragment over time on long-running nodes,
+                    // causing RSS to grow from ~300MB to 3+GB and trigger OOM kills.
+                    // malloc_trim returns free pages to the OS (like Bitcoin Core does).
+#ifdef __linux__
+                    {
+                        static int trim_counter = 0;
+                        if (++trim_counter >= 10) {  // 10 × 30s = 5 minutes
+                            trim_counter = 0;
+                            malloc_trim(0);
+                        }
+                    }
+#endif
 
                     // Sleep for 30 seconds between maintenance cycles
                     std::this_thread::sleep_for(std::chrono::seconds(30));
