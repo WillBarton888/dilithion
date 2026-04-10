@@ -576,22 +576,27 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             if (!header_hash_at_our_height.IsNull() && !our_tip_hash.IsNull() && our_tip_hash != header_hash_at_our_height) {
             // CHAIN MISMATCH: Our tip doesn't match the header chain at the same height
             // This means we're on a fork - trigger immediate detection
-            std::cout << "\n[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
-            std::cout << "[FORK-DETECT] CHAIN MISMATCH DETECTED (Layer 1 - Proactive)" << std::endl;
-            std::cout << "[FORK-DETECT] Our chain tip at height " << chain_height << ":" << std::endl;
-            std::cout << "[FORK-DETECT]   Local:  " << our_tip_hash.GetHex().substr(0, 16) << "..." << std::endl;
-            std::cout << "[FORK-DETECT]   Header: " << header_hash_at_our_height.GetHex().substr(0, 16) << "..." << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "\n[FORK-DETECT] ════════════════════════════════════════════════════" << std::endl;
+                std::cout << "[FORK-DETECT] CHAIN MISMATCH DETECTED (Layer 1 - Proactive)" << std::endl;
+                std::cout << "[FORK-DETECT] Our chain tip at height " << chain_height << ":" << std::endl;
+                std::cout << "[FORK-DETECT]   Local:  " << our_tip_hash.GetHex().substr(0, 16) << "..." << std::endl;
+                std::cout << "[FORK-DETECT]   Header: " << header_hash_at_our_height.GetHex().substr(0, 16) << "..." << std::endl;
+            }
             // B1: Route all recovery through unified AttemptForkRecovery pipeline
             // BUG FIX: Never return early here. Previously, when AttemptForkRecovery
             // returned true, DownloadBlocks exited immediately, skipping FetchBlocks()
             // at line 675. This meant blocks from the correct chain were never requested.
             // Now we always fall through to FetchBlocks regardless of recovery result.
             if (AttemptForkRecovery(chain_height, header_height, ForkRecoveryReason::LAYER1_TIP_MISMATCH)) {
-                std::cout << "[FORK-DETECT] Fork recovery initiated/active - continuing to fetch blocks" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-DETECT] Fork recovery initiated/active - continuing to fetch blocks" << std::endl;
             } else {
-                std::cout << "[FORK-DETECT] Recovery not initiated - continuing block download" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-DETECT] Recovery not initiated - continuing block download" << std::endl;
             }
-            std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[FORK-DETECT] ════════════════════════════════════════════════════\n" << std::endl;
             }
         }
     }
@@ -608,8 +613,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     int orphan_count = m_consecutive_orphan_blocks.load();
     bool force_fork_check = orphan_count >= ORPHAN_FORK_THRESHOLD;
     if (past_startup_grace && !bulk_ibd && force_fork_check && !m_fork_detected.load()) {
-        std::cout << "[FORK-DETECT] Layer 2 triggered: " << m_consecutive_orphan_blocks.load()
-                  << " consecutive orphan blocks received - attempting immediate fork recovery" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[FORK-DETECT] Layer 2 triggered: " << m_consecutive_orphan_blocks.load()
+                      << " consecutive orphan blocks received - attempting immediate fork recovery" << std::endl;
         m_consecutive_orphan_blocks.store(0);  // Reset counter
 
         if (AttemptForkRecovery(chain_height, header_height, ForkRecoveryReason::LAYER2_ORPHAN_STREAK)) {
@@ -655,8 +661,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             if (elapsed_check >= FORK_CHECK_MIN_INTERVAL_SECS) {
                 m_last_fork_check = now_check;
 
-                std::cout << "[FORK-DETECT] Layer 3: Chain stalled at height " << chain_height
-                          << " for " << stall_cycles << " cycles - attempting fork recovery..." << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-DETECT] Layer 3: Chain stalled at height " << chain_height
+                              << " for " << stall_cycles << " cycles - attempting fork recovery..." << std::endl;
 
                 AttemptForkRecovery(chain_height, header_height, ForkRecoveryReason::LAYER3_STALL_TIMEOUT);
             }
@@ -694,12 +701,14 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             if (on_correct_chain) {
                 // Actually recovered - clear fork state
                 if (m_resync_in_progress) {
-                    std::cout << "[FORK-RECOVERY] Deep resync complete: "
-                              << m_resync_fork_point << " -> " << chain_height << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[FORK-RECOVERY] Deep resync complete: "
+                                  << m_resync_fork_point << " -> " << chain_height << std::endl;
                     m_resync_in_progress = false;
                 }
-                std::cout << "[FORK-RECOVERY] Chain advanced past fork point " << current_fork_point
-                          << " to " << chain_height << " - fork recovery complete (hash verified)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-RECOVERY] Chain advanced past fork point " << current_fork_point
+                              << " to " << chain_height << " - fork recovery complete (hash verified)" << std::endl;
                 m_fork_detected.store(false);
                 g_node_context.fork_detected.store(false);  // Clear global flag so mining can resume
                 g_metrics.ClearForkDetected();  // Clear Prometheus metrics
@@ -711,9 +720,10 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                 // and m_fork_detected=true, all 3 detection layers are blocked by the
                 // !m_fork_detected guard. Clear m_fork_detected so Layer 1 can detect
                 // the new chain mismatch and initiate a fresh fork recovery.
-                std::cout << "[FORK-RECOVERY] Chain past fork point " << current_fork_point
-                          << " but hash mismatch at height " << chain_height
-                          << " with no active fork - clearing for re-detection" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-RECOVERY] Chain past fork point " << current_fork_point
+                              << " but hash mismatch at height " << chain_height
+                              << " with no active fork - clearing for re-detection" << std::endl;
                 m_fork_detected.store(false);
                 g_node_context.fork_detected.store(false);
                 g_metrics.ClearForkDetected();
@@ -733,8 +743,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
     // BUG #278: Clear failed fork point when chain advances past it.
     // This allows fresh fork detection for new forks at different points.
     if (m_last_failed_fork_point >= 0 && chain_height > m_last_failed_fork_point) {
-        std::cout << "[FORK-RECOVERY] Chain advanced past failed fork point " << m_last_failed_fork_point
-                  << " - clearing BUG #278 suppression" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[FORK-RECOVERY] Chain advanced past failed fork point " << m_last_failed_fork_point
+                      << " - clearing BUG #278 suppression" << std::endl;
         m_last_failed_fork_point = -1;
     }
 
@@ -750,8 +761,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
             int receivedCount = activeFork ? activeFork->GetReceivedBlockCount() : 0;
             int cancelPoint = activeFork ? activeFork->GetForkPointHeight() : chain_height;
             int timeoutSecs = activeFork ? activeFork->GetTimeoutSeconds() : 60;
-            std::cout << "[IBD] Active fork timed out (" << timeoutSecs << "s) with " << receivedCount
-                      << " received blocks - cancelling" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[IBD] Active fork timed out (" << timeoutSecs << "s) with " << receivedCount
+                          << " received blocks - cancelling" << std::endl;
             forkMgr.CancelFork("Timeout - no blocks delivered in " + std::to_string(timeoutSecs) + "s");
             forkMgr.ClearInFlightState(m_node_context, cancelPoint);
             m_fork_detected.store(false);
@@ -904,13 +916,15 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                         CBlockIndex* currentTip = m_chainstate.GetTip();
                         if (forkIndex && currentTip &&
                             currentTip->nChainWork < forkIndex->nChainWork) {
-                            std::cout << "[IBD] Fork ready with more work (fork="
-                                      << forkIndex->nChainWork.GetHex().substr(0, 16) << " current="
-                                      << currentTip->nChainWork.GetHex().substr(0, 16)
-                                      << ") - triggering chain switch" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] Fork ready with more work (fork="
+                                          << forkIndex->nChainWork.GetHex().substr(0, 16) << " current="
+                                          << currentTip->nChainWork.GetHex().substr(0, 16)
+                                          << ") - triggering chain switch" << std::endl;
                             if (m_node_context.blockchain_db &&
                                 forkMgr.TriggerChainSwitch(m_node_context, *m_node_context.blockchain_db)) {
-                                std::cout << "[IBD] Fork chain switch SUCCESSFUL!" << std::endl;
+                                if (g_verbose.load(std::memory_order_relaxed))
+                                    std::cout << "[IBD] Fork chain switch SUCCESSFUL!" << std::endl;
                                 m_fork_detected.store(false);
                                 g_node_context.fork_detected.store(false);
                                 g_metrics.ClearForkDetected();
@@ -918,8 +932,9 @@ void CIbdCoordinator::DownloadBlocks(int header_height, int chain_height,
                                 // BUG #278: Chain switch FAILED (consensus violation in fork chain).
                                 // Record fork point so we don't re-detect and retry the same invalid fork.
                                 int failedForkPoint = m_fork_point.load();
-                                std::cout << "[IBD] Fork chain switch FAILED at fork point " << failedForkPoint
-                                          << " - marking fork as permanently invalid" << std::endl;
+                                if (g_verbose.load(std::memory_order_relaxed))
+                                    std::cout << "[IBD] Fork chain switch FAILED at fork point " << failedForkPoint
+                                              << " - marking fork as permanently invalid" << std::endl;
                                 m_last_failed_fork_point = failedForkPoint;
                                 m_fork_detected.store(false);
                                 g_node_context.fork_detected.store(false);
@@ -1590,8 +1605,9 @@ bool CIbdCoordinator::FetchBlocks() {
                 int chain_height = m_chainstate.GetHeight();
 
                 if (fork_point > 0 && fork_point <= chain_height && m_node_context.blockchain_db) {
-                    std::cout << "[IBD] BUG#273: Escalating to DisconnectToHeight(" << fork_point
-                              << ") - fork blocks in DB can't reorg individually" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[IBD] BUG#273: Escalating to DisconnectToHeight(" << fork_point
+                                  << ") - fork blocks in DB can't reorg individually" << std::endl;
 
                     // Chain work check: verify header chain has more work before disconnecting
                     bool should_disconnect = true;
@@ -1605,7 +1621,8 @@ bool CIbdCoordinator::FetchBlocks() {
 
                     if (!localChainWork.IsNull() && !headerChainWork.IsNull()) {
                         if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
-                            std::cout << "[IBD] BUG#273: Header chain has LESS work - NOT disconnecting" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] BUG#273: Header chain has LESS work - NOT disconnecting" << std::endl;
                             should_disconnect = false;
                         }
                     }
@@ -1621,8 +1638,9 @@ bool CIbdCoordinator::FetchBlocks() {
                             std::cerr << "[IBD] BUG#273: DisconnectToHeight failed - requires --reindex" << std::endl;
                             m_requires_reindex = true;
                         } else {
-                            std::cout << "[IBD] BUG#273: Disconnected " << disconnected
-                                      << " blocks (chain now at " << m_chainstate.GetHeight() << ")" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] BUG#273: Disconnected " << disconnected
+                                          << " blocks (chain now at " << m_chainstate.GetHeight() << ")" << std::endl;
 
                             // Clear stale state above fork point
                             uint256 forkPointHash;
@@ -1654,7 +1672,8 @@ bool CIbdCoordinator::FetchBlocks() {
                             m_state = IBDState::BLOCKS_DOWNLOAD;
                             m_last_header_height = 0;
 
-                            std::cout << "[IBD] BUG#273: Resync started from height " << fork_point << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[IBD] BUG#273: Resync started from height " << fork_point << std::endl;
                         }
                     }
                 }
@@ -1742,9 +1761,10 @@ bool CIbdCoordinator::FetchBlocks() {
         if (cleared_count == 0 && perm_failed_count > 0) {
             m_perm_failed_stuck_cycles++;
             if (m_perm_failed_stuck_cycles >= 3) {
-                std::cout << "[IBD] BUG #278: All blocks in range permanently invalid for "
-                          << m_perm_failed_stuck_cycles << " cycles - clearing stale headers above "
-                          << chain_height << " to re-fetch from correct chain" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] BUG #278: All blocks in range permanently invalid for "
+                              << m_perm_failed_stuck_cycles << " cycles - clearing stale headers above "
+                              << chain_height << " to re-fetch from correct chain" << std::endl;
 
                 if (m_node_context.headers_manager) {
                     CBlockIndex* tip = m_chainstate.GetTip();
@@ -1762,7 +1782,8 @@ bool CIbdCoordinator::FetchBlocks() {
                 // Reset to header sync to re-fetch from peers
                 m_state = IBDState::HEADERS_SYNC;
                 m_last_header_height = 0;
-                std::cout << "[IBD] BUG #278: Switched to HEADERS_SYNC to get correct chain headers" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[IBD] BUG #278: Switched to HEADERS_SYNC to get correct chain headers" << std::endl;
             }
         } else {
             m_perm_failed_stuck_cycles = 0;
@@ -2264,8 +2285,9 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
     // Normal IBD continues for the valid chain; if the chain advances past this fork point,
     // m_last_failed_fork_point is cleared and fresh detection can occur.
     if (fork_point > 0 && fork_point == m_last_failed_fork_point) {
-        std::cout << "[FORK-RECOVERY] Skipping fork at point " << fork_point
-                  << " - chain switch already failed here (BUG #278), suppressing detection" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[FORK-RECOVERY] Skipping fork at point " << fork_point
+                      << " - chain switch already failed here (BUG #278), suppressing detection" << std::endl;
         m_fork_detected.store(true);  // Suppress further detection
         m_fork_point.store(fork_point);
         return false;
@@ -2274,26 +2296,30 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
     // BUG #189 FIX: Allow fork_point up to chain_height + 1 to handle race conditions
     if (fork_point <= 0 || fork_point > chain_height + 1) {
         if (fork_point == 0) {
-            std::cout << "[FORK-RECOVERY] reason=" << ForkRecoveryReasonToString(reason)
-                      << " result=no_common_ancestor chain_height=" << chain_height << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[FORK-RECOVERY] reason=" << ForkRecoveryReasonToString(reason)
+                          << " result=no_common_ancestor chain_height=" << chain_height << std::endl;
         } else {
-            std::cout << "[FORK-RECOVERY] reason=" << ForkRecoveryReasonToString(reason)
-                      << " result=invalid_fork_point fork_point=" << fork_point << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[FORK-RECOVERY] reason=" << ForkRecoveryReasonToString(reason)
+                          << " result=invalid_fork_point fork_point=" << fork_point << std::endl;
         }
         m_fork_stall_cycles.store(0);
         return false;
     }
 
     int fork_depth = std::max(0, chain_height - fork_point);
-    std::cout << "[FORK-RECOVERY] reason=" << ForkRecoveryReasonToString(reason)
-              << " fork_point=" << fork_point << " depth=" << fork_depth
-              << " chain_height=" << chain_height << " header_height=" << header_height << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[FORK-RECOVERY] reason=" << ForkRecoveryReasonToString(reason)
+                  << " fork_point=" << fork_point << " depth=" << fork_depth
+                  << " chain_height=" << chain_height << " header_height=" << header_height << std::endl;
 
     // Deep fork handling: fork exceeds MAX_AUTO_REORG_DEPTH
     // Disconnect blocks back to fork point, then re-download correct chain via normal IBD
     if (fork_depth > MAX_AUTO_REORG_DEPTH) {
-        std::cout << "[FORK-RECOVERY] Deep fork detected (" << fork_depth
-                  << " blocks, fork_point=" << fork_point << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[FORK-RECOVERY] Deep fork detected (" << fork_depth
+                      << " blocks, fork_point=" << fork_point << ")" << std::endl;
 
         // Chain work check: verify header chain has more work BEFORE disconnecting
         uint256 localChainWork;
@@ -2306,22 +2332,25 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
 
         if (!localChainWork.IsNull() && !headerChainWork.IsNull()) {
             if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
-                std::cout << "[FORK-RECOVERY] Header chain has LESS work - NOT disconnecting" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-RECOVERY] Header chain has LESS work - NOT disconnecting" << std::endl;
                 m_fork_stall_cycles.store(0);
                 return false;
             }
         }
         // If either is null, proceed on orphan-block evidence (same rationale as shallow fork path)
 
-        std::cout << "[FORK-RECOVERY] Deep fork (" << fork_depth
-                  << " blocks) - automatic disconnect-and-resync" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[FORK-RECOVERY] Deep fork (" << fork_depth
+                      << " blocks) - automatic disconnect-and-resync" << std::endl;
 
         // Clear mempool before deep disconnect: disconnecting hundreds of blocks would
         // flood mempool with old transactions from the wrong fork (stale anyway)
         auto* mempool = g_mempool.load();
         if (mempool) {
             mempool->Clear();
-            std::cout << "[FORK-RECOVERY] Mempool cleared before deep disconnect" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[FORK-RECOVERY] Mempool cleared before deep disconnect" << std::endl;
         }
 
         // Disconnect to fork point using proper per-block UTXO/identity/mempool undo
@@ -2336,8 +2365,9 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
             m_requires_reindex = true;
             return false;
         }
-        std::cout << "[FORK-RECOVERY] Disconnected " << disconnected
-                  << " blocks (chain now at " << m_chainstate.GetHeight() << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[FORK-RECOVERY] Disconnected " << disconnected
+                      << " blocks (chain now at " << m_chainstate.GetHeight() << ")" << std::endl;
 
         // Clear stale state above fork point
         uint256 forkPointHash;
@@ -2370,8 +2400,9 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
         m_state = IBDState::BLOCKS_DOWNLOAD;
         m_last_header_height = 0;
 
-        std::cout << "[FORK-RECOVERY] Deep resync started: downloading correct chain from height "
-                  << fork_point << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[FORK-RECOVERY] Deep resync started: downloading correct chain from height "
+                      << fork_point << std::endl;
         return true;
     }
 
@@ -2395,19 +2426,22 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
         if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
             std::string localHex = localChainWork.GetHex();
             std::string headerHex = headerChainWork.GetHex();
-            std::cout << "[FORK-DETECT] Incoming fork has LESS work than our chain - NOT switching" << std::endl;
-            std::cout << "[FORK-DETECT] Local work=..." << localHex.substr(localHex.length() > 16 ? localHex.length() - 16 : 0)
-                      << " Header work=..." << headerHex.substr(headerHex.length() > 16 ? headerHex.length() - 16 : 0) << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "[FORK-DETECT] Incoming fork has LESS work than our chain - NOT switching" << std::endl;
+                std::cout << "[FORK-DETECT] Local work=..." << localHex.substr(localHex.length() > 16 ? localHex.length() - 16 : 0)
+                          << " Header work=..." << headerHex.substr(headerHex.length() > 16 ? headerHex.length() - 16 : 0) << std::endl;
+            }
             m_fork_stall_cycles.store(0);
             return false;
         }
     } else {
         // Chainwork unavailable - proceed with fork recovery anyway.
         // Layer 2's 10+ consecutive orphan blocks is strong evidence of a stale fork.
-        std::cout << "[FORK-DETECT] ChainWork unavailable (local="
-                  << (localChainWork.IsNull() ? "null" : "set")
-                  << " header=" << (headerChainWork.IsNull() ? "null" : "set")
-                  << ") - proceeding based on orphan block evidence" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[FORK-DETECT] ChainWork unavailable (local="
+                      << (localChainWork.IsNull() ? "null" : "set")
+                      << " header=" << (headerChainWork.IsNull() ? "null" : "set")
+                      << ") - proceeding based on orphan block evidence" << std::endl;
     }
 
     // VALIDATE-BEFORE-DISCONNECT: Use ForkManager staging approach
@@ -2419,8 +2453,9 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
 
         // BUG #261: Check for excessive hash mismatches (stale expected hashes)
         if (activeFork && activeFork->HasExcessiveHashMismatches()) {
-            std::cout << "[FORK-DETECT] Fork has excessive hash mismatches"
-                      << ", cancelling and setting cooldown" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[FORK-DETECT] Fork has excessive hash mismatches"
+                          << ", cancelling and setting cooldown" << std::endl;
             int cancelPoint = activeFork->GetForkPointHeight();
             forkMgr.CancelFork("Excessive hash mismatches - stale expected hashes");
             forkMgr.ClearInFlightState(m_node_context, cancelPoint);
@@ -2436,7 +2471,8 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
         }
 
         if (forkMgr.CheckTimeout()) {
-            std::cout << "[FORK-DETECT] Existing fork timed out, canceling and starting new" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[FORK-DETECT] Existing fork timed out, canceling and starting new" << std::endl;
             // BUG #261: If fork timed out with zero received blocks, set cooldown
             int receivedCount = activeFork ? activeFork->GetReceivedBlockCount() : 0;
             int cancelPoint = activeFork ? activeFork->GetForkPointHeight() : fork_point;
@@ -2448,7 +2484,8 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
             g_metrics.ClearForkDetected();
             m_fork_point.store(-1);
             if (receivedCount == 0) {
-                std::cout << "[FORK-DETECT] Fork timed out with 0 received blocks - setting cooldown" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[FORK-DETECT] Fork timed out with 0 received blocks - setting cooldown" << std::endl;
                 m_last_cancelled_fork_point = fork_point;
                 m_fork_cancel_time = std::chrono::steady_clock::now();
                 m_fork_stall_cycles.store(0);

@@ -352,10 +352,11 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
             ErrorMessage error = CErrorFormatter::NetworkError("process message", 
                 "Invalid payload size for '" + std::string(command) + "'");
             std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
-            std::cout << "[P2P] ERROR: Invalid payload size for '" << command
-                      << "' from peer " << peer_id << " (got " << payload_size
-                      << " bytes, expected " << it->second.min_size << "-" << it->second.max_size << ")"
-                      << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: Invalid payload size for '" << command
+                          << "' from peer " << peer_id << " (got " << payload_size
+                          << " bytes, expected " << it->second.min_size << "-" << it->second.max_size << ")"
+                          << std::endl;
             peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
@@ -498,19 +499,21 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                 } else {
                     // First/second failure from this IP - show helpful message
                     LogPrintf(NET, WARN, "Peer %d is on a DIFFERENT BLOCKCHAIN (genesis mismatch)", peer_id);
-                    std::cout << "\n[P2P] ================================================" << std::endl;
-                    std::cout << "[P2P] CONNECTION REJECTED - DIFFERENT BLOCKCHAIN" << std::endl;
-                    std::cout << "[P2P] ================================================" << std::endl;
-                    std::cout << "[P2P] Peer " << peer_id << " (" << msg.user_agent << ") from " << peer_ip << std::endl;
-                    std::cout << "[P2P] Their genesis: " << their_genesis_hex << "..." << std::endl;
-                    std::cout << "[P2P] Our genesis:   " << our_genesis.GetHex().substr(0, 16) << "..." << std::endl;
-                    std::cout << "[P2P] " << std::endl;
-                    std::cout << "[P2P] HOW TO FIX (for the connecting peer):" << std::endl;
-                    std::cout << "[P2P] 1. Download the latest binary: https://github.com/dilithion/dilithion/releases" << std::endl;
-                    std::cout << "[P2P] 2. Stop your node" << std::endl;
-                    std::cout << "[P2P] 3. Delete your data directory (~/.dilithion or %APPDATA%\\.dilithion)" << std::endl;
-                    std::cout << "[P2P] 4. Restart with the new binary" << std::endl;
-                    std::cout << "[P2P] ================================================\n" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed)) {
+                        std::cout << "\n[P2P] ================================================" << std::endl;
+                        std::cout << "[P2P] CONNECTION REJECTED - DIFFERENT BLOCKCHAIN" << std::endl;
+                        std::cout << "[P2P] ================================================" << std::endl;
+                        std::cout << "[P2P] Peer " << peer_id << " (" << msg.user_agent << ") from " << peer_ip << std::endl;
+                        std::cout << "[P2P] Their genesis: " << their_genesis_hex << "..." << std::endl;
+                        std::cout << "[P2P] Our genesis:   " << our_genesis.GetHex().substr(0, 16) << "..." << std::endl;
+                        std::cout << "[P2P] " << std::endl;
+                        std::cout << "[P2P] HOW TO FIX (for the connecting peer):" << std::endl;
+                        std::cout << "[P2P] 1. Download the latest binary: https://github.com/dilithion/dilithion/releases" << std::endl;
+                        std::cout << "[P2P] 2. Stop your node" << std::endl;
+                        std::cout << "[P2P] 3. Delete your data directory (~/.dilithion or %APPDATA%\\.dilithion)" << std::endl;
+                        std::cout << "[P2P] 4. Restart with the new binary" << std::endl;
+                        std::cout << "[P2P] ================================================\n" << std::endl;
+                    }
                 }
 
                 // A5: Send reject message so the peer knows why they were disconnected
@@ -524,9 +527,11 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             // Allow connection but log warning - they might be on wrong chain
             LogPrintf(NET, WARN, "Peer %d (%s) is running old protocol (no genesis hash)",
                       peer_id, msg.user_agent.c_str());
-            std::cout << "[P2P] WARNING: Peer " << peer_id << " (" << msg.user_agent
-                      << ") is running old protocol without genesis validation." << std::endl;
-            std::cout << "[P2P] Please update to latest version: https://github.com/dilithion/dilithion/releases" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "[P2P] WARNING: Peer " << peer_id << " (" << msg.user_agent
+                          << ") is running old protocol without genesis validation." << std::endl;
+                std::cout << "[P2P] Please update to latest version: https://github.com/dilithion/dilithion/releases" << std::endl;
+            }
         }
 
         // NET-001 FIX: Explicit user agent length validation (defense-in-depth)
@@ -536,8 +541,9 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                 "User agent too long from peer");
             error.severity = ErrorSeverity::WARNING;
             LogPrintf(ALL, WARN, "%s", CErrorFormatter::FormatForLog(error).c_str());
-            std::cout << "[P2P] ERROR: User agent too long from peer " << peer_id
-                      << " (" << msg.user_agent.length() << " bytes, max 256)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: User agent too long from peer " << peer_id
+                          << " (" << msg.user_agent.length() << " bytes, max 256)" << std::endl;
             peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_HANDSHAKE);
             return false;
         }
@@ -555,24 +561,26 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                 "Peer has incompatible protocol version");
             error.severity = ErrorSeverity::WARNING;
             LogPrintf(ALL, WARN, "%s", CErrorFormatter::FormatForLog(error).c_str());
-            std::cout << "\n[P2P] ================================================" << std::endl;
-            std::cout << "[P2P] CONNECTION REJECTED - OUTDATED SOFTWARE" << std::endl;
-            std::cout << "[P2P] ================================================" << std::endl;
-            std::cout << "[P2P] Peer " << peer_id << " (" << msg.user_agent << ") protocol v"
-                      << msg.version << " (minimum required: " << minProtoVersion << ")" << std::endl;
-            std::cout << "[P2P] " << std::endl;
-            std::cout << "[P2P] This peer is running outdated software with incompatible" << std::endl;
-            std::cout << "[P2P] consensus rules, which causes fork creation on the network." << std::endl;
-            std::cout << "[P2P] " << std::endl;
-            std::cout << "[P2P] Your IP will be temporarily banned for 10 minutes." << std::endl;
-            std::cout << "[P2P] " << std::endl;
-            std::cout << "[P2P] HOW TO FIX:" << std::endl;
-            std::cout << "[P2P] 1. Download the latest version from https://github.com/dilithion/dilithion" << std::endl;
-            std::cout << "[P2P] 2. Stop your node" << std::endl;
-            std::cout << "[P2P] 3. Delete blocks/ and chainstate/ (keep wallet.dat!)" << std::endl;
-            std::cout << "[P2P] 4. Download the bootstrap from the releases page" << std::endl;
-            std::cout << "[P2P] 5. Extract bootstrap and restart with the new binary" << std::endl;
-            std::cout << "[P2P] ================================================\n" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "\n[P2P] ================================================" << std::endl;
+                std::cout << "[P2P] CONNECTION REJECTED - OUTDATED SOFTWARE" << std::endl;
+                std::cout << "[P2P] ================================================" << std::endl;
+                std::cout << "[P2P] Peer " << peer_id << " (" << msg.user_agent << ") protocol v"
+                          << msg.version << " (minimum required: " << minProtoVersion << ")" << std::endl;
+                std::cout << "[P2P] " << std::endl;
+                std::cout << "[P2P] This peer is running outdated software with incompatible" << std::endl;
+                std::cout << "[P2P] consensus rules, which causes fork creation on the network." << std::endl;
+                std::cout << "[P2P] " << std::endl;
+                std::cout << "[P2P] Your IP will be temporarily banned for 10 minutes." << std::endl;
+                std::cout << "[P2P] " << std::endl;
+                std::cout << "[P2P] HOW TO FIX:" << std::endl;
+                std::cout << "[P2P] 1. Download the latest version from https://github.com/dilithion/dilithion" << std::endl;
+                std::cout << "[P2P] 2. Stop your node" << std::endl;
+                std::cout << "[P2P] 3. Delete blocks/ and chainstate/ (keep wallet.dat!)" << std::endl;
+                std::cout << "[P2P] 4. Download the bootstrap from the releases page" << std::endl;
+                std::cout << "[P2P] 5. Extract bootstrap and restart with the new binary" << std::endl;
+                std::cout << "[P2P] ================================================\n" << std::endl;
+            }
             // Send reject message so the peer knows WHY they were banned
             SendRejectMessage(peer_id, "version",
                 "Outdated protocol version " + std::to_string(msg.version) +
@@ -588,7 +596,8 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         // Ensure peer supports basic network functionality
         if ((msg.services & NetProtocol::NODE_NETWORK) == 0) {
             LogPrintf(NET, WARN, "Peer %d does not support NODE_NETWORK service flag", peer_id);
-            std::cout << "[P2P] WARNING: Peer " << peer_id << " does not support NODE_NETWORK" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] WARNING: Peer " << peer_id << " does not support NODE_NETWORK" << std::endl;
             // Don't reject, but log for monitoring
         }
 
@@ -631,7 +640,8 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
             peer->start_height = msg.start_height;
             peer->relay = msg.relay;
         } else {
-            std::cout << "[P2P] WARNING: Could not create peer " << peer_id << " (connection limit reached?)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] WARNING: Could not create peer " << peer_id << " (connection limit reached?)" << std::endl;
         }
 
         // Call handler BEFORE updating state - handler checks state to decide if
@@ -657,13 +667,15 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
         return true;
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
-        std::cout << "[P2P] ERROR: VERSION message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: VERSION message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
-        std::cout << "[P2P] ERROR: VERSION message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: VERSION message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -672,7 +684,8 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
 bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
     auto peer = peer_manager.GetPeer(peer_id);
     if (!peer) {
-        std::cout << "[P2P] ProcessVerackMessage: peer " << peer_id << " not found" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ProcessVerackMessage: peer " << peer_id << " not found" << std::endl;
         return true;
     }
 
@@ -700,9 +713,10 @@ bool CNetMessageProcessor::ProcessVerackMessage(int peer_id) {
         } else {
             // BUG #148 DEBUG: Log when GetNode fails - this causes "no suitable peers"
             // because GetValidPeersForDownload checks CNode::state, not CPeer::state
-            std::cout << "[P2P] WARNING: ProcessVerackMessage - GetNode(" << peer_id
-                      << ") returned nullptr! CNode state NOT updated to HANDSHAKE_COMPLETE. "
-                      << "This peer will be excluded from block downloads." << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] WARNING: ProcessVerackMessage - GetNode(" << peer_id
+                          << ") returned nullptr! CNode state NOT updated to HANDSHAKE_COMPLETE. "
+                          << "This peer will be excluded from block downloads." << std::endl;
         }
 
         // Phase 3.2: Notify CPeerManager for unified peer tracking
@@ -735,13 +749,15 @@ bool CNetMessageProcessor::ProcessPingMessage(int peer_id, CDataStream& stream) 
         return true;
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
-        std::cout << "[P2P] ERROR: PING message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: PING message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
-        std::cout << "[P2P] ERROR: PING message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: PING message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -754,13 +770,15 @@ bool CNetMessageProcessor::ProcessPongMessage(int peer_id, CDataStream& stream) 
         return true;
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
-        std::cout << "[P2P] ERROR: PONG message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: PONG message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
-        std::cout << "[P2P] ERROR: PONG message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: PONG message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -785,7 +803,8 @@ bool CNetMessageProcessor::ProcessGetAddrMessage(int peer_id) {
     }
 
     if (addrs.empty()) {
-        std::cout << "[P2P] GETADDR from peer " << peer_id << " - no addresses to share" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] GETADDR from peer " << peer_id << " - no addresses to share" << std::endl;
         return true;
     }
 
@@ -824,8 +843,9 @@ bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) 
 
             // Check if peer exceeds rate limit
             if (timestamps.size() >= static_cast<size_t>(MAX_ADDR_PER_WINDOW)) {
-                std::cout << "[P2P] ERROR: Peer " << peer_id << " exceeded ADDR rate limit ("
-                          << timestamps.size() << " messages in last " << RATE_LIMIT_WINDOW << " seconds)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] ERROR: Peer " << peer_id << " exceeded ADDR rate limit ("
+                              << timestamps.size() << " messages in last " << RATE_LIMIT_WINDOW << " seconds)" << std::endl;
                 // NET-011 FIX: Penalize peer for rate limit violation
                 peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::ADDR_RATE_EXCEEDED);
                 return false;
@@ -837,8 +857,9 @@ bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) 
 
         uint64_t count = stream.ReadCompactSize();
         if (count > Consensus::MAX_INV_SIZE) {
-            std::cout << "[P2P] ERROR: ADDR message too large from peer " << peer_id
-                      << " (count=" << count << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: ADDR message too large from peer " << peer_id
+                          << " (count=" << count << ")" << std::endl;
             peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
@@ -862,13 +883,15 @@ bool CNetMessageProcessor::ProcessAddrMessage(int peer_id, CDataStream& stream) 
         return true;
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
-        std::cout << "[P2P] ERROR: ADDR message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: ADDR message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
-        std::cout << "[P2P] ERROR: ADDR message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: ADDR message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -895,8 +918,9 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
 
             // Check if peer exceeds rate limit
             if (timestamps.size() >= static_cast<size_t>(MAX_INV_PER_SECOND)) {
-                std::cout << "[P2P] ERROR: Peer " << peer_id << " exceeded INV rate limit ("
-                          << timestamps.size() << " messages in last second)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] ERROR: Peer " << peer_id << " exceeded INV rate limit ("
+                              << timestamps.size() << " messages in last second)" << std::endl;
                 // NET-011 FIX: Penalize peer for rate limit violation
                 peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INV_RATE_EXCEEDED);
                 return false;
@@ -908,8 +932,9 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
 
         uint64_t count = stream.ReadCompactSize();
         if (count > Consensus::MAX_INV_SIZE) {
-            std::cout << "[P2P] ERROR: INV message too large from peer " << peer_id
-                      << " (count=" << count << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: INV message too large from peer " << peer_id
+                          << " (count=" << count << ")" << std::endl;
             // NET-011 FIX: Penalize peer for sending oversized message
             peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
@@ -934,8 +959,9 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
             // NET-014/NET-018 FIX: Validate inventory type before processing
             // Only MSG_TX_INV(1), MSG_BLOCK_INV(2), MSG_FILTERED_BLOCK(3), MSG_CMPCT_BLOCK(4) are valid
             if (inv_item.type < 1 || inv_item.type > 4) {
-                std::cout << "[P2P] WARNING: Invalid INV type " << inv_item.type
-                          << " from peer " << peer_id << " - penalizing" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] WARNING: Invalid INV type " << inv_item.type
+                              << " from peer " << peer_id << " - penalizing" << std::endl;
                 peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
                 continue;  // Skip invalid items but continue processing valid ones
             }
@@ -979,7 +1005,8 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
                     std::cout << "[P2P] Sent GETDATA for " << vToFetch.size()
                               << " item(s) to peer " << peer_id << std::endl;
             } else {
-                std::cout << "[P2P] Cannot send GETDATA - connman not initialized" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] Cannot send GETDATA - connman not initialized" << std::endl;
             }
         }
 
@@ -988,13 +1015,15 @@ bool CNetMessageProcessor::ProcessInvMessage(int peer_id, CDataStream& stream) {
         return true;
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
-        std::cout << "[P2P] ERROR: INV message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: INV message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
-        std::cout << "[P2P] ERROR: INV message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: INV message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -1016,8 +1045,9 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
                 timestamps.end());
 
             if (timestamps.size() >= MAX_GETDATA_PER_SECOND) {
-                std::cout << "[P2P] RATE LIMIT: Too many GETDATA from peer " << peer_id
-                          << " (" << timestamps.size() << "/" << MAX_GETDATA_PER_SECOND << " per second)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] RATE LIMIT: Too many GETDATA from peer " << peer_id
+                              << " (" << timestamps.size() << "/" << MAX_GETDATA_PER_SECOND << " per second)" << std::endl;
                 peer_manager.Misbehaving(peer_id, 2, MisbehaviorType::GETDATA_RATE_EXCEEDED);  // Reduced from 10 - IBD sync is legitimate
                 return false;
             }
@@ -1031,8 +1061,9 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
         uint64_t count = stream.ReadCompactSize();
 
         if (count > NetProtocol::MAX_INV_SIZE) {
-            std::cout << "[P2P] ERROR: GETDATA message too large from peer " << peer_id
-                      << " (count=" << count << ")" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: GETDATA message too large from peer " << peer_id
+                          << " (count=" << count << ")" << std::endl;
             return false;
         }
 
@@ -1047,8 +1078,9 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
 
             // NET-020 FIX: Validate inventory type before adding
             if (inv.type < 1 || inv.type > 4) {
-                std::cout << "[P2P] WARNING: Invalid GETDATA type " << inv.type
-                          << " from peer " << peer_id << " - penalizing" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] WARNING: Invalid GETDATA type " << inv.type
+                              << " from peer " << peer_id << " - penalizing" << std::endl;
                 peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
                 continue;  // Skip invalid items
             }
@@ -1082,7 +1114,8 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
                                           << inv.hash.GetHex().substr(0, 16)
                                           << "... to peer " << peer_id << std::endl;
                         } else {
-                            std::cout << "[P2P] Cannot send transaction - connman not initialized" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[P2P] Cannot send transaction - connman not initialized" << std::endl;
                         }
                     } else {
                         if (g_verbose.load(std::memory_order_relaxed))
@@ -1196,13 +1229,15 @@ bool CNetMessageProcessor::ProcessGetDataMessage(int peer_id, CDataStream& strea
 
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
-        std::cout << "[P2P] ERROR: GETDATA message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: GETDATA message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
-        std::cout << "[P2P] ERROR: GETDATA message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: GETDATA message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -1253,13 +1288,15 @@ bool CNetMessageProcessor::ProcessBlockMessage(int peer_id, CDataStream& stream)
         return true;
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
-        std::cout << "[P2P] ERROR: BLOCK message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: BLOCK message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
-        std::cout << "[P2P] ERROR: BLOCK message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: BLOCK message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -1369,8 +1406,9 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
             CAmount fee = 0;
 
             if (!tx_validator->CheckTransaction(tx, *utxo_set, chain_height, fee, error)) {
-                std::cout << "[P2P] Invalid transaction " << txid.GetHex().substr(0, 16)
-                          << "... from peer " << peer_id << ": " << error << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] Invalid transaction " << txid.GetHex().substr(0, 16)
+                              << "... from peer " << peer_id << ": " << error << std::endl;
                 // Mark as rejected to prevent relay loops (re-requesting same invalid tx)
                 if (tx_relay) {
                     tx_relay->MarkRejected(txid);
@@ -1391,8 +1429,9 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
             CTransactionRef tx_ref = MakeTransactionRef(std::move(tx));
 
             if (!mempool->AddTx(tx_ref, fee, current_time, chain_height, &mempool_error)) {
-                std::cout << "[P2P] Failed to add tx " << txid.GetHex().substr(0, 16)
-                          << "... to mempool: " << mempool_error << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] Failed to add tx " << txid.GetHex().substr(0, 16)
+                              << "... to mempool: " << mempool_error << std::endl;
                 return true;  // Not necessarily peer's fault
             }
 
@@ -1409,21 +1448,24 @@ bool CNetMessageProcessor::ProcessTxMessage(int peer_id, CDataStream& stream) {
         }
 
         // If global pointers not set, log warning and drop
-        std::cout << "[P2P] WARNING: Cannot validate tx " << txid.GetHex().substr(0, 16)
-                  << "... - missing subsystems (validator=" << (tx_validator ? "yes" : "NO")
-                  << " utxo=" << (utxo_set ? "yes" : "NO")
-                  << " mempool=" << (mempool ? "yes" : "NO") << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] WARNING: Cannot validate tx " << txid.GetHex().substr(0, 16)
+                      << "... - missing subsystems (validator=" << (tx_validator ? "yes" : "NO")
+                      << " utxo=" << (utxo_set ? "yes" : "NO")
+                      << " mempool=" << (mempool ? "yes" : "NO") << ")" << std::endl;
         on_tx(peer_id, tx);
         return true;
     } catch (const std::out_of_range& e) {
         // NET-004 FIX: Specific error handling for truncated messages
-        std::cout << "[P2P] ERROR: TX message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: TX message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
         // NET-004 FIX: Detailed error logging with misbehavior penalty
-        std::cout << "[P2P] ERROR: TX message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: TX message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -1438,7 +1480,8 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
 
         // Validate locator size (max 32 hashes in locator)
         if (locator_size > 32) {
-            std::cout << "[P2P] ERROR: GETHEADERS locator size too large: " << locator_size << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: GETHEADERS locator size too large: " << locator_size << std::endl;
             peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
@@ -1470,12 +1513,14 @@ bool CNetMessageProcessor::ProcessGetHeadersMessage(int peer_id, CDataStream& st
 
         return true;
     } catch (const std::out_of_range& e) {
-        std::cout << "[P2P] ERROR: GETHEADERS message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: GETHEADERS message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        std::cout << "[P2P] ERROR: GETHEADERS message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: GETHEADERS message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -1511,8 +1556,9 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
                 // HEADERS are responses to our GETHEADERS requests, so high volume
                 // during fork sync is expected and not malicious behavior.
                 // We still skip processing to avoid memory pressure, but don't ban.
-                std::cout << "[P2P] RATE LIMIT: Skipping HEADERS from peer " << peer_id
-                          << " (" << timestamps.size() << "/" << MAX_HEADERS_PER_SECOND << " per second)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] RATE LIMIT: Skipping HEADERS from peer " << peer_id
+                              << " (" << timestamps.size() << "/" << MAX_HEADERS_PER_SECOND << " per second)" << std::endl;
                 return false;
             }
             timestamps.push_back(now);
@@ -1523,7 +1569,8 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
 
         // Validate count (Bitcoin Core max is 2000, wired via Consensus::MAX_HEADERS_RESULTS)
         if (header_count > Consensus::MAX_HEADERS_RESULTS) {
-            std::cout << "[P2P] ERROR: HEADERS count too large: " << header_count << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: HEADERS count too large: " << header_count << std::endl;
             peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
@@ -1550,7 +1597,8 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
             // Skip transaction count (headers message has 0 txs per header)
             uint64_t tx_count = stream.ReadCompactSize();
             if (tx_count != 0) {
-                std::cout << "[P2P] ERROR: HEADERS message with tx_count != 0" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] ERROR: HEADERS message with tx_count != 0" << std::endl;
                 peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_BLOCK_HEADER);
                 return false;
             }
@@ -1568,12 +1616,14 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
 
         return true;
     } catch (const std::out_of_range& e) {
-        std::cout << "[P2P] ERROR: HEADERS message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: HEADERS message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        std::cout << "[P2P] ERROR: HEADERS message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: HEADERS message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -1606,8 +1656,9 @@ bool CNetMessageProcessor::ProcessSendCmpctMessage(int peer_id, CDataStream& str
 
         // BIP 152 only supports version 1 (version 2 is for segwit, not applicable to Dilithion)
         if (version != 1) {
-            std::cout << "[P2P] Peer " << peer_id << " sent sendcmpct with unsupported version "
-                      << version << " (expected 1)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] Peer " << peer_id << " sent sendcmpct with unsupported version "
+                          << version << " (expected 1)" << std::endl;
             return true;  // Ignore but don't disconnect
         }
 
@@ -1622,12 +1673,14 @@ bool CNetMessageProcessor::ProcessSendCmpctMessage(int peer_id, CDataStream& str
 
         return true;
     } catch (const std::out_of_range& e) {
-        std::cout << "[P2P] ERROR: SENDCMPCT message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: SENDCMPCT message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        std::cout << "[P2P] ERROR: SENDCMPCT message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: SENDCMPCT message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -1659,8 +1712,9 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
         // Read prefilled transactions
         uint64_t prefilled_count = stream.ReadCompactSize();
         if (prefilled_count > 10000) {  // Sanity limit
-            std::cout << "[P2P] ERROR: CMPCTBLOCK with too many prefilled txs from peer "
-                      << peer_id << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: CMPCTBLOCK with too many prefilled txs from peer "
+                          << peer_id << std::endl;
             peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
@@ -1714,8 +1768,9 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
         // Read short IDs (6 bytes each)
         uint64_t shortid_count = stream.ReadCompactSize();
         if (shortid_count > 100000) {  // Sanity limit
-            std::cout << "[P2P] ERROR: CMPCTBLOCK with too many short IDs from peer "
-                      << peer_id << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: CMPCTBLOCK with too many short IDs from peer "
+                          << peer_id << std::endl;
             peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
@@ -1745,12 +1800,14 @@ bool CNetMessageProcessor::ProcessCmpctBlockMessage(int peer_id, CDataStream& st
 
         return true;
     } catch (const std::out_of_range& e) {
-        std::cout << "[P2P] ERROR: CMPCTBLOCK message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: CMPCTBLOCK message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        std::cout << "[P2P] ERROR: CMPCTBLOCK message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: CMPCTBLOCK message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -1767,8 +1824,9 @@ bool CNetMessageProcessor::ProcessGetBlockTxnMessage(int peer_id, CDataStream& s
         // Read requested indices
         uint64_t index_count = stream.ReadCompactSize();
         if (index_count > 50000) {  // Sanity limit
-            std::cout << "[P2P] ERROR: GETBLOCKTXN with too many indices from peer "
-                      << peer_id << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: GETBLOCKTXN with too many indices from peer "
+                          << peer_id << std::endl;
             peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
@@ -1790,12 +1848,14 @@ bool CNetMessageProcessor::ProcessGetBlockTxnMessage(int peer_id, CDataStream& s
 
         return true;
     } catch (const std::out_of_range& e) {
-        std::cout << "[P2P] ERROR: GETBLOCKTXN message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: GETBLOCKTXN message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        std::cout << "[P2P] ERROR: GETBLOCKTXN message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: GETBLOCKTXN message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }
@@ -1812,8 +1872,9 @@ bool CNetMessageProcessor::ProcessBlockTxnMessage(int peer_id, CDataStream& stre
         // Read transactions
         uint64_t tx_count = stream.ReadCompactSize();
         if (tx_count > 100000) {  // Sanity limit
-            std::cout << "[P2P] ERROR: BLOCKTXN with too many transactions from peer "
-                      << peer_id << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[P2P] ERROR: BLOCKTXN with too many transactions from peer "
+                          << peer_id << std::endl;
             peer_manager.Misbehaving(peer_id, 100, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
@@ -1873,12 +1934,14 @@ bool CNetMessageProcessor::ProcessBlockTxnMessage(int peer_id, CDataStream& stre
 
         return true;
     } catch (const std::out_of_range& e) {
-        std::cout << "[P2P] ERROR: BLOCKTXN message truncated from peer " << peer_id << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: BLOCKTXN message truncated from peer " << peer_id << std::endl;
         peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::TRUNCATED_MESSAGE);
         return false;
     } catch (const std::exception& e) {
-        std::cout << "[P2P] ERROR: BLOCKTXN message parsing failed from peer " << peer_id
-                  << ": " << e.what() << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[P2P] ERROR: BLOCKTXN message parsing failed from peer " << peer_id
+                      << ": " << e.what() << std::endl;
         peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::PARSE_FAILURE);
         return false;
     }

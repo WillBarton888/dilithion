@@ -81,9 +81,10 @@ static struct PeerForkTracker {
 
             counts[peerId]++;
             if (counts[peerId] >= THRESHOLD) {
-                std::cout << "[ForkTracker] Peer " << peerId
-                          << " relayed " << counts[peerId]
-                          << " fork blocks — applying misbehavior penalty" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[ForkTracker] Peer " << peerId
+                              << " relayed " << counts[peerId]
+                              << " fork blocks — applying misbehavior penalty" << std::endl;
                 counts[peerId] = 0;  // Reset after penalty
                 shouldPenalize = true;
             }
@@ -411,7 +412,8 @@ BlockProcessResult ProcessNewBlock(
             bool is_ibd = g_node_context.ibd_coordinator &&
                           !g_node_context.ibd_coordinator->IsSynced();
             if (!skipPoWCheck && !is_ibd && g_bannedMIKs.IsBanned(blockMikHex)) {
-                std::cout << "[ProcessNewBlock] REJECTED: banned MIK " << blockMikHex.substr(0, 12) << "..." << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[ProcessNewBlock] REJECTED: banned MIK " << blockMikHex.substr(0, 12) << "..." << std::endl;
                 if (peer_id >= 0 && ctx.block_fetcher) {
                     ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
                 }
@@ -532,10 +534,11 @@ BlockProcessResult ProcessNewBlock(
                     // 2. Peer sent wrong block
                     // Log for debugging and try to validate it through normal path
                     uint256 expectedHash = fork->GetExpectedHashAtHeight(blockHeight);
-                    std::cout << "[ProcessNewBlock] Block in fork range but HASH MISMATCH at height " << blockHeight
-                              << "\n  Expected: " << expectedHash.GetHex().substr(0, 16) << "..."
-                              << "\n  Got:      " << blockHash.GetHex().substr(0, 16) << "..."
-                              << "\n  prevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[ProcessNewBlock] Block in fork range but HASH MISMATCH at height " << blockHeight
+                                  << "\n  Expected: " << expectedHash.GetHex().substr(0, 16) << "..."
+                                  << "\n  Got:      " << blockHash.GetHex().substr(0, 16) << "..."
+                                  << "\n  prevBlock: " << block.hashPrevBlock.GetHex().substr(0, 16) << "..." << std::endl;
 
                     // BUG #261 FIX: Track hash mismatches. If we keep getting blocks
                     // at expected heights but with wrong hashes, the fork candidate's
@@ -551,8 +554,9 @@ BlockProcessResult ProcessNewBlock(
                     }
 
                     if (fork->HasExcessiveHashMismatches()) {
-                        std::cout << "[ProcessNewBlock] Fork has " << mismatchCount
-                                  << " hash mismatches - expected hashes are STALE, cancelling fork" << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[ProcessNewBlock] Fork has " << mismatchCount
+                                      << " hash mismatches - expected hashes are STALE, cancelling fork" << std::endl;
                         int cancelForkPoint = fork->GetForkPointHeight();
                         forkMgr.CancelFork("Excessive hash mismatches (" + std::to_string(mismatchCount) + ") - stale expected hashes");
                         forkMgr.ClearInFlightState(ctx, cancelForkPoint);
@@ -684,7 +688,8 @@ BlockProcessResult ProcessNewBlock(
             // (since we only write on connect) - don't invalidate headers for chain mismatch.
             if (parentOnActiveChain) {
                 g_node_context.headers_chain_invalid.store(true);
-                std::cout << "[ProcessNewBlock] Headers chain invalid (parent on active chain, MIK failed) - will resync from different peer" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[ProcessNewBlock] Headers chain invalid (parent on active chain, MIK failed) - will resync from different peer" << std::endl;
 
                 // BUG #255 FIX: Mark block as permanently failed (authoritative validation)
                 // Parent is on active chain, so chain state is correct. DFMP failure is definitive.
@@ -698,8 +703,9 @@ BlockProcessResult ProcessNewBlock(
                     }
                 }
             } else {
-                std::cout << "[ProcessNewBlock] MIK validation failed but parent not on active chain at height " << blockHeight
-                          << " (chainHeight=" << currentChainHeight << ") - NOT resetting headers (chain mismatch expected)" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[ProcessNewBlock] MIK validation failed but parent not on active chain at height " << blockHeight
+                              << " (chainHeight=" << currentChainHeight << ") - NOT resetting headers (chain mismatch expected)" << std::endl;
             }
 
             // BUG #246 FIX: NO misbehavior for MIK failures.
@@ -869,9 +875,10 @@ BlockProcessResult ProcessNewBlock(
         // If this block was previously marked invalid by authoritative validation,
         // never retry activation. Retrying here can starve fresh block processing.
         if (pindex->IsInvalid()) {
-            std::cout << "[ProcessNewBlock] Block is permanently invalid, skipping activation"
-                      << " height=" << pindex->nHeight
-                      << " hash=" << blockHash.GetHex().substr(0, 16) << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ProcessNewBlock] Block is permanently invalid, skipping activation"
+                          << " height=" << pindex->nHeight
+                          << " hash=" << blockHash.GetHex().substr(0, 16) << std::endl;
             tracker_guard.released = true;
             if (ctx.block_fetcher) {
                 ctx.block_fetcher->MarkBlockReceived(peer_id, blockHash);
@@ -1153,8 +1160,9 @@ BlockProcessResult ProcessNewBlock(
                 if (below_checkpoint) {
                     // Normal IBD - parent unknown because we haven't synced past checkpoints yet
                 } else if (ctx.headers_manager && !ctx.headers_manager->IsHeaderSyncInProgress()) {
-                    std::cout << "[ProcessNewBlock] Competing fork detected (parent "
-                              << block.hashPrevBlock.GetHex().substr(0, 16) << " unknown) - requesting headers" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[ProcessNewBlock] Competing fork detected (parent "
+                                  << block.hashPrevBlock.GetHex().substr(0, 16) << " unknown) - requesting headers" << std::endl;
 
                     // Track per-peer fork block relay for misbehavior scoring
                     if (peer_id >= 0) {

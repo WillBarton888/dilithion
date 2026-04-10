@@ -148,7 +148,8 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
     // Check if we already have this block
     CBlockIndex* existing = m_chainstate.GetBlockIndex(blockHash);
     if (existing && existing->HaveData() && (existing->nStatus & CBlockIndex::BLOCK_VALID_CHAIN)) {
-        std::cout << "[ValidationQueue] Block already in chain, skipping" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[ValidationQueue] Block already in chain, skipping" << std::endl;
         return false;  // Already processed
     }
 
@@ -181,8 +182,9 @@ bool CBlockValidationQueue::QueueBlock(int peer_id, const CBlock& block, int exp
     // Wake worker thread
     m_queue_cv.notify_one();
 
-    std::cout << "[ValidationQueue] Queued block " << blockHash.GetHex().substr(0, 16)
-              << "... at height " << expected_height << " (queue depth: " << queue_depth << ")" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[ValidationQueue] Queued block " << blockHash.GetHex().substr(0, 16)
+                  << "... at height " << expected_height << " (queue depth: " << queue_depth << ")" << std::endl;
 
     return true;
 }
@@ -233,7 +235,8 @@ bool CBlockValidationQueue::IsHeightQueued(int height) const {
 }
 
 void CBlockValidationQueue::ValidationWorker() {
-    std::cout << "[ValidationQueue] Worker thread started" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[ValidationQueue] Worker thread started" << std::endl;
 
     while (m_running.load()) {
         QueuedBlock queued_block;
@@ -306,7 +309,8 @@ void CBlockValidationQueue::ValidationWorker() {
         }
     }
 
-    std::cout << "[ValidationQueue] Worker thread stopped" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[ValidationQueue] Worker thread stopped" << std::endl;
 }
 
 bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
@@ -314,8 +318,9 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     const uint256& blockHash = queued_block.hash;
     int expected_height = queued_block.expected_height;
 
-    std::cout << "[ValidationQueue] Processing block " << blockHash.GetHex().substr(0, 16)
-              << "... at height " << expected_height << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[ValidationQueue] Processing block " << blockHash.GetHex().substr(0, 16)
+                  << "... at height " << expected_height << std::endl;
 
     // STRESS TEST FIX: Report to watchdog that validation is starting
     // Watchdog will alert if validation takes longer than VALIDATION_TIMEOUT_SECONDS
@@ -421,8 +426,9 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
     if (g_node_context.orphan_manager) {
         std::vector<uint256> orphanChildren = g_node_context.orphan_manager->GetOrphanChildren(blockHash);
         if (!orphanChildren.empty()) {
-            std::cout << "[ValidationQueue] Found " << orphanChildren.size()
-                      << " orphan children waiting for block " << blockHash.GetHex().substr(0, 16)
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[ValidationQueue] Found " << orphanChildren.size()
+                          << " orphan children waiting for block " << blockHash.GetHex().substr(0, 16)
                       << "... at height " << expected_height << std::endl;
 
             // Process orphan children (queue them for validation)
@@ -435,8 +441,9 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
                     CBlockIndex* pOrphanParent = m_chainstate.GetBlockIndex(orphanBlock.hashPrevBlock);
                     if (!pOrphanParent) {
                         // Parent still not available - keep orphan for later
-                        std::cout << "[ValidationQueue] Orphan " << orphanBlockHash.GetHex().substr(0, 16)
-                                  << "... parent still not available, keeping in pool" << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[ValidationQueue] Orphan " << orphanBlockHash.GetHex().substr(0, 16)
+                                      << "... parent still not available, keeping in pool" << std::endl;
                         continue;
                     }
 
@@ -480,8 +487,9 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
                     // Queue orphan for async validation
                     // IBD OPTIMIZATION: Pass orphanBlockHash to avoid RandomX recomputation
                     if (QueueBlock(-1, orphanBlock, orphanHeight, orphanBlockHash, pOrphanIndexRaw)) {
-                        std::cout << "[ValidationQueue] Queued orphan " << orphanBlockHash.GetHex().substr(0, 16)
-                                  << "... at height " << orphanHeight << " for validation" << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[ValidationQueue] Queued orphan " << orphanBlockHash.GetHex().substr(0, 16)
+                                      << "... at height " << orphanHeight << " for validation" << std::endl;
                         // Successfully queued - now safe to remove from orphan pool
                         g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
                     } else {
@@ -492,7 +500,8 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
         }
     }
 
-    std::cout << "[ValidationQueue] Successfully validated block at height " << expected_height << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[ValidationQueue] Successfully validated block at height " << expected_height << std::endl;
     m_watchdog.ReportValidationComplete();
     return true;
 

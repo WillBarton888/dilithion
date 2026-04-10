@@ -424,7 +424,8 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
         if (inbound_count >= static_cast<size_t>(m_options.nMaxInbound)) {
             // Phase 4: Try to evict a low-trust peer to make room
             if (m_peer_manager && m_peer_manager->EvictPeersIfNeeded()) {
-                std::cout << "[P2P] Evicted low-value peer to accept new inbound" << std::endl;
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[P2P] Evicted low-value peer to accept new inbound" << std::endl;
                 // Continue to accept — slot freed by eviction
             } else {
                 LogPrintf(NET, WARN, "[CConnman] Inbound connection limit reached (%zu/%d)\n",
@@ -1558,9 +1559,8 @@ void CConnman::ExtractMessages(CNode* pnode) {
 
         // Check if we have the complete message
         if (buffer.size() < total_size) {
-            // Log partial message waiting for headers/blocks (helps diagnose stuck-at-0)
-            if (cmd == "headers" || cmd == "block" ||
-                (g_verbose.load(std::memory_order_relaxed) && header.payload_size > 1000)) {
+            // Log partial message waiting (verbose only — very noisy during sync)
+            if (g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[EXTRACT-PARTIAL] node=" << pnode->id << " cmd=" << cmd
                           << " need=" << total_size << " have=" << buffer.size() << std::endl;
             }
@@ -1604,8 +1604,8 @@ void CConnman::ExtractMessages(CNode* pnode) {
         // Create processed message and push to queue
         std::string command = header.GetCommand();
 
-        // Log when headers or blocks are fully extracted from TCP (always, for diagnostics)
-        if (command == "headers" || command == "block") {
+        // Log extracted messages (verbose only)
+        if (g_verbose.load(std::memory_order_relaxed) && (command == "headers" || command == "block")) {
             std::cout << "[EXTRACT] node=" << pnode->id << " cmd=" << command
                       << " payload=" << header.payload_size << " bytes" << std::endl;
         } else if (g_verbose.load(std::memory_order_relaxed)) {
