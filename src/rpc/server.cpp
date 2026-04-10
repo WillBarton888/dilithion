@@ -2320,13 +2320,19 @@ std::string CRPCServer::RPC_ConsolidateUTXOs(const std::string& params) {
         throw std::runtime_error("Wallet is locked. Use walletpassphrase first.");
     }
 
-    // Parse optional max_inputs parameter (default 50, max 200)
+    // Parse optional parameters: max_inputs (default 50, max 200), address (destination)
     size_t max_inputs = 50;
+    std::string dest_address;
     if (!params.empty()) {
         try {
             auto j = nlohmann::json::parse(params);
-            if (j.is_object() && j.contains("max_inputs")) {
-                max_inputs = j["max_inputs"].get<size_t>();
+            if (j.is_object()) {
+                if (j.contains("max_inputs")) {
+                    max_inputs = j["max_inputs"].get<size_t>();
+                }
+                if (j.contains("address")) {
+                    dest_address = j["address"].get<std::string>();
+                }
             } else if (j.is_array() && !j.empty()) {
                 max_inputs = j[0].get<size_t>();
             }
@@ -2384,16 +2390,39 @@ std::string CRPCServer::RPC_ConsolidateUTXOs(const std::string& params) {
         tx.vin.push_back(CTxIn(outpoint));
     }
 
-    // Send back to own wallet
-    std::vector<uint8_t> own_hash = m_wallet->GetPubKeyHash();
-    if (own_hash.empty()) {
+    // Determine destination address:
+    // 1. Explicit address parameter (user chose in UI)
+    // 2. Mining address override (if set via --mining-address or setminingaddress)
+    // 3. Wallet default address (fallback)
+    std::vector<uint8_t> dest_hash;
+    std::string dest_label;
+    if (!dest_address.empty()) {
+        CDilithiumAddress addr;
+        if (!addr.SetString(dest_address)) {
+            for (const auto& u : to_consolidate) {
+                m_wallet->UnlockCoin(COutPoint(u.txid, u.vout));
+            }
+            throw std::runtime_error("Invalid destination address: " + dest_address);
+        }
+        dest_hash = CWallet::GetPubKeyHashFromAddress(addr);
+        dest_label = dest_address;
+    } else if (!g_node_state.mining_address_override.empty()) {
+        CDilithiumAddress addr;
+        addr.SetString(g_node_state.mining_address_override);
+        dest_hash = CWallet::GetPubKeyHashFromAddress(addr);
+        dest_label = g_node_state.mining_address_override;
+    } else {
+        dest_hash = m_wallet->GetPubKeyHash();
+        dest_label = "default";
+    }
+    if (dest_hash.empty()) {
         for (const auto& u : to_consolidate) {
             m_wallet->UnlockCoin(COutPoint(u.txid, u.vout));
         }
-        throw std::runtime_error("Failed to get wallet public key hash");
+        throw std::runtime_error("Failed to resolve destination address");
     }
 
-    std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(own_hash);
+    std::vector<uint8_t> scriptPubKey = WalletCrypto::CreateScriptPubKey(dest_hash);
     tx.vout.push_back(CTxOut(output_value, std::move(scriptPubKey)));
 
     // Sign
@@ -2433,6 +2462,7 @@ std::string CRPCServer::RPC_ConsolidateUTXOs(const std::string& params) {
         << "\"total_utxos_after\":" << (utxos.size() - count + 1) << ","
         << "\"amount\":" << FormatAmount(output_value) << ","
         << "\"fee\":" << FormatAmount(fee) << ","
+        << "\"destination\":\"" << dest_label << "\","
         << "\"tx_size\":" << actual_size << "}";
     return oss.str();
 }

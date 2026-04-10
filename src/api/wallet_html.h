@@ -1141,9 +1141,30 @@ inline const std::string& GetWalletHTML() {
                             <span id="optimizeUtxoCount"></span>
                         </div>
                     </div>
-                    <button class="btn btn-primary" id="optimizeBtn" onclick="optimizeWallet()" style="white-space: nowrap;">
+                    <button class="btn btn-primary" id="optimizeBtn" onclick="showConsolidateModal()" style="white-space: nowrap;" title="Combines many small mining payments into a single larger one, making future sends faster and cheaper. You choose which address receives the combined funds.">
                         Optimize Now
                     </button>
+                </div>
+            </div>
+
+            <!-- Consolidation Destination Modal -->
+            <div id="consolidateModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
+                <div style="background: var(--bg-secondary, #1a1a18); border: 1px solid rgba(200,162,78,0.3); border-radius: 12px; padding: 24px; max-width: 480px; width: 90%; margin: auto; position: relative; top: 50%; transform: translateY(-50%);">
+                    <div style="font-weight: 600; font-size: 16px; color: var(--text-primary, #e8e8e0); margin-bottom: 4px;">Consolidate Payments</div>
+                    <div style="font-size: 13px; color: var(--text-secondary, #8A8A80); margin-bottom: 16px;">
+                        Combine <span id="consolidateUtxoInfo" style="color: #C8B560;"></span> small payments into one. Choose which address receives the combined amount.
+                    </div>
+                    <div style="margin-bottom: 16px;">
+                        <label style="display: block; font-size: 12px; color: var(--text-secondary, #8A8A80); margin-bottom: 6px;">Destination Address</label>
+                        <select id="consolidateDestSelect" style="width: 100%; padding: 10px 12px; background: var(--bg-primary, #0f0f0e); color: var(--text-primary, #e8e8e0); border: 1px solid rgba(138,138,128,0.3); border-radius: 8px; font-family: monospace; font-size: 13px; cursor: pointer;">
+                        </select>
+                    </div>
+                    <div id="consolidatePreview" style="background: rgba(200,162,78,0.06); border: 1px solid rgba(200,162,78,0.15); border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 13px; color: var(--text-secondary, #8A8A80);">
+                    </div>
+                    <div style="display: flex; gap: 12px; justify-content: flex-end;">
+                        <button class="btn" onclick="closeConsolidateModal()" style="padding: 8px 20px;">Cancel</button>
+                        <button class="btn btn-primary" id="consolidateConfirmBtn" onclick="executeConsolidate()" style="padding: 8px 20px;">Consolidate</button>
+                    </div>
                 </div>
             </div>
 
@@ -3153,33 +3174,136 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
-        async function optimizeWallet() {
-            const btn = document.getElementById('optimizeBtn');
-            const originalText = btn.textContent;
-            btn.textContent = 'Optimizing...';
-            btn.disabled = true;
+        // Consolidation modal state
+        let consolidateAddresses = [];
+        let consolidateUtxoCount = 0;
+
+        async function showConsolidateModal() {
             try {
-                const result = await rpcCall('consolidateutxos', {max_inputs: 50}, 60000);
-                btn.textContent = 'Done! Combined ' + (result.inputs_consolidated || '?') + ' payments';
+                // Gather wallet addresses with balances
+                const utxos = await rpcCall('listunspent');
+                if (!Array.isArray(utxos) || utxos.length <= 1) {
+                    showNotification('Nothing to consolidate', 'info');
+                    return;
+                }
+                consolidateUtxoCount = utxos.length;
+
+                // Aggregate balances by address
+                const balanceMap = {};
+                const utxoCountMap = {};
+                for (const u of utxos) {
+                    const addr = u.address || 'unknown';
+                    balanceMap[addr] = (balanceMap[addr] || 0) + (u.amount || 0);
+                    utxoCountMap[addr] = (utxoCountMap[addr] || 0) + 1;
+                }
+
+                // Get mining address for labeling
+                let miningAddr = null;
+                try {
+                    const ma = await rpcCall('getminingaddress');
+                    if (ma && ma.address) miningAddr = ma.address;
+                } catch(e) {}
+
+                // Sort by balance descending
+                consolidateAddresses = Object.entries(balanceMap)
+                    .map(([addr, bal]) => ({ address: addr, balance: bal, utxos: utxoCountMap[addr] || 0, isMining: addr === miningAddr }))
+                    .sort((a, b) => b.balance - a.balance);
+
+                // Populate dropdown
+                const select = document.getElementById('consolidateDestSelect');
+                const coinLabel = (typeof currentChain !== 'undefined' && currentChain === 'dilv') ? 'DilV' : 'DIL';
+                select.innerHTML = '';
+                for (const a of consolidateAddresses) {
+                    const opt = document.createElement('option');
+                    opt.value = a.address;
+                    const short = a.address.substring(0, 10) + '...' + a.address.substring(a.address.length - 6);
+                    const tag = a.isMining ? ' [MINING]' : '';
+                    opt.textContent = short + tag + '  —  ' + a.balance.toFixed(4) + ' ' + coinLabel + ' (' + a.utxos + ' UTXOs)';
+                    select.appendChild(opt);
+                }
+
+                // Pre-select: mining address if set, otherwise highest balance
+                if (miningAddr && consolidateAddresses.some(a => a.address === miningAddr)) {
+                    select.value = miningAddr;
+                }
+
+                // Update preview
+                updateConsolidatePreview();
+                select.onchange = updateConsolidatePreview;
+
+                // Show info
+                document.getElementById('consolidateUtxoInfo').textContent = consolidateUtxoCount;
+
+                // Show modal
+                document.getElementById('consolidateModal').style.display = 'block';
+            } catch(e) {
+                const msg = e.message || String(e);
+                if (msg.includes('locked')) {
+                    showNotification('Unlock wallet first', 'error');
+                } else {
+                    showNotification('Error: ' + msg, 'error');
+                }
+            }
+        }
+
+        function updateConsolidatePreview() {
+            const select = document.getElementById('consolidateDestSelect');
+            const dest = select.value;
+            const preview = document.getElementById('consolidatePreview');
+            const coinLabel = (typeof currentChain !== 'undefined' && currentChain === 'dilv') ? 'DilV' : 'DIL';
+
+            // Count UTXOs that will be consolidated (up to 50 smallest)
+            const batchSize = Math.min(consolidateUtxoCount, 50);
+            const destInfo = consolidateAddresses.find(a => a.address === dest);
+            const short = dest.substring(0, 14) + '...' + dest.substring(dest.length - 8);
+
+            preview.innerHTML =
+                '<div style="margin-bottom: 6px;"><strong>Summary:</strong></div>' +
+                '<div>Combining up to <strong>' + batchSize + '</strong> of ' + consolidateUtxoCount + ' payments</div>' +
+                '<div>Destination: <span style="font-family: monospace; color: #C8B560;">' + short + '</span></div>' +
+                (destInfo ? '<div>Current balance: ' + destInfo.balance.toFixed(8) + ' ' + coinLabel + '</div>' : '') +
+                (consolidateUtxoCount > 50 ? '<div style="margin-top: 6px; font-size: 12px; color: #8A8A80;">You may need to click Optimize multiple times to consolidate all ' + consolidateUtxoCount + ' payments.</div>' : '');
+        }
+
+        function closeConsolidateModal() {
+            document.getElementById('consolidateModal').style.display = 'none';
+        }
+
+        async function executeConsolidate() {
+            const select = document.getElementById('consolidateDestSelect');
+            const destAddress = select.value;
+            const btn = document.getElementById('consolidateConfirmBtn');
+            const originalText = btn.textContent;
+            btn.textContent = 'Consolidating...';
+            btn.disabled = true;
+
+            try {
+                const result = await rpcCall('consolidateutxos', {max_inputs: 50, address: destAddress}, 60000);
+                btn.textContent = 'Done!';
+                const count = result.inputs_consolidated || '?';
+                closeConsolidateModal();
+                showNotification('Combined ' + count + ' payments into ' + destAddress.substring(0, 10) + '...', 'success');
                 await refreshBalance();
-                // Check if more consolidation needed
                 setTimeout(async () => {
                     await checkUtxoHealth();
                     btn.textContent = originalText;
                     btn.disabled = false;
-                }, 3000);
+                }, 2000);
             } catch(e) {
                 const msg = e.message || String(e);
+                btn.textContent = originalText;
+                btn.disabled = false;
                 if (msg.includes('locked')) {
-                    btn.textContent = 'Unlock wallet first';
+                    closeConsolidateModal();
+                    showNotification('Unlock wallet first', 'error');
                 } else if (msg.includes('Nothing to consolidate')) {
-                    btn.textContent = 'Already optimized!';
+                    closeConsolidateModal();
+                    showNotification('Already optimized!', 'info');
                     document.getElementById('optimizeBanner').style.display = 'none';
                 } else {
-                    btn.textContent = 'Failed — try again';
-                    console.error('[Optimize]', msg);
+                    showNotification('Failed: ' + msg, 'error');
+                    console.error('[Consolidate]', msg);
                 }
-                setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3000);
             }
         }
 

@@ -123,7 +123,7 @@ std::string CRestAPI::HandleBalance(const std::string& address, const std::strin
         return BuildErrorResponse(400, 1003, "Invalid address format");
     }
 
-    if (!m_utxo_set) {
+    if (!m_utxo_set || !m_chainstate) {
         return BuildErrorResponse(503, 2001, "UTXO set not available");
     }
 
@@ -133,9 +133,12 @@ std::string CRestAPI::HandleBalance(const std::string& address, const std::strin
         return BuildErrorResponse(400, 1003, "Invalid address format");
     }
 
-    // Sum UTXOs for this address
+    // Sum UTXOs for this address, separating mature and immature coinbase
     int64_t confirmed = 0;
+    int64_t immature = 0;
     int64_t unconfirmed = 0;
+    unsigned int currentHeight = m_chainstate->GetHeight();
+    static const unsigned int COINBASE_MATURITY = 100;
 
     // Get confirmed balance from UTXO set
     m_utxo_set->ForEach([&](const COutPoint& outpoint, const CUTXOEntry& entry) {
@@ -161,7 +164,11 @@ std::string CRestAPI::HandleBalance(const std::string& address, const std::strin
                 }
 
                 if (matches) {
-                    confirmed += entry.out.nValue;
+                    if (entry.fCoinBase && currentHeight < entry.nHeight + COINBASE_MATURITY) {
+                        immature += entry.out.nValue;
+                    } else {
+                        confirmed += entry.out.nValue;
+                    }
                 }
             }
         }
@@ -199,8 +206,10 @@ std::string CRestAPI::HandleBalance(const std::string& address, const std::strin
     oss << "{";
     oss << "\"address\":\"" << EscapeJSON(address) << "\",";
     oss << "\"confirmed\":" << confirmed << ",";
+    oss << "\"immature\":" << immature << ",";
     oss << "\"unconfirmed\":" << unconfirmed << ",";
     oss << "\"confirmed_formatted\":\"" << FormatAmount(confirmed) << "\",";
+    oss << "\"immature_formatted\":\"" << FormatAmount(immature) << "\",";
     oss << "\"unconfirmed_formatted\":\"" << FormatAmount(unconfirmed) << "\"";
     oss << "}";
 
