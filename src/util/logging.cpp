@@ -24,6 +24,11 @@ std::atomic<bool> g_verbose{false};
 // Global quiet flag - default to false (show operator-level messages)
 std::atomic<bool> g_quiet{false};
 
+// Original streambufs (before timestamp wrapping) — used by CLogger::WriteToConsole
+// to avoid double timestamps when LogPrintf already formats its own timestamp.
+static std::streambuf* g_cout_orig = nullptr;
+static std::streambuf* g_cerr_orig = nullptr;
+
 // CLoggingConfig implementation
 CLoggingConfig& CLoggingConfig::GetInstance() {
     static CLoggingConfig instance;
@@ -278,8 +283,14 @@ void CLogger::WriteToFile(const std::string& message) {
 }
 
 void CLogger::WriteToConsole(LogLevel level, const std::string& message) {
-    std::ostream& stream = (level == LogLevel::LVL_ERROR) ? std::cerr : std::cout;
-    stream << message << std::endl;
+    // Write directly to the original streambuf to avoid the TimestampedStreamBuf
+    // adding a duplicate timestamp (FormatLogMsg already includes one).
+    std::streambuf* buf = (level == LogLevel::LVL_ERROR)
+        ? (g_cerr_orig ? g_cerr_orig : std::cerr.rdbuf())
+        : (g_cout_orig ? g_cout_orig : std::cout.rdbuf());
+    buf->sputn(message.c_str(), static_cast<std::streamsize>(message.size()));
+    buf->sputc('\n');
+    buf->pubsync();
 }
 
 std::string CLogger::FormatLogMsg(LogCategory category, LogLevel level, const std::string& message) {
@@ -381,8 +392,10 @@ static TimestampedStreamBuf* g_cerr_buf = nullptr;
 
 void InstallTimestampedStreams() {
     if (g_cout_buf) return;  // already installed
-    g_cout_buf = new TimestampedStreamBuf(std::cout.rdbuf(), GetConsoleMutexInternal());
-    g_cerr_buf = new TimestampedStreamBuf(std::cerr.rdbuf(), GetConsoleMutexInternal());
+    g_cout_orig = std::cout.rdbuf();
+    g_cerr_orig = std::cerr.rdbuf();
+    g_cout_buf = new TimestampedStreamBuf(g_cout_orig, GetConsoleMutexInternal());
+    g_cerr_buf = new TimestampedStreamBuf(g_cerr_orig, GetConsoleMutexInternal());
     std::cout.rdbuf(g_cout_buf);
     std::cerr.rdbuf(g_cerr_buf);
 }

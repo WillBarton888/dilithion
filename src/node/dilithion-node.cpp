@@ -6426,11 +6426,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "  For fixed address: restart with --mining-address=Dxxx" << std::endl;
                 std::cout << std::endl;
             } else {
-                // Default: wallet's default address
+                // Default: wallet's default address — show it so miners know where rewards go
+                std::string defaultAddr = "(unknown)";
+                if (g_node_state.wallet) {
+                    CDilithiumAddress addr = g_node_state.wallet->GetNewAddress();
+                    if (addr.IsValid()) defaultAddr = addr.ToString();
+                }
                 std::cout << "+----------------------------------------------------------------------+" << std::endl;
                 std::cout << "| Mining Mode: WALLET DEFAULT ADDRESS                                  |" << std::endl;
                 std::cout << "+----------------------------------------------------------------------+" << std::endl;
-                std::cout << "  All rewards go to your wallet's default address" << std::endl;
+                std::cout << "  Mining to: " << defaultAddr << std::endl;
                 std::cout << "  For privacy: restart with --rotate-mining-address" << std::endl;
                 std::cout << "  For explicit: restart with --mining-address=Dxxx" << std::endl;
                 std::cout << std::endl;
