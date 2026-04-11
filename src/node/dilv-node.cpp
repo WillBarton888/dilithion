@@ -452,6 +452,7 @@ struct NodeConfig {
     bool reindex = false;           // Phase 4.2: Rebuild block index from blocks on disk
     bool rescan = false;            // Phase 4.2: Rescan wallet transactions
     bool verbose = false;           // Show debug output (hidden by default)
+    bool quiet = false;             // Quiet mode: only block lifecycle, errors, and warnings
     bool relay_only = false;        // Relay-only mode: skip wallet creation (for seed nodes)
     bool upnp_enabled = false;      // Enable UPnP automatic port mapping
     bool upnp_prompted = false;     // True if user was already prompted or used explicit flag
@@ -583,6 +584,12 @@ struct NodeConfig {
                 // Show debug output
                 verbose = true;
             }
+            else if (arg == "--quiet" || arg == "-q") {
+                // Quiet mode: suppress operator-level messages, show only
+                // block lifecycle events (PRODUCED/CONFIRMED/NOT SELECTED),
+                // errors, and warnings
+                quiet = true;
+            }
             else if (arg == "--relay-only") {
                 // Relay-only mode: skip wallet creation (for seed nodes)
                 relay_only = true;
@@ -680,6 +687,7 @@ struct NodeConfig {
         std::cout << "  --rotate-mining-address Use a new HD address for each mined block" << std::endl;
         std::cout << "  --restore-mnemonic=\"words\" Restore wallet from 24-word recovery phrase" << std::endl;
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
+        std::cout << "  --quiet, -q           Quiet mode: only block events, errors, and warnings" << std::endl;
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
         std::cout << "  --relay-only          Relay-only mode: skip wallet (for seed nodes)" << std::endl;
         std::cout << "  --public-api          Enable public REST API for light wallets (seed nodes)" << std::endl;
@@ -2024,6 +2032,8 @@ int main(int argc, char* argv[]) {
 
     // Set global verbose flag for debug output
     g_verbose.store(config.verbose, std::memory_order_relaxed);
+    // Set global quiet flag for minimal output
+    g_quiet.store(config.quiet, std::memory_order_relaxed);
 
     if (config_parser.IsLoaded()) {
         LogPrintf(ALL, INFO, "Configuration loaded from: %s", config_file.c_str());

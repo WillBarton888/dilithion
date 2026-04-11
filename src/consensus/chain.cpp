@@ -189,13 +189,15 @@ bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew, const CBlock* pblo
         if (g_node_context.cooldown_tracker &&
             !CheckVDFReplacementPreflight(*pblockNew, pindexNew, pindexTip, pdb, pindexNew->nHeight,
                                           *g_node_context.cooldown_tracker, preflightErr)) {
-            std::cout << "[VDF Distribution] Replacement preflight rejected: " << preflightErr << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[VDF Distribution] Replacement preflight rejected: " << preflightErr << std::endl;
             return false;
         }
     }
 
-    std::cout << "[VDF Distribution] Lower output wins -- replacing tip (grace: "
-              << (gracePeriod - elapsed) << "s remaining)" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[VDF Distribution] Lower output wins -- replacing tip (grace: "
+                  << (gracePeriod - elapsed) << "s remaining)" << std::endl;
 
     return true;
 }
@@ -290,7 +292,8 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
     // Case 2.5: VDF Distribution — competing VDF block at same height with lower output
     if (ShouldReplaceVDFTip(pindexNew, &block)) {
-        std::cout << "[Chain] VDF DISTRIBUTION REPLACEMENT -- 1-block reorg" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "[Chain] VDF DISTRIBUTION REPLACEMENT -- 1-block reorg" << std::endl;
 
         // Disconnect current tip
         if (!DisconnectTip(pindexTip)) {
@@ -324,10 +327,12 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     }
 
     // Case 3: Competing chain - need to compare chain work
-    std::cout << "  Current tip: " << pindexTip->GetBlockHash().GetHex().substr(0, 16)
-              << " (height " << pindexTip->nHeight << ")" << std::endl;
-    std::cout << "  New block:   " << pindexNew->GetBlockHash().GetHex().substr(0, 16)
-              << " (height " << pindexNew->nHeight << ")" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "  Current tip: " << pindexTip->GetBlockHash().GetHex().substr(0, 16)
+                  << " (height " << pindexTip->nHeight << ")" << std::endl;
+        std::cout << "  New block:   " << pindexNew->GetBlockHash().GetHex().substr(0, 16)
+                  << " (height " << pindexNew->nHeight << ")" << std::endl;
+    }
 
     // Compare chain work
     if (!ChainWorkGreaterThan(pindexNew->nChainWork, pindexTip->nChainWork)) {
@@ -358,8 +363,9 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                         now - m_vdfTipAcceptTime).count();
                     int gracePeriod = Dilithion::g_chainParams->vdfLotteryGracePeriod;
                     if (elapsed > gracePeriod) {
-                        std::cout << "[VDF Distribution] Fork tiebreak: lower output but grace expired ("
-                                  << elapsed << "s > " << gracePeriod << "s)" << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[VDF Distribution] Fork tiebreak: lower output but grace expired ("
+                                      << elapsed << "s > " << gracePeriod << "s)" << std::endl;
                         withinGrace = false;
                     }
                 }
@@ -369,14 +375,16 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     if (g_node_context.cooldown_tracker &&
                         !CheckVDFReplacementPreflight(block, pindexNew, pindexTip, pdb, pindexNew->nHeight,
                                                       *g_node_context.cooldown_tracker, preflightErr)) {
-                        std::cout << "[VDF Distribution] Fork tiebreak preflight rejected: "
-                                  << preflightErr << std::endl;
+                        if (g_verbose.load(std::memory_order_relaxed))
+                            std::cout << "[VDF Distribution] Fork tiebreak preflight rejected: "
+                                      << preflightErr << std::endl;
                         withinGrace = false;
                     }
                 }
 
                 if (withinGrace) {
-                    std::cout << "[VDF Distribution] FORK TIEBREAK -- equal work, lower VDF output wins!" << std::endl;
+                    if (g_verbose.load(std::memory_order_relaxed))
+                        std::cout << "[VDF Distribution] FORK TIEBREAK -- equal work, lower VDF output wins!" << std::endl;
                     vdfTiebreak = true;
                 }
             }
@@ -390,7 +398,8 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     }
 
     // New chain wins - REORGANIZATION REQUIRED (either more work or VDF tiebreak)
-    std::cout << "[Chain] REORGANIZING to better chain at height " << pindexNew->nHeight << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "[Chain] REORGANIZING to better chain at height " << pindexNew->nHeight << std::endl;
 
     // Find fork point
     CBlockIndex* pindexFork = FindFork(pindexTip, pindexNew);
@@ -466,7 +475,8 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     // Reverse connect list so we connect from fork point -> new tip
     std::reverse(connectBlocks.begin(), connectBlocks.end());
 
-    std::cout << "  Disconnect " << disconnectBlocks.size() << ", connect " << connectBlocks.size() << " block(s)" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed))
+        std::cout << "  Disconnect " << disconnectBlocks.size() << ", connect " << connectBlocks.size() << " block(s)" << std::endl;
 
     // ============================================================================
     // DFMP FORK FIX: Skip reorg if any block in connect path is already invalid
@@ -579,8 +589,9 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     size_t disconnectedCount = 0;
     for (size_t i = 0; i < disconnectBlocks.size(); ++i) {
         CBlockIndex* pindexDisconnect = disconnectBlocks[i];
-        std::cout << "  Disconnecting: " << pindexDisconnect->GetBlockHash().GetHex().substr(0, 16)
-                  << " (height " << pindexDisconnect->nHeight << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "  Disconnecting: " << pindexDisconnect->GetBlockHash().GetHex().substr(0, 16)
+                      << " (height " << pindexDisconnect->nHeight << ")" << std::endl;
 
         if (!DisconnectTip(pindexDisconnect)) {
             std::cerr << "[Chain] ERROR: Failed to disconnect block during reorg at height "
@@ -648,8 +659,9 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     size_t connectedCount = 0;
     for (size_t i = 0; i < connectBlocks.size(); ++i) {
         CBlockIndex* pindexConnect = connectBlocks[i];
-        std::cout << "  Connecting: " << pindexConnect->GetBlockHash().GetHex().substr(0, 16)
-                  << " (height " << pindexConnect->nHeight << ")" << std::endl;
+        if (g_verbose.load(std::memory_order_relaxed))
+            std::cout << "  Connecting: " << pindexConnect->GetBlockHash().GetHex().substr(0, 16)
+                      << " (height " << pindexConnect->nHeight << ")" << std::endl;
 
         // Load block data from database
         CBlock connectBlock;
@@ -806,9 +818,11 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         pdb->WriteBestBlock(pindexNew->GetBlockHash());
     }
 
-    std::cout << "[Chain] Reorganization complete" << std::endl;
-    std::cout << "  New tip: " << pindexTip->GetBlockHash().GetHex().substr(0, 16)
-              << " (height " << pindexTip->nHeight << ")" << std::endl;
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        std::cout << "[Chain] Reorganization complete" << std::endl;
+        std::cout << "  New tip: " << pindexTip->GetBlockHash().GetHex().substr(0, 16)
+                  << " (height " << pindexTip->nHeight << ")" << std::endl;
+    }
 
     // P1-4: Reorg completed successfully - delete WAL
     if (m_reorgWAL) {
@@ -1079,9 +1093,10 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                         int activeMiners = g_node_context.cooldown_tracker->GetActiveMiners();
                         if (activeMiners > 1) {
                             chainStalled = false;  // Reject stall exemption
-                            std::cout << "[Chain] Block " << pindex->nHeight
-                                      << ": stall exemption DENIED (same miner as prev, "
-                                      << activeMiners << " active miners)" << std::endl;
+                            if (g_verbose.load(std::memory_order_relaxed))
+                                std::cout << "[Chain] Block " << pindex->nHeight
+                                          << ": stall exemption DENIED (same miner as prev, "
+                                          << activeMiners << " active miners)" << std::endl;
                         }
                     }
                 }
@@ -1093,10 +1108,11 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         }
 
         if (chainStalled) {
-            std::cout << "[Chain] Block " << pindex->nHeight
-                      << ": cooldown check skipped (chain stall -- "
-                      << (block.nTime - pindex->pprev->nTime)
-                      << "s since last block)" << std::endl;
+            if (g_verbose.load(std::memory_order_relaxed))
+                std::cout << "[Chain] Block " << pindex->nHeight
+                          << ": cooldown check skipped (chain stall -- "
+                          << (block.nTime - pindex->pprev->nTime)
+                          << "s since last block)" << std::endl;
         } else {
             std::string cooldownError;
             // Pass block.nTime for time-based cooldown expiry
@@ -1390,7 +1406,7 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
                               << "... to mempool after disconnect: " << add_error << std::endl;
                 }
             }
-            if (returned > 0) {
+            if (returned > 0 && g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[Chain] Returned " << returned << " tx to mempool from disconnected block at height "
                           << disconnectHeight << std::endl;
             }

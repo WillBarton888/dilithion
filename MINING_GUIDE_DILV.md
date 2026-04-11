@@ -135,8 +135,12 @@ If you want more control, run the node directly:
 | Option | What it does |
 |--------|-------------|
 | `--mine` | Enable mining |
+| `--quiet` or `-q` | Quiet mode — only shows block events (PRODUCED/CONFIRMED), errors, and warnings |
+| `--verbose` or `-v` | Show detailed debug output (for troubleshooting) |
 
 **You don't need to set threads for DilV!** Unlike DIL's RandomX mining, VDF only uses one core for the computation. More CPU power doesn't help you — it's fair distribution.
+
+**Tip:** If the logs are too noisy, use `--quiet` for a cleaner experience. You'll still see when you produce a block and whether it's confirmed.
 
 ---
 
