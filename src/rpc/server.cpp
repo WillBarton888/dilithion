@@ -7906,9 +7906,14 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
     if (dcBanEnabled && m_asnDatabase->IsDatacenterIP(clientIP)) {
         uint32_t asn = m_asnDatabase->LookupASN(clientIP);
         std::string desc = m_asnDatabase->LookupDescription(clientIP);
-        throw std::runtime_error("Mining not available from datacenter IPs. "
+        throw std::runtime_error("Mining not available from datacenter/VPN IPs. "
             "Your IP (" + clientIP + ") belongs to ASN " + std::to_string(asn) +
-            " (" + desc + "). Use a residential connection to mine.");
+            " (" + desc + "). Most VPN and proxy services route through datacenter "
+            "infrastructure and will trigger this check. To register your miner identity, "
+            "temporarily disable your VPN, restart the node, and let it complete MIK "
+            "registration. This is a one-time step — after registration you can re-enable "
+            "your VPN for all subsequent mining. Your residential IP is only shared with "
+            "the 4 seed nodes during registration and is not stored on-chain.");
     }
 
     // Derive MIK identity early — needed for rate limit tracking and logging
