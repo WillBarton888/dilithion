@@ -2148,7 +2148,7 @@ async function pollNode() {
             document.getElementById('blocksTotal').textContent = 'Total: ' + (miningInfo.blocks_found_total || 0);
 
             if (miningInfo.blocks_found_total > previousBlocksTotal && previousBlocksTotal > 0) {
-                addLog('BLOCK FOUND! Total: ' + miningInfo.blocks_found_total, 'block');
+                addLog('BLOCK SUBMITTED — waiting for confirmation. Total: ' + miningInfo.blocks_found_total, 'block');
             }
             previousBlocksFound = miningInfo.blocks_found || 0;
             previousBlocksTotal = miningInfo.blocks_found_total || 0;

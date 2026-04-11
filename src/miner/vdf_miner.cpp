@@ -400,11 +400,19 @@ void CVDFMiner::MiningLoop()
                 now - m_lastHeightChangeTime).count();
             int graceRemaining = minGap - static_cast<int>(sinceHeight);
 
+            std::cout << std::endl;
+            std::cout << "======================================" << std::endl;
+            std::cout << "  BLOCK PRODUCED" << std::endl;
             if (graceRemaining > 0) {
-                if (g_verbose.load(std::memory_order_relaxed))
-                    std::cout << "[VDF Miner] Grace period: waiting " << graceRemaining
-                              << "s for block timestamp validity (gap=" << minGap << "s)"
-                              << std::endl;
+                std::cout << "  Waiting for other miners (" << graceRemaining << "s)..." << std::endl;
+            }
+            std::cout << "======================================" << std::endl;
+            std::cout << "  Height: " << height << std::endl;
+            std::cout << "  VDF time: " << elapsedSec << "s" << std::endl;
+            std::cout << "======================================" << std::endl;
+            std::cout << std::endl;
+
+            if (graceRemaining > 0) {
                 std::unique_lock<std::mutex> lock(m_epochMutex);
                 m_epochCV.wait_for(lock, std::chrono::seconds(graceRemaining),
                     [this] { return m_epochChanged || !m_running; });
@@ -425,15 +433,8 @@ void CVDFMiner::MiningLoop()
         {
             std::lock_guard<std::mutex> lock(m_callbackMutex);
             if (m_blockFoundCallback) {
-                std::cout << std::endl;
-                std::cout << "======================================" << std::endl;
-                std::cout << "[VDF Miner] BLOCK PRODUCED!" << std::endl;
-                std::cout << "======================================" << std::endl;
-                std::cout << "  Height: " << height << std::endl;
-                std::cout << "  Hash: " << block.GetHash().GetHex() << std::endl;
-                std::cout << "  VDF time: " << elapsedSec << "s" << std::endl;
-                std::cout << "======================================" << std::endl;
-                std::cout << std::endl;
+                std::cout << "[VDF Miner] Submitting block " << height
+                          << " to network..." << std::endl;
 
                 m_blockFoundCallback(block);
                 m_blocksFound++;

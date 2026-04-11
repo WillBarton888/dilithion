@@ -5376,8 +5376,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             bool reorgOccurred = false;
             if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
                 if (g_chainstate.GetTip() == pblockIndexPtr) {
-                    std::cout << "[VDF] Block became new chain tip at height "
-                              << pblockIndexPtr->nHeight << std::endl;
+                    std::cout << std::endl;
+                    std::cout << "======================================" << std::endl;
+                    std::cout << "  BLOCK CONFIRMED!" << std::endl;
+                    std::cout << "  Your block won this round!" << std::endl;
+                    std::cout << "  Height: " << pblockIndexPtr->nHeight << std::endl;
+                    std::cout << "======================================" << std::endl;
 
                     // Persist total blocks mined counter
                     if (g_node_state.rpc_server) {
@@ -5452,6 +5456,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             }
                         }
                     }
+                } else {
+                    // Our block was valid but another miner's block with a lower
+                    // VDF output is already the tip at this height.
+                    std::cout << std::endl;
+                    std::cout << "======================================" << std::endl;
+                    std::cout << "  BLOCK NOT SELECTED" << std::endl;
+                    std::cout << "  Another miner produced a lower VDF" << std::endl;
+                    std::cout << "  output and won this round. This is" << std::endl;
+                    std::cout << "  normal — better luck next block!" << std::endl;
+                    std::cout << "======================================" << std::endl;
+                    std::cout << std::endl;
                 }
                 g_node_state.new_block_found = true;
             } else {

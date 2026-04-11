@@ -5252,7 +5252,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             uint256 blockHash = block.GetHash();
             std::cout << std::endl;
             std::cout << "======================================" << std::endl;
-            std::cout << "[OK] BLOCK FOUND!" << std::endl;
+            std::cout << "  BLOCK SUBMITTED" << std::endl;
+            std::cout << "  Waiting for network confirmation..." << std::endl;
             std::cout << "======================================" << std::endl;
             std::cout << "Block hash: " << blockHash.GetHex() << std::endl;
             std::cout << "Block time: " << block.nTime << std::endl;
@@ -5336,13 +5337,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             bool reorgOccurred = false;
             if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
                 if (reorgOccurred) {
-                    std::cout << "[Blockchain] CHAIN REORGANIZATION occurred during mining (new tip height "
-                              << g_chainstate.GetHeight() << ")" << std::endl;
+                    std::cout << std::endl;
+                    std::cout << "======================================" << std::endl;
+                    std::cout << "  BLOCK NOT ACCEPTED" << std::endl;
+                    std::cout << "  Another miner's block was selected" << std::endl;
+                    std::cout << "  by the network. This is normal." << std::endl;
+                    std::cout << "======================================" << std::endl;
+                    std::cout << std::endl;
 
                     // Stop mining - need to reassess chain state
                     g_node_state.new_block_found = true;
                 } else if (g_chainstate.GetTip() == pblockIndexPtr) {
-                    std::cout << "[Blockchain] Block became new chain tip at height " << pblockIndexPtr->nHeight << std::endl;
+                    std::cout << std::endl;
+                    std::cout << "======================================" << std::endl;
+                    std::cout << "  BLOCK CONFIRMED!" << std::endl;
+                    std::cout << "  Height: " << pblockIndexPtr->nHeight << std::endl;
+                    std::cout << "======================================" << std::endl;
 
                     // Persist total blocks mined counter
                     if (g_node_state.rpc_server) {

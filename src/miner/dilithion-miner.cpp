@@ -118,7 +118,8 @@ int main(int argc, char* argv[]) {
     miner.SetBlockFoundCallback([](const CBlock& block) {
         cout << "\n\n";
         cout << "======================================" << endl;
-        cout << "         BLOCK FOUND!" << endl;
+        cout << "  BLOCK SUBMITTED" << endl;
+        cout << "  Waiting for network confirmation..." << endl;
         cout << "======================================" << endl;
         cout << "Hash:   " << block.GetHash().GetHex() << endl;
         cout << "Nonce:  " << block.nNonce << endl;
