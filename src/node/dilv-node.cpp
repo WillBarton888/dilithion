@@ -2122,6 +2122,14 @@ int main(int argc, char* argv[]) {
         std::cerr << "WARNING: Failed to install SIGTERM handler" << std::endl;
         LogPrintf(ALL, WARN, "Failed to install SIGTERM handler");
     }
+#ifndef _WIN32
+    // Ignore SIGPIPE. Without this, a peer socket closing mid-send() terminates
+    // the process with exit code 141. Bitcoin Core does the same in init.cpp.
+    if (std::signal(SIGPIPE, SIG_IGN) == SIG_ERR) {
+        std::cerr << "WARNING: Failed to install SIGPIPE handler" << std::endl;
+        LogPrintf(ALL, WARN, "Failed to install SIGPIPE handler");
+    }
+#endif
 #ifdef _WIN32
     // Windows console close handler — catches X button, logoff, shutdown.
     // Without this, closing the console window kills the process immediately,
