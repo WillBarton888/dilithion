@@ -1175,6 +1175,33 @@ public:
      */
     void UpdateSentTransactionHeight(const uint256& txid, uint32_t nHeight);
 
+    /**
+     * Look up a single sent transaction by txid.
+     *
+     * @param txid Transaction ID to look up
+     * @param out Output struct populated on success
+     * @return true if the txid is in mapSentTx, false otherwise
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    bool GetSentTransaction(const uint256& txid, CSentTx& out) const;
+
+    /**
+     * Check if a specific tx output belongs to this wallet (and, if so,
+     * return the stored address + value). Unlike HasKey, this works for
+     * HD-derived addresses that aren't in mapKeys but are tracked as
+     * UTXOs in mapWalletTx.
+     *
+     * @param txid Transaction ID
+     * @param vout Output index
+     * @param addressOut On success, set to the address of the output
+     * @param valueOut On success, set to the output value in satoshis
+     * @return true if (txid, vout) is in mapWalletTx, false otherwise
+     * Thread-safe: Acquires cs_wallet lock
+     */
+    bool GetWalletOutput(const uint256& txid, uint32_t vout,
+                         CDilithiumAddress& addressOut,
+                         int64_t& valueOut) const;
+
     // ========================================================================
     // WALLET-006 FIX: UTXO Locking Mechanism
     // ========================================================================

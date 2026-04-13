@@ -2859,6 +2859,73 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
                 oss << "\"blockheight\":" << pCurrent->nHeight << ",";
                 oss << "\"confirmations\":" << confirmations << ",";
                 oss << "\"in_mempool\":false";
+
+                // Wallet context: lets callers verify whether this tx
+                // involved the local wallet — forensic support for the
+                // bridge (did the bridge wallet sign this send?). Uses
+                // mapWalletTx (tracks all owned UTXOs by outpoint) so
+                // HD-derived change addresses are detected even though
+                // they're not in mapKeys.
+                if (m_wallet) {
+                    CSentTx sentTx;
+                    bool isSend = m_wallet->GetSentTransaction(txid, sentTx);
+
+                    std::ostringstream details;
+                    details << "\"details\":[";
+                    bool firstDetail = true;
+                    int64_t walletReceive = 0;
+                    bool anyReceive = false;
+
+                    for (size_t i = 0; i < tx->vout.size(); i++) {
+                        const CTxOut& txout = tx->vout[i];
+                        CDilithiumAddress walletAddr;
+                        int64_t walletValue = 0;
+                        bool isOurs = m_wallet->GetWalletOutput(
+                            txid, static_cast<uint32_t>(i),
+                            walletAddr, walletValue);
+                        std::string addr = isOurs
+                            ? walletAddr.ToString()
+                            : DecodeScriptPubKeyToAddress(txout.scriptPubKey);
+
+                        if (isOurs) {
+                            if (!firstDetail) details << ",";
+                            details << "{\"address\":\"" << addr << "\","
+                                    << "\"category\":\"receive\","
+                                    << "\"amount\":" << txout.nValue << ","
+                                    << "\"vout\":" << i << "}";
+                            firstDetail = false;
+                            walletReceive += txout.nValue;
+                            anyReceive = true;
+                        } else if (isSend && !addr.empty()
+                                   && sentTx.toAddress.ToString() == addr) {
+                            if (!firstDetail) details << ",";
+                            details << "{\"address\":\"" << addr << "\","
+                                    << "\"category\":\"send\","
+                                    << "\"amount\":-" << txout.nValue << ","
+                                    << "\"vout\":" << i << ","
+                                    << "\"fee\":-" << sentTx.nFee << "}";
+                            firstDetail = false;
+                        }
+                    }
+                    details << "]";
+
+                    oss << ",\"wallet\":{";
+                    if (isSend) {
+                        oss << "\"category\":\"send\","
+                            << "\"amount\":-" << sentTx.nValue << ","
+                            << "\"fee\":-" << sentTx.nFee << ","
+                            << "\"to_address\":\"" << sentTx.toAddress.ToString() << "\","
+                            << "\"time\":" << sentTx.nTime;
+                    } else if (anyReceive) {
+                        oss << "\"category\":\"receive\","
+                            << "\"amount\":" << walletReceive;
+                    } else {
+                        oss << "\"category\":\"not_wallet_related\"";
+                    }
+                    oss << "},";
+                    oss << details.str();
+                }
+
                 oss << "}";
 
                 return oss.str();

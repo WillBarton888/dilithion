@@ -3437,11 +3437,35 @@ void CWallet::RecordSentTransaction(const uint256& txid, const CDilithiumAddress
 
     mapSentTx[txid] = stx;
 
-    // Trigger auto-save if enabled
+    // Persist immediately so sends survive node restart. Previously this
+    // path only "marked as dirty" — relying on a later block-triggered
+    // save to flush — which silently lost send history across restarts.
     if (m_autoSave && !m_walletFile.empty()) {
-        // Note: Full save would happen on next block/periodic save
-        // For now, just mark as dirty
+        SaveUnlocked(m_walletFile);
     }
+}
+
+bool CWallet::GetSentTransaction(const uint256& txid, CSentTx& out) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    auto it = mapSentTx.find(txid);
+    if (it == mapSentTx.end()) {
+        return false;
+    }
+    out = it->second;
+    return true;
+}
+
+bool CWallet::GetWalletOutput(const uint256& txid, uint32_t vout,
+                              CDilithiumAddress& addressOut,
+                              int64_t& valueOut) const {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    auto it = mapWalletTx.find(COutPoint(txid, vout));
+    if (it == mapWalletTx.end()) {
+        return false;
+    }
+    addressOut = it->second.address;
+    valueOut = it->second.nValue;
+    return true;
 }
 
 std::vector<CSentTx> CWallet::ListSentTransactions() const {
