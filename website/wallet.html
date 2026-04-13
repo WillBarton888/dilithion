@@ -2182,7 +2182,13 @@
         // Active chain: 'dil' or 'dilv'
         let activeChain = 'dil';  // Always start on DIL
         let chainSwitchGen = 0;   // Generation counter to discard stale async responses
-        const chainPorts = { dil: 8332, dilv: 9332 };
+        let chainPorts = { dil: 8332, dilv: 9332 };
+        try {
+            const savedPorts = JSON.parse(localStorage.getItem('dilithionChainPorts') || 'null');
+            if (savedPorts && Number.isInteger(savedPorts.dil) && Number.isInteger(savedPorts.dilv)) {
+                chainPorts = savedPorts;
+            }
+        } catch(e) {}
         const chainUnits = { dil: 'DIL', dilv: 'DilV' };
 
         function switchChain(chain) {
@@ -2346,6 +2352,8 @@
             if (saved) {
                 try {
                     rpcConfig = JSON.parse(saved);
+                    // Prefer per-chain port for current activeChain over the last-saved port
+                    if (chainPorts[activeChain]) rpcConfig.port = chainPorts[activeChain];
                     document.getElementById('rpcHost').value = rpcConfig.host;
                     document.getElementById('rpcPort').value = rpcConfig.port;
                     document.getElementById('rpcUser').value = rpcConfig.user || 'rpc';
@@ -2363,6 +2371,8 @@
             rpcConfig.port = parseInt(document.getElementById('rpcPort').value);
             rpcConfig.user = document.getElementById('rpcUser').value;
             rpcConfig.pass = document.getElementById('rpcPass').value;
+            chainPorts[activeChain] = rpcConfig.port;
+            localStorage.setItem('dilithionChainPorts', JSON.stringify(chainPorts));
             localStorage.setItem('dilithionWalletConfig', JSON.stringify(rpcConfig));
             showNotification('Settings saved. Connecting...', 'info');
             connect();
