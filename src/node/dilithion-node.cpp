@@ -66,6 +66,8 @@
 #include <dfmp/dfmp.h>             // DFMP: Fair Mining Protocol
 #include <dfmp/identity_db.h>      // DFMP: Identity persistence
 #include <dfmp/mik.h>              // DFMP v2.0: Mining Identity Key
+#include <dfmp/mik_registration_file.h>  // Persistent MIK registration PoW
+#include <util/chain_reset.h>      // --reset-chain helper
 #include <consensus/tx_validation.h>  // BUG #108 FIX: For CTransactionValidator
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
@@ -454,6 +456,8 @@ struct NodeConfig {
     std::vector<std::string> add_nodes;      // --addnode nodes (additional)
     bool reindex = false;           // Phase 4.2: Rebuild block index from blocks on disk
     bool rescan = false;            // Phase 4.2: Rescan wallet transactions
+    bool reset_chain = false;       // --reset-chain: wipe chain-derived state, keep wallet/MIK
+    bool yes_flag = false;          // --yes: bypass --reset-chain confirmation prompt
     bool verbose = false;           // Show debug output (hidden by default)
     bool quiet = false;             // Quiet mode: only block lifecycle, errors, and warnings
     bool relay_only = false;        // Relay-only mode: skip wallet creation (for seed nodes)
@@ -579,6 +583,15 @@ struct NodeConfig {
                 // Phase 4.2: Rebuild block index from blocks on disk
                 reindex = true;
             }
+            else if (arg == "--reset-chain") {
+                // Wipe chain-derived state (blocks, chainstate, headers, dna_registry),
+                // preserve wallet.dat and mik_registration.dat. Exits after reset.
+                reset_chain = true;
+            }
+            else if (arg == "--yes" || arg == "-y") {
+                // Bypass interactive confirmation (currently only used by --reset-chain)
+                yes_flag = true;
+            }
             else if (arg == "--rescan" || arg == "-rescan") {
                 // Phase 4.2: Rescan wallet transactions
                 rescan = true;
@@ -686,6 +699,10 @@ struct NodeConfig {
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
         std::cout << "  --quiet, -q           Quiet mode: only block events, errors, and warnings" << std::endl;
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
+        std::cout << "  --reset-chain         Wipe chain state for a clean resync." << std::endl;
+        std::cout << "                          Preserves wallet.dat and mik_registration.dat" << std::endl;
+        std::cout << "                          so miners do NOT re-solve the registration PoW." << std::endl;
+        std::cout << "                          Add --yes to skip the confirmation prompt." << std::endl;
         std::cout << "  --relay-only          Relay-only mode: skip wallet (for seed nodes)" << std::endl;
         std::cout << "  --public-api          Enable public REST API for light wallets (seed nodes)" << std::endl;
         std::cout << "  --no-shared-heat      Disable shared cluster heat penalty" << std::endl;
@@ -741,6 +758,23 @@ extern std::atomic<bool> g_attestationsCollected;
 // Defined in globals.cpp — shared with RPC server for startmining path.
 extern std::array<uint8_t, 32> g_cachedDnaHash;
 extern std::atomic<bool> g_dnaHashCached;
+
+// Data directory (defined in globals.cpp, set in main before any PoW save/load).
+extern std::string g_datadir;
+
+// Persist the solved registration PoW so miners don't re-solve on restart.
+// Best-effort: failure is logged but does not block mining.
+static void PersistRegistrationPoW(const std::vector<uint8_t>& pubkey) {
+    if (g_datadir.empty() || pubkey.empty()) return;
+    std::array<uint8_t, 32> dnaHash{};
+    if (g_dnaHashCached.load()) dnaHash = g_cachedDnaHash;
+    int64_t now = static_cast<int64_t>(std::time(nullptr));
+    if (DFMP::SaveMIKRegistration(g_datadir, pubkey, dnaHash, g_regCachedNonce, now)) {
+        std::cout << "  [Mining] Registration PoW saved to disk (skips re-solve on restart)" << std::endl;
+    } else {
+        std::cerr << "  [Mining] WARNING: failed to persist registration PoW" << std::endl;
+    }
+}
 
 /**
  * Ensure MIK identity is registered before mining begins.
@@ -806,6 +840,36 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
         std::cerr << "[Mining] WARNING: Failed to get MIK public key (wallet may be locked)" << std::endl;
         return false;
     }
+
+    // ========================================================================
+    // Step 0: Attempt to restore a previously-solved registration PoW from disk.
+    // If the cached pubkey matches this wallet's MIK, we skip the ~25 min PoW.
+    // This handles the case where the node restarted (or chain was reset) but
+    // wallet.dat + mik_registration.dat survived.
+    // ========================================================================
+    if (!g_regNonceMined.load() && !g_datadir.empty()) {
+        DFMP::MIKRegistrationFile rec;
+        auto res = DFMP::LoadMIKRegistration(g_datadir, mikPubkey, rec);
+        if (res == DFMP::MIKRegFileLoadResult::OK) {
+            g_regCachedNonce = rec.nonce;
+            g_regNonceIdentity = identity;
+            g_regNonceMined.store(true);
+            // Reuse the DNA hash the PoW was solved against — the on-chain PoW
+            // verifier checks SHA3-256(pubkey||dnaHash||nonce), so DNA hash must
+            // match what we solved with, not a freshly collected one.
+            g_cachedDnaHash = rec.dnaHash;
+            bool nonZeroDna = false;
+            for (auto b : rec.dnaHash) { if (b != 0) { nonZeroDna = true; break; } }
+            if (nonZeroDna) g_dnaHashCached.store(true);
+            std::cout << "  [Mining] MIK registration restored from disk (saves ~25 min PoW)" << std::endl;
+        } else if (res == DFMP::MIKRegFileLoadResult::PubkeyMismatch) {
+            std::cout << "  [Mining] Found stale mik_registration.dat (wallet MIK changed), ignoring" << std::endl;
+        } else if (res == DFMP::MIKRegFileLoadResult::Corrupt) {
+            std::cerr << "  [Mining] mik_registration.dat corrupt, solving new PoW" << std::endl;
+        }
+    }
+
+    if (g_regNonceMined.load() && g_regNonceIdentity == identity) return true;
 
     // ========================================================================
     // Step 1: Collect Digital DNA (required after dnaCommitmentActivationHeight)
@@ -925,6 +989,7 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
             g_regNonceIdentity = identity;
             g_regNonceMined.store(true);
             g_regPowInProgress.store(false);
+            PersistRegistrationPoW(mikPubkey);
             std::cout << std::endl;
             std::cout << "  [Mining] Miner identity registered successfully!" << std::endl;
             std::cout << std::endl;
@@ -967,6 +1032,7 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
                 g_regNonceIdentity = identity;
                 g_regNonceMined.store(true);
                 g_regPowInProgress.store(false);
+                PersistRegistrationPoW(mikPubkey);
                 std::cout << "  [Mining] Miner identity registered successfully!" << std::endl;
                 return true;
             } else {
@@ -1211,6 +1277,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                                 g_regCachedNonce = regNonce;
                                 g_regNonceIdentity = mikIdentity;
                                 g_regNonceMined.store(true);
+                                PersistRegistrationPoW(mikPubkey);
                             } else {
                                 std::cerr << "[DFMP v3.0] Failed to mine registration PoW!" << std::endl;
                                 regNonce = UINT64_MAX;  // Sentinel: skip registration (prevents nonce=0 template)
@@ -2129,6 +2196,37 @@ int main(int argc, char* argv[]) {
         config.p2pport = Dilithion::g_chainParams->p2pPort;
     }
 
+    // Publish datadir globally so MIK registration persistence + other
+    // utilities can find the right path without threading it through
+    // every call site.
+    g_datadir = config.datadir;
+
+    // --reset-chain: wipe chain-derived state and exit. Preserves wallet.dat
+    // and mik_registration.dat so miners don't lose keys or re-solve PoW.
+    if (config.reset_chain) {
+        if (!std::filesystem::exists(config.datadir)) {
+            std::cerr << "Data directory does not exist: " << config.datadir << std::endl;
+            return 1;
+        }
+        if (!Dilithion::ConfirmChainReset(config.datadir, config.yes_flag)) {
+            return 1;
+        }
+        auto report = Dilithion::ResetChainState(config.datadir);
+        std::cout << "\n=== Reset complete ===" << std::endl;
+        std::cout << "Removed:" << std::endl;
+        if (report.removed.empty()) std::cout << "  (nothing — chain state already absent)" << std::endl;
+        for (const auto& p : report.removed) std::cout << "  - " << p << std::endl;
+        std::cout << "\nPreserved:" << std::endl;
+        if (report.preserved.empty()) std::cout << "  (none found)" << std::endl;
+        for (const auto& p : report.preserved) std::cout << "  + " << p << std::endl;
+        if (!report.errors.empty()) {
+            std::cerr << "\nErrors:" << std::endl;
+            for (const auto& e : report.errors) std::cerr << "  ! " << e << std::endl;
+        }
+        std::cout << "\nRun the node again (without --reset-chain) to resync." << std::endl;
+        return 0;
+    }
+
     // Initialize logging system (Bitcoin Core style)
     if (!CLogger::GetInstance().Initialize(config.datadir)) {
         std::cerr << "Warning: Failed to initialize logging system" << std::endl;
@@ -2260,18 +2358,19 @@ int main(int argc, char* argv[]) {
                 if (!reason.empty()) {
                     std::cout << "Reason: " << reason << std::endl;
                 }
-                std::cout << "Wiping blocks and chainstate for clean resync..." << std::endl;
+                std::cout << "Wiping chain-derived state for clean resync" << std::endl;
+                std::cout << "(wallet.dat and mik_registration.dat are preserved)" << std::endl;
                 std::cout << "==========================================================" << std::endl;
 
-                // Wipe corrupted data
-                std::filesystem::remove_all(config.datadir + "/blocks");
-                std::filesystem::remove_all(config.datadir + "/chainstate");
-                std::filesystem::remove_all(config.datadir + "/wal");
-                std::cout << "  [OK] Chain data cleared" << std::endl;
-
-                // Delete the marker so we don't loop
-                std::remove(markerPath.c_str());
-                std::cout << "  [OK] Auto-rebuild marker removed" << std::endl;
+                // Shared preserve-list logic — never touches wallet.dat / peers.dat /
+                // mik_registration.dat. auto_rebuild marker itself is in the remove list.
+                auto report = Dilithion::ResetChainState(config.datadir);
+                for (const auto& p : report.removed) {
+                    std::cout << "  [OK] Removed: " << p << std::endl;
+                }
+                for (const auto& p : report.preserved) {
+                    std::cout << "  [OK] Preserved: " << p << std::endl;
+                }
                 std::cout << "  Resyncing from network..." << std::endl;
                 std::cout << "==========================================================" << std::endl;
             }
@@ -2751,8 +2850,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             std::cerr << "  3. Running different code versions" << std::endl;
                             std::cerr << "\nTo recover:" << std::endl;
                             std::cerr << "  Delete blockchain data for full re-sync:" << std::endl;
-                            std::cerr << "    rm -rf ~/.dilithion/blocks ~/.dilithion/chainstate" << std::endl;
+                            std::cerr << "    ./dilithion-node --reset-chain" << std::endl;
                             std::cerr << "    ./dilithion-node" << std::endl;
+                            std::cerr << "  (--reset-chain preserves wallet.dat and mik_registration.dat)" << std::endl;
                             std::cerr << "\nFor more information, see docs/troubleshooting.md\n" << std::endl;
 
                             delete Dilithion::g_chainParams;
@@ -2874,9 +2974,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cerr << "  2. Incomplete blockchain download" << std::endl;
                     std::cerr << "  3. Disk corruption" << std::endl;
                     std::cerr << "\nTo recover:" << std::endl;
-                    std::cerr << "  Option 1: Delete blockchain data for full re-sync" << std::endl;
-                    std::cerr << "    rm -rf ~/.dilithion/blocks ~/.dilithion/chainstate" << std::endl;
+                    std::cerr << "  Option 1: Reset chain state for full re-sync" << std::endl;
+                    std::cerr << "    ./dilithion-node --reset-chain" << std::endl;
                     std::cerr << "    ./dilithion-node" << std::endl;
+                    std::cerr << "  (preserves wallet.dat and mik_registration.dat)" << std::endl;
                     std::cerr << "\nFor more information, see docs/troubleshooting.md\n" << std::endl;
 
                     delete Dilithion::g_chainParams;

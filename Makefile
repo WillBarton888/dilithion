@@ -172,7 +172,8 @@ MINER_SOURCES := src/miner/controller.cpp \
 # DFMP (Fair Mining Protocol) sources
 DFMP_SOURCES := src/dfmp/dfmp.cpp \
                 src/dfmp/identity_db.cpp \
-                src/dfmp/mik.cpp
+                src/dfmp/mik.cpp \
+                src/dfmp/mik_registration_file.cpp
 
 # Digital DNA (Sybil-resistant identity) sources
 DIGITAL_DNA_SOURCES := src/digital_dna/digital_dna.cpp \
@@ -284,7 +285,8 @@ UTIL_SOURCES := src/util/strencodings.cpp \
                 src/util/config_validator.cpp \
                 src/util/error_format.cpp \
                 src/util/bench.cpp \
-                src/util/pidfile.cpp
+                src/util/pidfile.cpp \
+                src/util/chain_reset.cpp
 
 # Combine all core sources
 CORE_SOURCES := $(CONSENSUS_SOURCES) \

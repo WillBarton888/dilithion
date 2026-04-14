@@ -18,6 +18,7 @@
 #include <attestation/seed_attestation.h>
 #include <array>
 #include <atomic>
+#include <string>
 
 // Global chain state (kept separate for utilities that don't need full NodeContext)
 CChainState g_chainstate;
@@ -56,3 +57,8 @@ std::atomic<bool> g_attestationsCollected{false};
 // Shared between dilithion-node.cpp and server.cpp so RPC startmining can bind DNA to PoW.
 std::array<uint8_t, 32> g_cachedDnaHash{};
 std::atomic<bool> g_dnaHashCached{false};
+
+// Data directory of the running node. Set in main() so utilities like the MIK
+// registration file persistence can find the right location without threading
+// the path through every function signature.
+std::string g_datadir;

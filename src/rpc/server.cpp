@@ -31,6 +31,7 @@
 #include <util/base58.h>           // For EncodeBase58Check
 #include <dfmp/dfmp.h>  // DFMP v2.0
 #include <dfmp/mik.h>   // DFMP v2.0: Mining Identity Key
+#include <dfmp/mik_registration_file.h>  // MIK registration PoW persistence
 #include <dfmp/identity_db.h>  // DFMP v2.0: Identity database
 #include <digital_dna/dna_verification.h>  // DFMP v3.4: Verification-aware free tier
 #include <core/chainparams.h>  // For Dilithion::g_chainParams
@@ -91,6 +92,9 @@ extern uint64_t g_regCachedNonce;
 extern std::atomic<bool> g_regNonceMined;
 extern std::atomic<bool> g_regPowInProgress;
 extern DFMP::Identity g_regNonceIdentity;
+
+// Data directory for persisting registration PoW (defined in globals.cpp).
+extern std::string g_datadir;
 
 // Cached DNA hash for registration — defined in globals.cpp
 // Needed so RPC startmining can bind DNA hash to registration PoW.
@@ -3305,9 +3309,8 @@ std::string CRPCServer::RPC_CheckChain(const std::string& params) {
         oss << ",\"fork_detected_at_height\":" << forkHeight;
         oss << ",\"your_hash_at_fork\":\"" << forkLocalHash << "\"";
         oss << ",\"expected_hash_at_fork\":\"" << forkExpectedHash << "\"";
-        oss << ",\"action_required\":\"Your chain forked! Delete data folder and resync: "
-            << "Windows: Remove-Item -Recurse -Force $env:APPDATA\\\\.dilithion-testnet | "
-            << "Linux/Mac: rm -rf ~/.dilithion-testnet\"";
+        oss << ",\"action_required\":\"Your chain forked! Reset chain state and resync: "
+            << "run 'dilithion-node --reset-chain' (preserves wallet.dat and mik_registration.dat)\"";
     }
 
     oss << "}";
@@ -4569,6 +4572,13 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
                     g_regNonceIdentity = mikData.identity;
                     g_regNonceMined.store(true);
                     g_regPowInProgress.store(false);
+                    // Persist to mik_registration.dat so a restart doesn't waste the PoW.
+                    if (!g_datadir.empty()) {
+                        std::array<uint8_t, 32> dnaHash{};
+                        if (g_dnaHashCached.load()) dnaHash = g_cachedDnaHash;
+                        int64_t now = static_cast<int64_t>(std::time(nullptr));
+                        DFMP::SaveMIKRegistration(g_datadir, mikData.pubkey, dnaHash, regNonce, now);
+                    }
                     std::cout << "[RPC] Registration PoW complete!" << std::endl;
                 } else {
                     g_regPowInProgress.store(false);

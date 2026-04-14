@@ -510,7 +510,7 @@ bool CNetMessageProcessor::ProcessVersionMessage(int peer_id, CDataStream& strea
                         std::cout << "[P2P] HOW TO FIX (for the connecting peer):" << std::endl;
                         std::cout << "[P2P] 1. Download the latest binary: https://github.com/dilithion/dilithion/releases" << std::endl;
                         std::cout << "[P2P] 2. Stop your node" << std::endl;
-                        std::cout << "[P2P] 3. Delete your data directory (~/.dilithion or %APPDATA%\\.dilithion)" << std::endl;
+                        std::cout << "[P2P] 3. Reset chain state: run with --reset-chain (preserves wallet.dat)" << std::endl;
                         std::cout << "[P2P] 4. Restart with the new binary" << std::endl;
                         std::cout << "[P2P] ================================================\n" << std::endl;
                     }
