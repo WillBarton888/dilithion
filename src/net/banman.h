@@ -56,6 +56,7 @@ enum class MisbehaviorType : uint16_t {
     BLOCK_TOO_LARGE = 306,           // Block exceeds size limit
     INVALID_BLOCK_TIME = 307,        // Block timestamp invalid
     INVALID_BLOCK_VERSION = 308,     // Block version rejected
+    FUTURE_BLOCK_TIMESTAMP = 309,    // Block timestamp too far in future (clock skew)
 
     // Transaction violations (20-100 points)
     INVALID_TRANSACTION = 400,       // Transaction validation failed
@@ -102,6 +103,7 @@ inline const char* MisbehaviorTypeToString(MisbehaviorType type) {
         case MisbehaviorType::BLOCK_TOO_LARGE: return "block_too_large";
         case MisbehaviorType::INVALID_BLOCK_TIME: return "invalid_block_time";
         case MisbehaviorType::INVALID_BLOCK_VERSION: return "invalid_block_version";
+        case MisbehaviorType::FUTURE_BLOCK_TIMESTAMP: return "future_block_timestamp";
         case MisbehaviorType::INVALID_TRANSACTION: return "invalid_transaction";
         case MisbehaviorType::TX_TOO_LARGE: return "tx_too_large";
         case MisbehaviorType::TX_DUPLICATE_INPUTS: return "tx_duplicate_inputs";
@@ -154,6 +156,7 @@ inline int GetMisbehaviorScore(MisbehaviorType type) {
         case MisbehaviorType::BLOCK_TOO_LARGE: return 100;
         case MisbehaviorType::INVALID_BLOCK_TIME: return 100;
         case MisbehaviorType::INVALID_BLOCK_VERSION: return 100;
+        case MisbehaviorType::FUTURE_BLOCK_TIMESTAMP: return 20;  // 5 offenses → ban (clock skew, not necessarily malicious)
         case MisbehaviorType::TX_TOO_LARGE: return 100;
         case MisbehaviorType::TX_DUPLICATE_INPUTS: return 100;
         case MisbehaviorType::TX_INVALID_SIGNATURE: return 100;

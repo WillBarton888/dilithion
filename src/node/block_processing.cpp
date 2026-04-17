@@ -754,6 +754,13 @@ BlockProcessResult ProcessNewBlock(
                 std::cerr << "[ProcessNewBlock] REJECTED: Block at height " << tsBlockHeight
                           << " failed timestamp validation" << std::endl;
                 g_metrics.RecordInvalidBlock();
+                // Penalize the peer — 20 points per offense (ban after 5).
+                // Clock skew is usually misconfiguration, not malice, so we
+                // give them a chance to fix it before banning.
+                if (peer_id >= 0 && ctx.peer_manager) {
+                    ctx.peer_manager->Misbehaving(peer_id, 0,
+                        MisbehaviorType::FUTURE_BLOCK_TIMESTAMP);
+                }
                 return BlockProcessResult::VALIDATION_ERROR;
             }
         }
@@ -1436,6 +1443,7 @@ BlockProcessResult ProcessNewBlock(
         std::cout.flush();
     }
     auto activate_start = std::chrono::steady_clock::now();
+    int heightBeforeActivate = g_chainstate.GetHeight();
     bool reorgOccurred = false;
     if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
         if (g_verbose.load(std::memory_order_relaxed)) {
@@ -1451,9 +1459,23 @@ BlockProcessResult ProcessNewBlock(
         }
 
         if (reorgOccurred) {
-            std::cout << "[ProcessNewBlock] CHAIN REORGANIZATION occurred!" << std::endl;
-            std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
-                      << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
+            int heightAfterActivate = g_chainstate.GetHeight();
+            bool isVdfTipSwap = (heightAfterActivate == heightBeforeActivate);
+
+            if (isVdfTipSwap) {
+                // VDF tip replacement (same height, lower VDF output won) — routine on VDF chains.
+                // Only log at verbose level to avoid flooding the console.
+                if (g_verbose.load(std::memory_order_relaxed)) {
+                    std::cout << "[ProcessNewBlock] VDF tip replacement at height "
+                              << heightAfterActivate << " -> "
+                              << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
+                              << std::endl;
+                }
+            } else {
+                std::cout << "[ProcessNewBlock] CHAIN REORGANIZATION occurred!" << std::endl;
+                std::cout << "  New tip: " << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
+                          << " (height " << heightAfterActivate << ")" << std::endl;
+            }
             g_metrics.RecordReorg();
 
             g_node_state.new_block_found = true;

@@ -1553,10 +1553,20 @@ std::vector<CChainState::ChainTip> CChainState::GetChainTips() const {
         }
     }
 
-    // Any block NOT in hasChildren set is a tip
+    // Any block NOT in hasChildren set is a tip.
+    // Skip tips more than 100 blocks behind active tip — on VDF chains,
+    // same-height competing blocks create many short-lived forks that
+    // accumulate in mapBlockIndex and never get extended.
+    const int tipPruneDepth = 100;
+    const int minTipHeight = pindexTip->nHeight - tipPruneDepth;
+
     for (const auto& pair : mapBlockIndex) {
         const CBlockIndex* pindex = pair.second.get();
         if (hasChildren.count(pindex) == 0) {
+            // Skip deeply stale tips (except the active tip)
+            if (pindex != pindexTip && pindex->nHeight < minTipHeight)
+                continue;
+
             ChainTip tip;
             tip.height = pindex->nHeight;
             tip.hash = pair.first;
