@@ -2,7 +2,7 @@
 // Caches wallet assets for offline access (keys stay in IndexedDB regardless)
 // Strategy: network-first for everything (always get latest, cache as offline fallback)
 
-const CACHE_NAME = 'dilithion-wallet-v5';
+const CACHE_NAME = 'dilithion-wallet-v6';
 
 // Core assets to cache for offline wallet access
 const CORE_ASSETS = [

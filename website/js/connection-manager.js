@@ -366,8 +366,8 @@ class ConnectionManager {
                 const result = await this.rpcCall('estimatefee', [6]);
                 return { recommended: result, minimum: result * 0.5 };
             } catch (e) {
-                // Default fee if estimation fails
-                return { recommended: 1000, minimum: 500 };
+                // Default fee if estimation fails (consensus: FEE_PER_BYTE=5 → 5000 ions/KB)
+                return { recommended: 5000, minimum: 5000 };
             }
         } else {
             return await this.restCall('/api/v1/fee');

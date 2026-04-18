@@ -47,8 +47,9 @@ class TransactionBuilder {
     async updateFeeRate() {
         try {
             const feeInfo = await this.conn.getFeeRate();
-            this.feeRate = feeInfo.recommended || DEFAULT_FEE_RATE;
-            console.log('[TxBuilder] Fee rate updated:', this.feeRate, 'ions/KB');
+            const reported = feeInfo.recommended || DEFAULT_FEE_RATE;
+            this.feeRate = Math.max(reported, MIN_FEE_RATE);
+            console.log('[TxBuilder] Fee rate updated:', this.feeRate, 'ions/KB (reported:', reported + ')');
         } catch (e) {
             console.warn('[TxBuilder] Failed to fetch fee rate, using default:', this.feeRate);
         }
