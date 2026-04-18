@@ -38,6 +38,19 @@ namespace TxValidation {
      * This prevents computational DoS attacks via high-input-count transactions.
      */
     static const size_t MAX_INPUT_COUNT_PER_TX = 10000;
+
+    /**
+     * Maximum transaction size the wallet is allowed to construct (bytes).
+     *
+     * Mempool admission rejects txs > 1,000,000 bytes (node/mempool.cpp). With
+     * Dilithium3 scriptSigs at ~5,308 bytes per input, a send that pulls in
+     * thousands of tiny UTXOs easily exceeds that cap. Capping selection here
+     * produces a clean "consolidate first" error instead of signing a 50+ MB
+     * transaction that will be rejected downstream.
+     *
+     * 1 KB margin left for serialization overhead / future output variants.
+     */
+    static const size_t MAX_WALLET_TX_SIZE = 999000;
 }
 
 /**

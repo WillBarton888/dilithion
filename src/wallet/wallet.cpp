@@ -3571,12 +3571,25 @@ bool CWallet::SelectCoins(CAmount target_value,
                   return a.nValue > b.nValue;
               });
 
-    // Select coins until we reach target
+    // Select coins until we reach target, but stop before the tx grows past
+    // the wallet size cap (MAX_WALLET_TX_SIZE). A tx that exceeds the mempool
+    // 1 MB limit will be rejected regardless of fee; fail fast with a clear
+    // "consolidate first" message instead.
+    bool size_cap_hit = false;
     for (const CWalletTx& wtx : unspent) {
         // WALLET-006 FIX: Skip locked UTXOs to prevent concurrent transaction conflicts
         COutPoint outpoint(wtx.txid, wtx.vout);
         if (IsLocked(outpoint)) {
             continue;  // Skip this UTXO - it's locked by another transaction
+        }
+
+        // Size-aware cap: estimate the tx size if we added this UTXO and bail
+        // if it would push past the wallet limit. Assumes 2 outputs (recipient +
+        // change), which matches what CreateTransaction builds.
+        size_t prospective_size = Consensus::EstimateDilithiumTxSize(selected_coins.size() + 1, 2);
+        if (prospective_size > TxValidation::MAX_WALLET_TX_SIZE) {
+            size_cap_hit = true;
+            break;
         }
 
         // WALLET-004 FIX: Check for integer overflow when summing coin values
@@ -3598,9 +3611,19 @@ bool CWallet::SelectCoins(CAmount target_value,
         }
     }
 
-    // Insufficient funds
-    error = "Insufficient balance (need " + std::to_string(target_value) +
-            " but only have " + std::to_string(total_value) + ")";
+    // Distinguish "ran out of coins" from "size cap hit before target" — the
+    // fixes are different (top up vs consolidate).
+    if (size_cap_hit) {
+        error = "Send too large: would need more than " +
+                std::to_string(selected_coins.size()) +
+                " inputs (~" + std::to_string(Consensus::EstimateDilithiumTxSize(selected_coins.size(), 2)) +
+                " bytes) to cover " + std::to_string(target_value) + " ions. " +
+                "Covered so far: " + std::to_string(total_value) + " ions. " +
+                "Consolidate small UTXOs first via 'consolidateutxos', then retry.";
+    } else {
+        error = "Insufficient balance (need " + std::to_string(target_value) +
+                " but only have " + std::to_string(total_value) + ")";
+    }
     selected_coins.clear();
     total_value = 0;
     return false;

@@ -7,6 +7,7 @@
 #include <node/blockchain_storage.h>
 #include <node/utxo_set.h>
 #include <consensus/chain.h>
+#include <consensus/fees.h>
 #include <consensus/tx_validation.h>
 #include <wallet/wallet.h>
 #include <util/strencodings.h>
@@ -164,6 +165,13 @@ std::string CRestAPI::HandleBalance(const std::string& address, const std::strin
                 }
 
                 if (matches) {
+                    // Skip UTXOs already spent by an in-flight mempool tx —
+                    // otherwise balance overstates what's actually spendable
+                    // and the light wallet picks a "rich" address whose
+                    // funds are all locked.
+                    if (m_mempool && m_mempool->IsSpent(outpoint)) {
+                        return true;
+                    }
                     if (entry.fCoinBase && currentHeight < entry.nHeight + COINBASE_MATURITY) {
                         immature += entry.out.nValue;
                     } else {
@@ -265,6 +273,14 @@ std::string CRestAPI::HandleUTXOs(const std::string& address, const std::string&
             }
 
             if (matches) {
+                // Skip UTXOs already spent by an in-flight mempool tx. Light
+                // wallets have no independent view of the mempool, so without
+                // this filter they re-select these outputs and the next
+                // broadcast is rejected as a double-spend.
+                if (m_mempool && m_mempool->IsSpent(outpoint)) {
+                    return true;  // continue iterating, skip this one
+                }
+
                 int confirmations = (entry.nHeight > 0 && currentHeight >= (int)entry.nHeight)
                     ? (currentHeight - entry.nHeight + 1) : 0;
 
@@ -518,9 +534,13 @@ std::string CRestAPI::HandleFee(const std::string& clientIP) {
         return BuildRateLimitResponse();
     }
 
-    // Fee estimation (ions per KB) — dynamic based on mempool state
-    int64_t recommended = 1000;  // default: 0.00001 DIL per KB
-    int64_t minimum = 500;       // default: 0.000005 DIL per KB
+    // Fee estimation (ions per KB) — dynamic based on mempool state.
+    // Floor is consensus minimum: FEE_PER_BYTE (5 ions/byte) * 1000 = 5000 ions/KB.
+    // Anything below this gets rejected by Consensus::CheckFee — clients that trusted
+    // a sub-consensus value here produced txs that failed validation.
+    const int64_t kConsensusMinRate = static_cast<int64_t>(Consensus::FEE_PER_BYTE) * 1000;
+    int64_t recommended = kConsensusMinRate;
+    int64_t minimum = kConsensusMinRate;
 
     if (m_mempool) {
         size_t pool_size = 0, pool_bytes = 0;
@@ -530,8 +550,8 @@ std::string CRestAPI::HandleFee(const std::string& clientIP) {
         if (pool_size > 0 && min_fee_rate > 0) {
             // Use mempool fee rates: minimum is the floor, recommended
             // is 2x the current minimum to ensure priority confirmation.
-            minimum = std::max(static_cast<int64_t>(min_fee_rate * 1000), int64_t(500));
-            recommended = std::max(minimum * 2, int64_t(1000));
+            minimum = std::max(static_cast<int64_t>(min_fee_rate * 1000), kConsensusMinRate);
+            recommended = std::max(minimum * 2, kConsensusMinRate);
         }
     }
 

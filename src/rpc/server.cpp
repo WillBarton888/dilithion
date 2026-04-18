@@ -2348,8 +2348,19 @@ std::string CRPCServer::RPC_ConsolidateUTXOs(const std::string& params) {
     unsigned int currentHeight = m_chainstate->GetHeight();
     std::vector<CWalletTx> utxos = m_wallet->ListUnspentOutputs(*m_utxo_set, currentHeight);
 
+    // Filter out UTXOs already locked by in-flight mempool txs. Without this,
+    // back-to-back consolidateutxos calls select the same "smallest 200" and
+    // the second tx is rejected as a double-spend. The lock-filter lets a
+    // batch of consolidations run rapidly without waiting for confirmations.
+    utxos.erase(
+        std::remove_if(utxos.begin(), utxos.end(),
+            [this](const CWalletTx& u) {
+                return m_wallet->IsLocked(COutPoint(u.txid, u.vout));
+            }),
+        utxos.end());
+
     if (utxos.size() <= 1) {
-        throw std::runtime_error("Nothing to consolidate (0 or 1 UTXOs)");
+        throw std::runtime_error("Nothing to consolidate (0 or 1 UTXOs free; others may be locked by in-flight txs)");
     }
 
     // Sort smallest first — consolidate the small ones
@@ -5113,7 +5124,7 @@ std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
 
         oss << "{";
         oss << "\"id\":" << peer->id << ",";
-        oss << "\"addr\":\"" << peer->addr.ToString() << "\",";
+        oss << "\"addr\":\"" << EscapeJSON(peer->addr.ToString()) << "\",";
 
         // Pull CNode fields for inbound/bytes (CNode is the source of truth)
         bool is_inbound = false;
@@ -5135,7 +5146,9 @@ std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
         oss << "\"lastsend\":" << peer->last_send << ",";
         oss << "\"lastrecv\":" << peer->last_recv << ",";
         oss << "\"version\":" << peer->version << ",";
-        oss << "\"subver\":\"" << peer->user_agent << "\",";
+        // user_agent comes from remote peers and can contain arbitrary bytes,
+        // including unescaped quotes that would break JSON. Always escape.
+        oss << "\"subver\":\"" << EscapeJSON(peer->user_agent) << "\",";
         oss << "\"startingheight\":" << peer->start_height << ",";
         oss << "\"relaytxes\":" << (peer->relay ? "true" : "false") << ",";
         oss << "\"misbehavior\":" << peer->misbehavior_score;
