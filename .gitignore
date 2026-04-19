@@ -536,6 +536,32 @@ src/digital_dna/fingerprint_run*.json
 /Userswilldilithion*/
 
 # ═══════════════════════════════════════
+#  PR-C: One-off dev scripts + standalone .cpp (2026-04-19)
+# ═══════════════════════════════════════
+
+# One-off migration / fix Python scripts at root
+/apply_bug*.py
+/edit_makefile.py
+/fix_orphan.py
+/fix_server.ps1
+
+# Standalone test / debug / benchmark .cpp at repo root (not part of test suite)
+/check-db.cpp
+/debug-*.cpp
+/dilithium_benchmark.cpp
+/mine-genesis.cpp
+/test-hello.cpp
+/test-isolation.cpp
+/test-openssl.cpp
+/validate_crypto.cpp
+/compile_benchmark.sh
+
+# Historical misc
+/test-nyc-fix.patch
+/Dockerfile-2025-*
+/Makefile.am.temp*
+
+# ═══════════════════════════════════════
 #  Phase 2a: Obsolete session/phase docs (untracked 2026-04-19)
 # ═══════════════════════════════════════
 /BLOCK-PROPAGATION-IMPROVEMENT-HANDOFF.md
