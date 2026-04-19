@@ -4256,10 +4256,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     auto it = g_mik_peer_map.find(mik);
                     mapped = (it != g_mik_peer_map.end() && it->second == peer_id);
                 }
+                uint64_t now_sec = static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count());
+
                 if (mapped) {
-                    uint64_t now_sec = static_cast<uint64_t>(
-                        std::chrono::duration_cast<std::chrono::seconds>(
-                            std::chrono::system_clock::now().time_since_epoch()).count());
+                    // Full-trust path (Phase 1): mapped peer can overwrite any field.
                     if (g_dna_sample_limiter.allow(peer_id, mik, now_sec)) {
                         auto result = g_node_context.dna_registry->append_sample(*dna);
                         if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
@@ -4273,9 +4275,29 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         // INVALID_DNA (dim-loss) and DB_ERROR are silent — expected under
                         // mixed-version propagation and transient storage issues.
                     }
+                } else {
+                    // Phase 1.1 dim-fill path: unmapped peers can fill missing
+                    // dimensions but cannot overwrite existing values. Protects
+                    // data provenance from relay-peer pollution while unblocking
+                    // propagation for the common case (discovery response from a
+                    // peer that happens to have enriched DNA for this MIK).
+                    int filled = 0;
+                    auto merged = digital_dna::merge_fill_missing_dims(*existing, *dna, &filled);
+                    if (filled == 0) {
+                        // Nothing to add — unmapped peer has no new info. Silent drop.
+                    } else if (g_dna_sample_limiter.allow(peer_id, mik, now_sec)) {
+                        auto result = g_node_context.dna_registry->append_sample(merged);
+                        if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
+                            result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED) {
+                            char hex[9];
+                            snprintf(hex, sizeof(hex), "%02x%02x%02x%02x",
+                                     mik[0], mik[1], mik[2], mik[3]);
+                            std::cout << "[DNA] Filled " << filled << " dim(s) for MIK "
+                                      << hex << "... from peer " << peer_id
+                                      << " (unmapped)" << std::endl;
+                        }
+                    }
                 }
-                // Unmapped peer: silent drop. The mapping update below lets future
-                // samples from this peer for this MIK pass.
             }
 
             // Phase 2: Track MIK -> peer_id mapping for verification routing
