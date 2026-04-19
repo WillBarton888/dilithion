@@ -1,326 +1,250 @@
-# Dilithion Changelog
+# Changelog
 
-All notable changes to the Dilithion cryptocurrency project will be documented in this file.
+All notable changes to Dilithion are documented here.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+Format based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+This project follows [Semantic Versioning](https://semver.org/).
+
+- **Added** — new features
+- **Changed** — changes to existing features
+- **Deprecated** — features marked for removal
+- **Removed** — removed features
+- **Fixed** — bug fixes
+- **Security** — security-related changes
+
+For releases older than v4.0.0, see git tags and
+[docs/archive/CHANGELOG-LEGACY-pre-v3.md](docs/archive/CHANGELOG-LEGACY-pre-v3.md).
+
+---
 
 ## [Unreleased]
 
-### Deficiency Remediation - Critical Bug Fixes (October 28, 2025)
-
-#### CRITICAL FIX: UTXO Serialization Format Mismatch
-- **Impact**: CRITICAL - Transaction validation failures due to corrupted UTXO data
-- **Root Cause**: Inconsistent serialization format between SerializeUTXOEntry() and ApplyBlock()/UndoBlock()
-- **Files**: `src/node/utxo_set.cpp` (lines 451-476, 659-683)
-- **Fix**: Standardized serialization format across all code paths
-  - Format: height (4) + fCoinBase (1) + nValue (8) + scriptPubKey_size (4) + scriptPubKey
-- **Testing**: tx_validation_tests now passing 7/7 (was 4/7)
-- **Status**: ✅ RESOLVED
-
-#### CRITICAL FIX: Wallet Unlock for Unencrypted Wallets
-- **Impact**: CRITICAL - Users unable to create transactions with unencrypted wallets
-- **Root Cause**: IsUnlockValid() rejected unencrypted wallets due to fWalletUnlocked=false default
-- **Files**: `src/wallet/wallet.cpp` (lines 511-529)
-- **Fix**: Added check for unencrypted wallets in IsUnlockValid()
-  - Returns true immediately if !masterKey.IsValid() (wallet not encrypted)
-- **Testing**: wallet_tests original "locked/unlock timeout" error eliminated
-- **Status**: ✅ RESOLVED
-
-#### FIX: DNS Seed Node Empty List
-- **Impact**: MEDIUM - Automated peer discovery unavailable
-- **Root Cause**: InitializeSeedNodes() left seed_nodes vector empty
-- **Files**: `src/net/peers.cpp` (lines 317-324)
-- **Fix**: Added testnet seed node (localhost 127.0.0.1:8444)
-  - PRODUCTION NOTE: Replace with real community IPs before mainnet
-- **Testing**: net_tests now fully passing
-- **Status**: ✅ RESOLVED
-
-#### Test Suite Improvements
-- **Files**: `src/test/tx_validation_tests.cpp`
-- **Changes**: Updated test fee amounts from unrealistic values (10-50 coins) to realistic values (0.01 coins = 1000000 ions)
-- **Rationale**: Tests were exceeding MAX_REASONABLE_FEE causing false failures
-
-#### Overall Impact
-- **Test Pass Rate**: Improved from 79% (11/14) to 93% (13/14)
-- **Critical Issues**: All 3 critical deficiencies resolved with NO workarounds
-- **Production Status**: ✅ TESTNET READY
+Tracked but not yet shipped. See `git log origin/main...HEAD` on a fresh checkout.
 
 ---
 
-### Phase 4 - Security Hardening (October 28, 2025)
+## [v4.0.16] — 2026-04-13
 
-#### Critical Security Fixes
+### Fixed
+- Node no longer exits with status 141 when a peer socket closes mid-write; `SIGPIPE` is now ignored process-wide.
 
-**FIXED: Unchecked std::stoi() Exceptions Causing DoS Crashes**
-- **Impact**: CRITICAL - Malformed CLI arguments or RPC parameters could crash the node
-- **Locations**: 6 instances across CLI and RPC parameter parsing
-- **Files**: `src/node/dilithion-node.cpp`, `src/rpc/server.cpp`
+## [v4.0.15] — 2026-04-12
 
-**CLI Argument Parsing** (`dilithion-node.cpp`)
-- `--rpcport=<value>`: Now validates port range (1-65535) with try-catch
-  - Invalid format: "Error: Invalid RPC port format (not a number)"
-  - Out of range: "Error: Invalid RPC port (must be 1-65535)"
-- `--port=<value>`: Now validates P2P port range with try-catch
-  - Invalid format: "Error: Invalid P2P port format (not a number)"
-  - Out of range: "Error: Invalid P2P port (must be 1-65535)"
-- `--threads=<value>`: Now validates thread count (1-256) with try-catch
-  - Invalid format: "Error: Invalid thread count format (not a number)"
-  - Out of range: "Error: Invalid thread count (must be 1-256)"
+### Added
+- `--quiet` flag and richer `--verbose` gating so default logs are clean and actionable.
+- Clearer block-lifecycle messages for both DIL and DilV during mining.
+- Improved VPN/datacenter error message; mining guide refreshed to match.
 
-**Peer Address Parsing** (`dilithion-node.cpp`)
-- `--connect=<ip:port>`: Now validates port in peer address with try-catch
-  - Invalid format: "Invalid port format in address (expected ip:port)"
-  - Out of range: "Invalid port number in address (must be 1-65535)"
-- `--addnode=<ip:port>`: Same validation as --connect
+### Fixed
+- DilV wrapper now uses an absolute path so auto-restart picks up the correct binary version.
 
-**RPC Parameter Parsing** (`server.cpp`)
-- `getblockhash` height parameter: Now validates with try-catch
-  - Invalid format: "Invalid height parameter format (not a number)"
-  - Out of range: "Height parameter out of range"
-  - Negative values: "Invalid height parameter (must be non-negative)"
+## [v4.0.14] — 2026-04-11
 
-**Attack Vector Eliminated**:
-```bash
-# Before Phase 4 (CRASH):
-./dilithion-node --rpcport=INVALID  # → Uncaught exception, node crash
+### Fixed
+- Long-running Linux nodes no longer OOM: `malloc_trim` + per-thread arena limit applied (systemic leak workaround).
+- Wallet UTXO consolidation now sends to the intended address; explorer no longer counts immature outputs as confirmed balance.
+- Consensus: DFMP preflight added to VDF distribution replacement (BUG #285).
+- DilV: raised `dfmpAssumeValidHeight` to 18,700 and added checkpoint (BUG #285 follow-through).
+- Wallet: chain switching, password persistence, and general UX polish.
 
-# After Phase 4 (GRACEFUL):
-./dilithion-node --rpcport=INVALID  # → Error message, clean exit
-```
+## [v4.0.13] — 2026-04-10
 
-#### Code Quality Improvements
+### Added
+- REST/RPC: `dumpprivkey` and `importprivkey` for key portability.
+- Wallet: `sendtoaddress` accepts optional `from_address` to constrain the spending wallet.
+- Bridge: additional REST API features for balance and history queries.
 
-**REMOVED: Debug Output from Production Code**
-- **Impact**: HIGH - Cleaner production logs, reduced log spam
-- **Files**: `src/node/dilithion-node.cpp`
-- **Changes**: Removed 18 instances of `[DEBUG]` output
-  - Removed verbose coinbase creation debug (3 lines)
-  - Removed verbose coinbase verification debug (5 lines)
-  - Removed verbose wallet crediting debug (7 lines)
-  - Removed verbose transaction processing debug (3 lines)
-- **Production Logging**: Retained clean `[Wallet]`, `[Mining]`, `[Blockchain]` prefixed logs
+### Fixed
+- Digital DNA: thermal, bandwidth, and clock-drift dimensions collect correctly on all platforms.
+- Digital DNA: false-positive Sybil-cluster from empty perspective data eliminated.
+- Logging: removed duplicate timestamp; mining address shown in startup banner.
 
-**Before Phase 4**:
-```
-[DEBUG] Coinbase creation:
-[DEBUG]   Miner pubkey hash size: 20 bytes
-[DEBUG]   scriptPubKey size: 25 bytes
-[DEBUG] Coinbase verification:
-[DEBUG]   scriptPubKey size: 25 bytes
-...18 verbose debug lines...
-```
+### Changed
+- Verbose logging cleanup across network/sync code.
 
-**After Phase 4**:
-```
-[Wallet] Coinbase credited: 50.00000000 DIL
-[Wallet] Total Balance: 50.00000000 DIL (5000000000 ions)
-```
+## [v4.0.12] — 2026-04-09
 
-**ADDED: Consensus Parameter Constants** (`src/consensus/params.h`)
-- **Impact**: HIGH - Improved maintainability, eliminated magic numbers
-- **New Header**: Comprehensive consensus parameters header
-- **Categories**:
-  - Block Reward Parameters (subsidy, halving interval, maturity)
-  - Network Protocol Limits (max inv size, max request size, max block size)
-  - Port Range Validation (min/max port, default ports)
-  - Mining Parameters (threads, block time, difficulty adjustment)
-  - Chain Security (max reorg depth, max headers, max blocks in transit)
-  - P2P Network (connection limits, timeouts)
-  - Mempool Parameters (size limits, fees, tx limits)
-  - Script and Transaction Limits (max sigops, max script size)
-  - Cryptographic Constants (Dilithium3 sizes, SHA3 sizes)
-  - Time Constants (max future block time, median time span)
+### Added
+- Wallet: one-click **Optimize** button for UTXO consolidation.
 
-**REPLACED: Magic Numbers with Named Constants**
-- **Files**: `src/node/dilithion-node.cpp`
+### Fixed
+- Windows: graceful shutdown when the console window is closed.
+- Windows: PID-file false positive when the OS reused a PID for an unrelated process.
+- CI: resolved all remaining fuzz-target build failures blocking audit-readiness.
 
-**Block Subsidy Calculation**:
-```cpp
-// Before:
-int64_t nSubsidy = 50 * COIN;
-int nHalvings = nHeight / 210000;
-if (nHalvings >= 64) {
-    nSubsidy = 0;
-}
+### Changed
+- Updated Telegram links; added Mastodon verification.
 
-// After:
-int64_t nSubsidy = Consensus::INITIAL_BLOCK_SUBSIDY;
-int nHalvings = nHeight / Consensus::SUBSIDY_HALVING_INTERVAL;
-if (nHalvings >= Consensus::SUBSIDY_HALVING_BITS) {
-    nSubsidy = 0;
-}
-```
+## [v4.0.11] — 2026-04-08
 
-**Port Validation**:
-```cpp
-// Before:
-if (port <= 0 || port > 65535) {
+### Security
+- Added hard checkpoints at **DIL height 40,000** and **DilV height 15,000**.
 
-// After:
-if (port < Consensus::MIN_PORT || port > Consensus::MAX_PORT) {
-```
+### Fixed
+- Mining: attestation deadlock resolved when DNA was not yet cached (BUG #284).
+- Bridge: prevented SQLite binding error in `get_block_hash` fallback path.
+- Mempool: transactions are now preserved across VDF distribution reorgs.
 
-**Thread Validation**:
-```cpp
-// Before:
-if (threads <= 0 || threads > 256) {
+## [v4.0.10] — 2026-04-06
 
-// After:
-if (threads < Consensus::MIN_MINING_THREADS || threads > Consensus::MAX_MINING_THREADS) {
-```
+### Fixed
+- IBD: skip MIK-ban check during initial block download to prevent sync stalls.
+- IBD: store below-checkpoint headers to prevent fresh-sync stalls.
+- DIL: attestation + DNA binding correctly wired for the height-40,000 activation.
+- Networking: capped DEDUP misbehavior penalty so IBD clients are not banned by honest duplicates.
 
-#### Testing
+## [v4.0.9] — 2026-04-05
 
-**Input Validation Tests**:
-- All CLI arguments tested with invalid formats (non-numeric strings)
-- All CLI arguments tested with out-of-range values (negative, too large)
-- All CLI arguments tested with edge cases (0, MAX_INT, empty strings)
-- All CLI arguments tested with valid inputs (confirmed no regression)
-- RPC methods tested with malformed parameters
-- Peer addresses tested with invalid port formats
+### Added
+- Explorer: address-prefix search.
 
-**Compilation**:
-- Zero compilation errors
-- All binaries build successfully (dilithion-node: 937K)
-- All existing tests pass (no regressions)
+### Fixed
+- DIL: raised `dfmpAssumeValidHeight` to 34,000 to match checkpoint placement.
+- Mining: added IBD check to the RandomX `startmining` RPC so miners don't waste work on stale tips.
+- DilV: raised checkpoint to 8,370 (covers all pre-ban blocks).
+- DilV: skip MIK-ban + cooldown during IBD for checkpointed blocks (BUG #284).
 
-**Manual Testing**:
-```bash
-# Invalid format handling:
-./dilithion-node --rpcport=INVALID  # ✓ Graceful error
-./dilithion-node --port=ABC         # ✓ Graceful error
-./dilithion-node --threads=XYZ      # ✓ Graceful error
+## [v4.0.8] — 2026-04-03
 
-# Out of range handling:
-./dilithion-node --rpcport=999999   # ✓ Rejected with error
-./dilithion-node --threads=0        # ✓ Rejected with error
-./dilithion-node --threads=1000     # ✓ Rejected with error
+### Added
+- Sybil defense Layer 2 (MIK expiration) and Layer 3 (registration rate limit).
+- Bridge: arb bot hardened with slippage protection and timing jitter.
+- Website: auto-detects DIL vs DilV chain and shows the correct unit.
 
-# Valid inputs (no regression):
-./dilithion-node --rpcport=8445     # ✓ Works normally
-./dilithion-node --port=8444        # ✓ Works normally
-./dilithion-node --threads=4        # ✓ Works normally
-```
+### Fixed
+- REST API: strict P2PKH script matching in balance endpoint.
+- Packaging: bootstrap script rewrite + safety checks in release scripts.
+- DilV: stale-attestation refresh in template builder (BUG #283).
+- Seeds: `--externalip` passed so seeds report the correct `seed_id`.
 
----
+## [v4.0.7] — 2026-04-03
 
-### Phase 3 - Testnet Readiness (October 28, 2025)
+### Added
+- DilV Sybil defense: Phases 2A, 4, 5.
+- Wallet: encryption warning banner and "forgot password" hints.
+- Explorer: Dev Fund address labeled on the holders page.
 
-#### Added
-- **Manual Peer Setup Documentation** (`docs/MANUAL-PEER-SETUP.md`)
-  - Complete guide for `--addnode` and `--connect` usage
-  - Network topology recommendations (star, mesh)
-  - Troubleshooting guide for connectivity issues
-  - Security best practices
-  - 3-node testnet example setup
+### Fixed
+- IBD: fork detection suppressed during bulk IBD (BUG #282).
+- Networking: all `Misbehaving()` calls now tagged with misbehavior type for ban diagnostics.
+- Wallet: password validated at prompt; requirement relaxed from 16 to 8 characters.
+- Wallet: HD scan now covers both chains and change addresses; address panel supports light mode.
 
-- **Transaction Hex Serialization** (`src/util/strencodings.h`, `src/util/strencodings.cpp`)
-  - `HexStr()` - Convert byte arrays to hex strings
-  - `ParseHex()` - Parse hex strings to byte vectors
-  - `IsHex()` - Validate hex string format
-  - `HexDigit()` - Convert hex character to value
+## [v4.0.6] — 2026-04-01
 
-- **RPC Method Implementations**
-  - `signrawtransaction` - Fully functional (deserialize → sign → serialize)
-  - `sendrawtransaction` - Fully functional (deserialize → validate → broadcast)
-  - `startmining` - Production-ready with block template creation
+### Security
+- DilV: added checkpoint at height 2,961 to reject the exploit chain.
 
-#### Changed
-- Updated help text for `signrawtransaction` and `sendrawtransaction`
-- Removed "not fully implemented" warnings from RPC methods
+## [v4.0.5] — 2026-04-01
 
----
+### Security
+- DilV: reverted stall exemption; reduced cooldown window from 1,920 to 200; raised consecutive-miner stall threshold from 600 s to 3,600 s; added checkpoint and full Sybil defense following the 97-MIK round-robin attack.
+- DilV: permanently-invalid blocks are now skipped in `ProcessNewBlock`.
 
-### Phase 2 - Critical Security Fixes (October 28, 2025)
+### Added
+- Wallet: lock/switch wallet and unlock from welcome screen.
+- Service worker: network-first policy; HD scan for both chains and change addresses.
 
-#### Security
+## [v4.0.4] — 2026-03-30
 
-**FIXED: VULN-002 - Wallet Unlock Timeout Race Condition**
-- **Severity**: CRITICAL
-- **Impact**: Unauthorized transaction signing after wallet timeout
-- **Files**: `src/wallet/wallet.h`, `src/wallet/wallet.cpp`
-- **Fix**: Added atomic `IsUnlockValid()` helper method
-- **Details**: Prevents race condition between timeout check and signing operation
+### Added
+- Website: live peer-count and network-stats on landing page (no more hardcoded values).
+- Website: mobile-responsive design across all pages.
+- Mining guide page added; mining calculator rebranded to gold/black.
 
-**FIXED: VULN-003 - Missing Signature Message Validation**
-- **Severity**: CRITICAL
-- **Impact**: Signature replay attacks, transaction malleability
-- **Files**: `src/consensus/tx_validation.cpp`, `src/wallet/wallet.cpp`
-- **Fix**: Enhanced signature message to include transaction version
-- **BREAKING CHANGE**: Signature message now 40 bytes (was 36 bytes)
-  - Format: tx_hash (32) + input_index (4) + tx_version (4)
-  - All nodes must upgrade for consensus compatibility
+### Fixed
+- Genesis height bug in HD wallet dashboard.
+- Mining address UX.
+- Explorer includes pre-fund in DilV circulating supply; pulls real difficulty from nodes API.
 
-**FIXED: SHA3 Streaming API Critical Bug**
-- **Severity**: CRITICAL
-- **Impact**: Runtime crashes from unimplemented streaming API
-- **Files**: `src/crypto/sha3.h`, `src/crypto/sha3.cpp`
-- **Fix**: Removed dangerous `CSHA3_256`/`CSHA3_512` classes
-- **Changes**: Simplified to production-ready one-shot functions only
+## [v4.0.3] — 2026-03-30
+
+### Added
+- PWA support for mobile wallet installation.
+- Standalone web wallet: bridge deposits, HD scan, unlock prompt.
+- WASM Dilithium rebuilt from reference implementation.
+
+### Fixed
+- BUG #281 suite:
+  - Moved DNA hash-equality check outside `skipValidation`.
+  - Moved attestation check outside `skipValidation` so it runs during VDF reorgs.
+  - Raised DilV `dfmpAssumeValidHeight` to 2,000; added checkpoint fix.
+  - Corrected `seedAttestationActivationHeight` vs `dfmpAssumeValidHeight` mix-up.
+  - Unblocked DilV IBD past block 1,078.
+- Stale `skipValidation` comments removed from `chain.cpp`.
+
+## [v4.0.2] — 2026-03-29
+
+### Fixed
+- **Root cause of IBD rejection (BUG #280)**: cooldown is now correctly enforced during reorgs. This was the top IBD blocker reported by miners post-v4.0.0.
+
+## [v4.0.1] — 2026-03-29
+
+### Fixed
+- IBD: assume-valid raised to 5,000; startup re-validation skipped below it.
+- IBD: stall timeout race with RandomX header processing.
+- IBD: undo cooldown-tracker state during re-validation.
+
+### Added
+- Cooldown and attestation trace logging for IBD investigation.
+
+## [v4.0.0] — 2026-03-28
+
+The first v4 release shipped the **DilV chain reset** and the **DIL residential-attestation activation at height 40,000**.
+
+### Added
+- **DilV chain reset** with DNA-bound registration PoW and mandatory DNA from genesis.
+- **Mainnet seed attestation** pubkeys + 4-seed Byzantine (3-of-4) tolerance.
+- Miner identity resolution and peer analysis added to the forensic tool.
+- `getfullmikdistribution` now includes MIK-to-address mapping; `getblock` exposes MIK.
+- Seed attestation activated on DilV testnet at height 15.
+
+### Changed
+- Coinbase `scriptSig` limit raised from 6 KB to 20 KB to accommodate Dilithium attestations.
+- Dev fund / dev reward split across 3 bridge wallets; pre-fund bookkeeping updated.
+- Explorer: shows pre-fund supply percentage; labels the bridge wallet.
+
+### Fixed
+- Seed attestation pubkeys were being read from the private-key offset — corrected.
+- Auto-recollect attestations when a block is rejected.
+- DilV genesis timestamp corrected to March 28, 2026 UTC.
+- Genesis block exempt from the attestation check (height 0).
+- DNA P2P discovery: rate-limit collision + misbehavior penalty resolved.
 
 ---
 
-### Phase 1 - Initial Security Fixes (October 27-28, 2025)
+## Earlier releases
 
-#### Security
+v3.9.0 and earlier (~March 2026 and before) are documented via git tags and
+commit messages. Run `git log --oneline --tags --no-walk --decorate` or view
+[github.com/dilithion/dilithion/releases](https://github.com/dilithion/dilithion/releases)
+for a chronological list.
 
-**FIXED: VULN-001 - Integer Overflow in GetBalance()**
-- **Severity**: CRITICAL
-- **Impact**: Wallet balance corruption, potential fund loss
-- **Files**: `src/wallet/wallet.cpp`
-- **Fix**: Added overflow detection before balance addition
+Key pre-v4 milestones:
 
-**FIXED: VULN-006 - Missing Base58 Length Limits**
-- **Severity**: HIGH
-- **Impact**: DoS via unbounded Base58 string allocation
-- **Files**: `src/wallet/wallet.cpp`
-- **Fix**: Added `MAX_BASE58_LEN = 1024` byte limit
+- **v3.8.0–v3.9.0** (mid-March 2026): mempool propagation fixes, DilV 97-MIK Sybil incident response, stall-exemption removal, dual-window cooldown, protocol bump.
+- **v3.7.x** (early March 2026): Digital DNA live on mainnet at height 30,000 (DIL); DilV active from genesis; 148+ DNA unit tests; 5-layer Sybil defense architecture live.
+- **v3.6.x** (late Feb / early March 2026): Timestamp validation hard fork at DIL height 24,500 (600 s future-time limit); ASERT re-anchor.
+- **v3.0.x** (Feb 2026): Bridge to Base L2 mainnet live (wDIL + wDilV ERC-20 contracts, Aerodrome pools, relayer); explorer live at explorer.dilithion.org.
 
-**FIXED: VULN-007 - Mempool Double-Spend Detection Missing**
-- **Severity**: HIGH
-- **Impact**: Double-spend attacks via mempool manipulation
-- **Files**: `src/node/mempool.h`, `src/node/mempool.cpp`
-- **Fix**: Added `mapSpentOutpoints` tracking and conflict checks
+Pre-v3 content previously in this file has been archived to
+[docs/archive/CHANGELOG-LEGACY-pre-v3.md](docs/archive/CHANGELOG-LEGACY-pre-v3.md).
 
-**FIXED: VULN-008 - No Chain Reorganization Depth Limit**
-- **Severity**: HIGH
-- **Impact**: DoS via deep reorg attacks
-- **Files**: `src/consensus/chain.cpp`
-- **Fix**: Added `MAX_REORG_DEPTH = 100` blocks limit
-
----
-
-## Production Readiness Status
-
-### ✅ READY FOR TESTNET LAUNCH
-- All CRITICAL security vulnerabilities fixed
-- All HIGH priority security issues addressed
-- All input validation hardened with exception handling
-- Production-quality logging and error messages
-- Comprehensive consensus parameters
-- Clean, maintainable codebase
-- Zero compilation errors
-- Full test coverage
-
-### 📋 Pending for v1.1
-- Transaction blockchain indexing (gettransaction currently mempool-only)
-- DNS seed node infrastructure
-- Difficulty calculation display
-- Peer info integration
-- Performance optimizations
-- Additional monitoring tools
-
----
-
-## Contributors
-
-- **AI-Assisted Development**: Claude Code (Anthropic)
-- **Project Lead**: Will Barton
-- **Security Audits**: Comprehensive AI-driven security analysis
-
----
-
-## License
-
-MIT License - See LICENSE file for details
+[Unreleased]: https://github.com/dilithion/dilithion/compare/v4.0.16...HEAD
+[v4.0.16]: https://github.com/dilithion/dilithion/compare/v4.0.15...v4.0.16
+[v4.0.15]: https://github.com/dilithion/dilithion/compare/v4.0.14...v4.0.15
+[v4.0.14]: https://github.com/dilithion/dilithion/compare/v4.0.13...v4.0.14
+[v4.0.13]: https://github.com/dilithion/dilithion/compare/v4.0.12...v4.0.13
+[v4.0.12]: https://github.com/dilithion/dilithion/compare/v4.0.11...v4.0.12
+[v4.0.11]: https://github.com/dilithion/dilithion/compare/v4.0.10...v4.0.11
+[v4.0.10]: https://github.com/dilithion/dilithion/compare/v4.0.9...v4.0.10
+[v4.0.9]: https://github.com/dilithion/dilithion/compare/v4.0.8...v4.0.9
+[v4.0.8]: https://github.com/dilithion/dilithion/compare/v4.0.7...v4.0.8
+[v4.0.7]: https://github.com/dilithion/dilithion/compare/v4.0.6...v4.0.7
+[v4.0.6]: https://github.com/dilithion/dilithion/compare/v4.0.5...v4.0.6
+[v4.0.5]: https://github.com/dilithion/dilithion/compare/v4.0.4...v4.0.5
+[v4.0.4]: https://github.com/dilithion/dilithion/compare/v4.0.3...v4.0.4
+[v4.0.3]: https://github.com/dilithion/dilithion/compare/v4.0.2...v4.0.3
+[v4.0.2]: https://github.com/dilithion/dilithion/compare/v4.0.1...v4.0.2
+[v4.0.1]: https://github.com/dilithion/dilithion/compare/v4.0.0...v4.0.1
+[v4.0.0]: https://github.com/dilithion/dilithion/releases/tag/v4.0.0
