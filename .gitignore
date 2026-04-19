@@ -236,7 +236,8 @@ __pycache__/
 !.gitignore
 !.gitattributes
 !.github/
-!.claude/
+# .claude/ — intentionally NOT whitelisted: private AI-assistant config
+# lives per-machine, should not be tracked in the repo.
 
 # ═══════════════════════════════════════
 #  Project Organization (Added 2025-11-10)
@@ -386,14 +387,13 @@ Support Images/
 /health-check.sh
 /msys2-build.cmd
 
-# Local Claude state (per-machine, not shared)
-.claude/handoff.md
-.claude/bug_tracker.md
-.claude/plans/
-.claude/skills/
-.claude/*.sh
-.claude/*.lock
+# AI-assistant local config (per-machine, never tracked)
+.claude/
 /CLAUDE.md
+
+# Old-style bug/debug archive at repo root (moved off main 2026-04-19,
+# preserved on docs-archive-snapshot branch)
+/archive/
 
 # Stale single-bug implementation plan
 /PLAN.md
