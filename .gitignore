@@ -457,6 +457,62 @@ bridge/relayer/broadcast_body.json
 src/digital_dna/fingerprint_run*.json
 
 # ═══════════════════════════════════════
+#  Build outputs at repo root (2026-04-19)
+# ═══════════════════════════════════════
+
+# Compiled binaries at repo root (Makefile targets output here)
+/check-wallet-balance
+/dilithion-miner
+/dilithion-node
+/dilv-node
+/check-wallet-balance.exe
+/dilithion-miner.exe
+/difficulty_determinism_test
+/difficulty_determinism_test.exe
+/fuzz_compactsize
+/fuzz_compactsize.exe
+/fuzz_subsidy
+/fuzz_subsidy.exe
+/test_passphrase_validator
+/test_passphrase_validator.exe
+
+# DLLs at repo root (copied from MSYS2 mingw64/bin during Windows packaging;
+# the authoritative copies live in MSYS2, not in this repo)
+/libcrypto-3-x64.dll
+/libgcc_s_seh-1.dll
+/libgmp-10.dll
+/libgmpxx-4.dll
+/libleveldb.def
+/libleveldb.dll
+/libssl-3-x64.dll
+/libstdc++-6.dll
+/libwinpthread-1.dll
+
+# LCOV coverage HTML reports dumped at repo root
+/index.html
+/index-sort-f.html
+/index-sort-l.html
+/index-detail.html
+/index-detail-sort-f.html
+/index-detail-sort-l.html
+/consensus/
+/core/
+/crypto/
+/primitives/
+/util/
+
+# Coverage + CI output
+/coverage.info
+/coverage_filtered.info
+/ci_coverage/
+/corpus_backups/
+/test-results/
+
+# Benchmark result dumps
+/difficulty_results.json
+/difficulty_results_*.json
+
+# ═══════════════════════════════════════
 #  Phase 2a: Obsolete session/phase docs (untracked 2026-04-19)
 # ═══════════════════════════════════════
 /BLOCK-PROPAGATION-IMPROVEMENT-HANDOFF.md
