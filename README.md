@@ -31,14 +31,13 @@
 
 ## Disclaimers
 
-**This is experimental software developed with AI assistance (Claude Code):**
-- **Open Source:** MIT License - full transparency
-- **AI-Assisted Development:** Built with Claude Code assistance
-- **No Professional Audit:** Community review only (professional audit: TBD)
+- **Open Source:** MIT License — full transparency
+- **AI-Assisted Development:** Built with Claude Code; every change reviewed before shipping
+- **Security Audit:** Pre-audit hardening complete; engagement with [Hacken](https://hacken.io) planned — no findings published yet
 - **Use at Own Risk:** No guarantees of security, value, or success
 - **Not Financial Advice:** DYOR (Do Your Own Research)
 
-**Seeking Code Review:** We actively welcome expert review from cryptographers, blockchain developers, and security researchers. See [SECURITY.md](SECURITY.md) for details.
+**Seeking Code Review:** We actively welcome expert review from cryptographers, blockchain developers, and security researchers. See [SECURITY.md](SECURITY.md) and [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md) for how to engage.
 
 ---
 

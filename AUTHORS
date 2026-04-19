@@ -1,0 +1,55 @@
+Dilithion Core Contributors
+============================
+
+This file lists the people who have contributed code, documentation, or
+research to the Dilithion project. See the Acknowledgements section below
+for the upstream projects Dilithion builds upon.
+
+To add your name, open a pull request — contributions are welcome.
+
+Core developers
+---------------
+Will Barton <will@bananatree.com.au>              (project lead, core)
+Candlestick <redback@tuta.com>                    (contributor)
+
+Community contributors
+----------------------
+(Add yourself here when you submit your first PR!)
+
+Development assistance
+----------------------
+This project is developed with the assistance of Anthropic's Claude Code.
+Every AI-assisted change is human-reviewed before landing. See
+README.md "Disclaimers" for the full statement.
+
+Acknowledgements
+----------------
+Dilithion stands on the shoulders of a number of open-source projects.
+We gratefully acknowledge the work of:
+
+  * Bitcoin Core developers
+    https://github.com/bitcoin/bitcoin
+    Ported patterns for AddrMan, peer scoring, compact blocks,
+    headers sync, and consensus engineering.
+
+  * pqcrystals/dilithium (NIST FIPS 204 reference implementation)
+    https://github.com/pqcrystals/dilithium
+    Post-quantum digital signatures.
+
+  * tevador/RandomX
+    https://github.com/tevador/RandomX
+    CPU-friendly, ASIC-resistant proof-of-work.
+
+  * Chia Network / chiavdf
+    https://github.com/Chia-Network/chiavdf
+    Verifiable delay function implementation.
+
+  * OpenZeppelin Contracts (bridge / Base L2)
+    https://github.com/OpenZeppelin/openzeppelin-contracts
+    Audited primitives for the wrapped-token ERC-20s.
+
+  * NIST SP 800-208, FIPS 202 (SHA-3 / Keccak), FIPS 204 (Dilithium)
+    Standards the implementation is measured against.
+
+  * Python, CMake, Boost, GMP, LevelDB, libsecp256k1 — foundational
+    libraries that Dilithion depends on.
