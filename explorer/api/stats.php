@@ -11,6 +11,7 @@
  */
 
 require_once __DIR__ . "/rpc.php";
+require_once __DIR__ . "/metrics_helpers.php";
 
 // Chain-specific cache files
 $config = getChainConfig();
@@ -18,7 +19,7 @@ $chainSuffix = $config['chain'] === 'dilv' ? '-dilv' : '';
 $cacheFile = __DIR__ . "/../cache/stats{$chainSuffix}.json";
 if (file_exists($cacheFile)) {
     $cacheAge = time() - filemtime($cacheFile);
-    if ($cacheAge < 10) {
+    if ($cacheAge < 30) {
         $cached = file_get_contents($cacheFile);
         if ($cached !== false) {
             $data = json_decode($cached, true);
@@ -109,6 +110,15 @@ if (!$holderCacheValid) {
     }
 }
 
+// Extended metrics (introduced Apr 2026)
+$networkInfo  = dilithionRPC('getnetworkinfo');
+$chainVersion = is_array($networkInfo) ? ($networkInfo['subversion'] ?? null) : null;
+
+$activeMiners    = getActiveMinerCount($height, $config['chain']);
+$nodesOnlineInfo = getNodesOnline($config['rpc_port'], $config['chain']);
+$totalTxs        = getTotalTransactions($height, $config['chain']);
+$nextHalving     = getNextHalving($height);
+
 $result = [
     "blocks" => $height,
     "difficulty" => $difficulty,
@@ -123,6 +133,14 @@ $result = [
     "unit" => $config['unit'],
     "chainName" => $config['name'],
     "consensusType" => $config['chain'] === 'dilv' ? 'VDF' : 'RandomX',
+    // Extended metrics
+    "chainVersion" => $chainVersion,
+    "activeMiners" => $activeMiners,          // distinct MIKs in last active window
+    "activeMinersWindow" => $config['chain'] === 'dilv' ? ACTIVE_WINDOW_DILV : ACTIVE_WINDOW_DIL,
+    "nodesOnline" => $nodesOnlineInfo['nodesOnline'] ?? null,
+    "seedsResponding" => $nodesOnlineInfo['seedsResponding'] ?? null,
+    "totalTransactions" => $totalTxs,
+    "nextHalving" => $nextHalving,
 ];
 
 // Write cache
