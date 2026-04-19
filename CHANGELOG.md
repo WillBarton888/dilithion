@@ -13,7 +13,7 @@ This project follows [Semantic Versioning](https://semver.org/).
 - **Security** — security-related changes
 
 For releases older than v4.0.0, see git tags and
-[docs/archive/CHANGELOG-LEGACY-pre-v3.md](docs/archive/CHANGELOG-LEGACY-pre-v3.md).
+[docs/CHANGELOG-LEGACY.md](docs/CHANGELOG-LEGACY.md).
 
 ---
 
@@ -228,7 +228,7 @@ Key pre-v4 milestones:
 - **v3.0.x** (Feb 2026): Bridge to Base L2 mainnet live (wDIL + wDilV ERC-20 contracts, Aerodrome pools, relayer); explorer live at explorer.dilithion.org.
 
 Pre-v3 content previously in this file has been archived to
-[docs/archive/CHANGELOG-LEGACY-pre-v3.md](docs/archive/CHANGELOG-LEGACY-pre-v3.md).
+[docs/CHANGELOG-LEGACY.md](docs/CHANGELOG-LEGACY.md).
 
 [Unreleased]: https://github.com/dilithion/dilithion/compare/v4.0.16...HEAD
 [v4.0.16]: https://github.com/dilithion/dilithion/compare/v4.0.15...v4.0.16
