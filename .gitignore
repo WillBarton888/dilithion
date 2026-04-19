@@ -461,3 +461,24 @@ src/digital_dna/fingerprint_run*.json
 /output.txt
 /seed node ip.txt
 /test.txt
+
+# ═══════════════════════════════════════
+#  Phase 2c: Obsolete scratch .bat (untracked 2026-04-19)
+# ═══════════════════════════════════════
+/DEBUG-EXE-ACCESS.bat
+/DIAGNOSE-PACKAGE.bat
+/FIX-WINDOWS-DEFENDER.bat
+/ULTRA-DEBUG.bat
+/TEST-DEBUG.bat
+/TEST-IBD-*.bat
+/TEST-PERSISTENCE.bat
+/SETUP-AND-START-FIXED.bat
+/SETUP-AND-START-NO-COLOR.bat
+/SETUP-AND-START-SIMPLE.bat
+/START-MINING-FIXED.bat
+/START-MINING-SIMPLE.bat
+/mine-genesis-v1.0.*.bat
+/test-bug28.bat
+/test-security-fixes.bat
+/run-test-simple.bat
+/build_tests.bat
