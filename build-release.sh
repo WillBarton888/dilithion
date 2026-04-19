@@ -123,7 +123,7 @@ cp LICENSE "$PACKAGE_DIR/"
 cp SECURITY.md "$PACKAGE_DIR/"
 cp TEAM.md "$PACKAGE_DIR/"
 cp CONTRIBUTING.md "$PACKAGE_DIR/"
-cp WHITEPAPER.md "$PACKAGE_DIR/docs/"
+cp docs/WHITEPAPER.md "$PACKAGE_DIR/docs/"
 
 # Create archive
 cd "$BUILD_DIR"

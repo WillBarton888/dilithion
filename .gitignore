@@ -393,6 +393,13 @@ Support Images/
 .claude/skills/
 .claude/*.sh
 .claude/*.lock
+/CLAUDE.md
+
+# Stale single-bug implementation plan
+/PLAN.md
+
+# Fuzzer output captures (regeneratable from fuzz runs)
+/fuzz_*_output.txt
 
 # Auto-generated source (by chain_forensics.py)
 /chainparams_prefund.cpp

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Simple Markdown to HTML converter for whitepaper
 
-input="WHITEPAPER.md"
+input="docs/WHITEPAPER.md"
 output="WHITEPAPER.html"
 
 cat > "$output" << 'HTML_START'

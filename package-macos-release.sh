@@ -50,7 +50,7 @@ chmod +x "${RELEASE_DIR}/setup-and-start.sh"
 
 # Copy documentation and wallet
 cp README-MAC.txt "${RELEASE_DIR}/README.txt"
-cp TESTNET-GUIDE.md "${RELEASE_DIR}/TESTNET-GUIDE.md"
+cp docs/TESTNET-GUIDE.md "${RELEASE_DIR}/TESTNET-GUIDE.md"
 cp website/wallet.html "${RELEASE_DIR}/wallet.html"
 
 # Create the tar.gz archive

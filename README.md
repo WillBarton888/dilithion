@@ -96,7 +96,7 @@ Phase 2 (Hybrid):   RandomX + VDF (both accepted)
 Phase 3 (Future):   VDF-Only + Digital DNA
 ```
 
-**Status:** VDF implementation complete (46 tests passing). Testnet activation in progress. Mainnet activation pending community vote. See [VDF_LOTTERY_PROPOSAL.md](VDF_LOTTERY_PROPOSAL.md) for full details.
+**Status:** VDF implementation complete (46 tests passing). Testnet activation in progress. Mainnet activation pending community vote. See [VDF_LOTTERY_PROPOSAL.md](docs/proposals/VDF_LOTTERY_PROPOSAL.md) for full details.
 
 ---
 
