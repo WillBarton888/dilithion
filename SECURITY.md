@@ -12,10 +12,19 @@ For critical vulnerabilities, you can also reach us via:
 
 ## Response Timeline
 
-- **Critical vulnerabilities (P0):** Response within 1 hour
-- **High severity (P1):** Response within 24 hours
-- **Medium severity (P2):** Response within 1 week
-- **Low severity (P3):** Best effort
+We aim to respond to all security reports as quickly as possible. Target
+acknowledgement times below are best-effort and reflect current team capacity;
+every report is triaged on receipt and escalated if urgent.
+
+| Severity | Example | Target acknowledgement |
+|----------|---------|------------------------|
+| **P0 — Critical** | Remote code exec, consensus break, custodial fund loss | Within 4 business hours |
+| **P1 — High** | Remote DoS, wallet key exposure, bridge replay | Within 1 business day |
+| **P2 — Medium** | Local DoS, privilege escalation, info leak | Within 1 week |
+| **P3 — Low** | Minor issues, hardening opportunities | Best effort |
+
+An initial acknowledgement is not a fix timeline. Remediation and disclosure
+timing are coordinated with the reporter (see **Responsible Disclosure** below).
 
 ---
 
