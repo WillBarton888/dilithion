@@ -395,6 +395,27 @@ Support Images/
 # preserved on docs-archive-snapshot branch)
 /archive/
 
+# ═══════════════════════════════════════
+#  PR-E: Stray images, screenshots, generated HTML (2026-04-19)
+# ═══════════════════════════════════════
+
+# Screenshots dumped at repo root
+/Screenshot *.png
+/Screenshot *.jpg
+
+# Ad-hoc images at repo root
+/4.png
+/amber.png
+
+# Generated / one-off HTML at repo root (authoritative copies live in
+# website/ or are regenerated from docs/ markdown)
+/WHITEPAPER.html
+/DILITHION-COMPREHENSIVE-TECHNICAL-DOCUMENTATION.html
+/wallet_test.html
+
+# Dead one-off PDF-conversion script (source markdown doesn't exist)
+/convert-to-pdf.py
+
 # Stale single-bug implementation plan
 /PLAN.md
 
