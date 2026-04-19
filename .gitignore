@@ -401,6 +401,47 @@ Support Images/
 # Fuzzer output captures (regeneratable from fuzz runs)
 /fuzz_*_output.txt
 
+# ═══════════════════════════════════════
+#  Phase 4: Docs/ session artifacts + dated scripts (2026-04-19)
+# ═══════════════════════════════════════
+/docker-compose-2025-*.yml
+/scripts/install-mainnet-2025-*.sh
+
+# Docs — dated session/phase/completion artifacts
+docs/AUDIT-SESSION-SUMMARY-*.md
+docs/BUG-*-IBD-OPTIMIZATION-PLAN.md
+docs/BUG-*-WINDOWS-STARTUP-CRASH-FIX.md
+docs/COMPLETE-NODE-SETUP-GUIDE-*.md
+docs/COMPREHENSIVE-AUDIT-REPORT-*.md
+docs/DAILY-HEALTH-CHECK-GUIDE-*.md
+docs/DIGITAL-DNA-IMPROVEMENTS-PLAN.md
+docs/DIGITAL-DNA-PITCH.md
+docs/DIGITAL-DNA-SCORING-REVIEW.md
+docs/DIGITAL-OCEAN-SETUP-GUIDE-*.md
+docs/FUZZER-BUILD-GUIDE-*.md
+docs/FUZZING-*-COMPLETION-REPORT-*.md
+docs/HD-WALLET-TEST-PLAN.md
+docs/IBD-REDESIGN-HANDOFF.md
+docs/LAUNCH-CHECKLIST.md
+docs/MAINNET-LAUNCH-CHECKLIST.md
+docs/MAINNET-MINING-GUIDE-*.md
+docs/MAINNET-NODE-SETUP-*.md
+docs/MAINNET-READINESS-STATUS.md
+docs/MAINNET-TASKS-BREAKDOWN.md
+docs/MAINNET-WALLET-GUIDE-*.md
+docs/NEXT-SESSION-START.md
+docs/PHASE-*-COMPLETION-REPORT-*.md
+docs/PHASE-5-CONTINUOUS-FUZZING.md
+docs/PHASE-5-CORPUS-BACKUP-*.md
+docs/PHASE-5-COVERAGE-AND-CICD-*.md
+docs/PHASE-5-CRASH-DEDUPLICATION-*.md
+docs/PHASE-5-RESOURCE-MONITOR-FIX-*.md
+docs/PHASE-5-ROADMAP.md
+docs/PRODUCTION-READINESS-*.md
+docs/SECURITY-CHECKLIST-*.md
+docs/TROUBLESHOOTING-2025-*.md
+docs/WINDOWS-PACKAGING-PERMANENT-SOLUTION.md
+
 # Auto-generated source (by chain_forensics.py)
 /chainparams_prefund.cpp
 
