@@ -21,12 +21,13 @@ Prerequisites:
 
 import argparse
 import base64
+import http.client
 import json
 import signal
+import socket
 import sys
 import time
-import urllib.error
-import urllib.request
+from urllib.parse import urlparse
 
 
 # ions -> DIL
@@ -42,7 +43,12 @@ class RPCError(Exception):
 
 
 def rpc_call(url, user, password, method, params):
-    """Make a single RPC call. Returns the 'result' field on success."""
+    """Make a single RPC call. Returns the 'result' field on success.
+
+    Uses http.client rather than urllib so the X-Dilithion-RPC header
+    keeps its original case — urllib's Request class normalises header
+    names and the node rejects the normalised variant with HTTP 403.
+    """
     body = json.dumps({
         "jsonrpc": "2.0",
         "id": 1,
@@ -50,15 +56,26 @@ def rpc_call(url, user, password, method, params):
         "params": params,
     }).encode("utf-8")
 
-    auth = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
-    req = urllib.request.Request(url, data=body, method="POST", headers={
-        "Content-Type": "application/json",
-        "X-Dilithion-RPC": "1",
-        "Authorization": f"Basic {auth}",
-    })
+    parsed_url = urlparse(url)
+    host = parsed_url.hostname
+    port = parsed_url.port or (443 if parsed_url.scheme == "https" else 80)
+    path = parsed_url.path or "/"
 
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    conn_cls = http.client.HTTPSConnection if parsed_url.scheme == "https" else http.client.HTTPConnection
+    conn = conn_cls(host, port, timeout=120)
+    try:
+        auth = base64.b64encode(f"{user}:{password}".encode("utf-8")).decode("ascii")
+        conn.request("POST", path, body=body, headers={
+            "Content-Type": "application/json",
+            "X-Dilithion-RPC": "1",
+            "Authorization": f"Basic {auth}",
+        })
+        resp = conn.getresponse()
         text = resp.read().decode("utf-8")
+        if resp.status != 200:
+            raise RPCError(-1, f"HTTP {resp.status}: {text[:300]}", text)
+    finally:
+        conn.close()
 
     try:
         parsed = json.loads(text)
@@ -146,7 +163,7 @@ def main():
     # Preflight: wallet reachable + unlocked, snapshot baseline.
     try:
         check_wallet(url, args.rpc_user, args.rpc_pass)
-    except (RPCError, urllib.error.URLError, RuntimeError) as e:
+    except (RPCError, socket.error, http.client.HTTPException, OSError, RuntimeError) as e:
         print(f"Preflight failed: {e}", file=sys.stderr)
         sys.exit(2)
 
@@ -200,7 +217,7 @@ def main():
         try:
             small, total, _value = count_small_utxos(
                 url, args.rpc_user, args.rpc_pass, args.small_dil)
-        except (RPCError, urllib.error.URLError) as e:
+        except (RPCError, socket.error, http.client.HTTPException, OSError) as e:
             consecutive_errors += 1
             print(f"[round {rounds+1}] count query failed: {e} "
                   f"(consecutive errors: {consecutive_errors})", file=sys.stderr)
@@ -218,7 +235,7 @@ def main():
         # Re-check wallet still unlocked before firing.
         try:
             winfo = rpc_call(url, args.rpc_user, args.rpc_pass, "getwalletinfo", [])
-        except (RPCError, urllib.error.URLError) as e:
+        except (RPCError, socket.error, http.client.HTTPException, OSError) as e:
             print(f"[round {rounds}] walletinfo failed: {e}", file=sys.stderr)
             time.sleep(args.interval)
             continue
@@ -247,7 +264,7 @@ def main():
                 sys.exit(3)
             time.sleep(min(args.interval * consecutive_errors, 60))
             continue
-        except urllib.error.URLError as e:
+        except (socket.error, http.client.HTTPException, OSError) as e:
             consecutive_errors += 1
             print(f"[round {rounds}] network error: {e}", file=sys.stderr)
             time.sleep(min(args.interval * consecutive_errors, 60))
