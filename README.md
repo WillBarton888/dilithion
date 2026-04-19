@@ -2,11 +2,13 @@
 
 **Post-Quantum Cryptocurrency with NIST-Standard Cryptography**
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-v3.0.12-brightgreen.svg)](https://github.com/dilithion/dilithion/releases)
+[![License: MIT](https://img.shields.io/github/license/dilithion/dilithion?color=blue)](LICENSE)
+[![Latest Release](https://img.shields.io/github/v/release/dilithion/dilithion?include_prereleases&sort=semver)](https://github.com/dilithion/dilithion/releases)
 [![Mainnet](https://img.shields.io/badge/mainnet-LIVE-success.svg)](https://dilithion.org)
 [![CI](https://github.com/dilithion/dilithion/workflows/Dilithion%20CI/badge.svg)](https://github.com/dilithion/dilithion/actions)
 [![Fuzzing](https://github.com/dilithion/dilithion/workflows/Fuzzing%20Infrastructure%20Build/badge.svg)](https://github.com/dilithion/dilithion/actions)
+[![Last Commit](https://img.shields.io/github/last-commit/dilithion/dilithion)](https://github.com/dilithion/dilithion/commits/main)
+[![Open Issues](https://img.shields.io/github/issues/dilithion/dilithion)](https://github.com/dilithion/dilithion/issues)
 
 ---
 
@@ -296,10 +298,13 @@ Coinbase:  "Dilithion Mainnet v2.0.0 - Fair Launch Reset - Quantum-Resistant Dig
 
 ### Educational Resources
 - **Post-Quantum Crypto Course:** [website/POST-QUANTUM-CRYPTO-COURSE.md](website/POST-QUANTUM-CRYPTO-COURSE.md)
-- **Whitepaper:** [Dilithion-Whitepaper-v1.0.pdf](Dilithion-Whitepaper-v1.0.pdf)
+- **Whitepaper (PDF):** [Dilithion-Whitepaper-v1.0.pdf](Dilithion-Whitepaper-v1.0.pdf)
+- **Whitepaper (Markdown):** [docs/WHITEPAPER.md](docs/WHITEPAPER.md)
 
 ### Security
 - **Security Policy:** [SECURITY.md](SECURITY.md)
+- **Threat Model:** [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md)
+- **Best Practices:** [docs/SECURITY-BEST-PRACTICES.md](docs/SECURITY-BEST-PRACTICES.md)
 
 ---
 

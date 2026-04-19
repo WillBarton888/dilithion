@@ -1,15 +1,19 @@
 # Dilithion Blockchain - Threat Model and Risk Analysis
 
-**Document Version:** 1.0.0
-**Date:** November 7, 2025
-**Mainnet Launch:** January 1, 2026
+**Document Version:** 1.1.0
+**Originally Dated:** November 7, 2025 (pre-launch)
+**Last Reviewed:** April 19, 2026 (mainnet live since January 18, 2026)
 **Classification:** Public
+
+> **Status:** Mainnet is live. This document is maintained as an evergreen
+> reference and is updated as the architecture evolves. Review quarterly or on
+> significant consensus / network / custody changes.
 
 ---
 
 ## Executive Summary
 
-This document provides a comprehensive threat model and risk analysis for the Dilithion blockchain, the world's first production-ready post-quantum cryptocurrency. The threat model identifies potential attack vectors, assesses risks, and documents mitigations for mainnet deployment.
+This document provides a comprehensive threat model and risk analysis for the Dilithion blockchain, a production post-quantum cryptocurrency. The threat model identifies potential attack vectors, assesses risks, and documents mitigations now in effect on mainnet.
 
 **Overall Risk Level:** LOW TO MODERATE (with mitigations in place)
 
