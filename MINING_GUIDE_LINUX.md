@@ -295,6 +295,11 @@ If running as a service: `sudo systemctl stop dilithion`
 - Check available RAM: `free -h` (need at least 4 GB for DIL's RandomX)
 - Check disk space: `df -h` (need at least 1 GB free)
 - Try restarting the miner
+- If the chain state is truly wedged, reset chain data only:
+  ```
+  ./dilithion-node --reset-chain
+  ```
+  (or `./dilv-node --reset-chain` for DilV). Wipes `blocks/`, `chainstate/`, `headers/`, `dna_registry/`, `dfmp_identity/`, `mempool.dat`. **Preserves** `wallet.dat`, `mik_registration.dat` (saves ~25 min MIK PoW on re-sync), `peers.dat`, configs. Add `--yes` to skip the `RESET` confirmation prompt in scripts.
 
 **Balance shows 0**
 - Wait for the node to fully sync first

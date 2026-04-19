@@ -2570,7 +2570,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             error.recovery_steps = {
                 "Verify you are using the correct network (mainnet/testnet)",
                 "Check that blockchain data directory is correct",
-                "Try deleting blockchain data and re-syncing",
+                "Run `dilithion-node --reset-chain` to wipe chain data while preserving wallet and MIK registration",
                 "Report this issue if it persists"
             };
             std::cerr << CErrorFormatter::FormatForUser(error) << std::endl;
@@ -6934,7 +6934,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 std::cout << "  [WARN] If headers=0, the seed may not be responding to GETHEADERS." << std::endl;
                                 std::cout << "  [WARN] Try these fixes:" << std::endl;
                                 std::cout << "  [WARN]   1. Download bootstrap from https://github.com/dilithion/dilithion/releases" << std::endl;
-                                std::cout << "  [WARN]   2. Delete your data folder and restart with a fresh sync" << std::endl;
+                                std::cout << "  [WARN]   2. Run `dilithion-node --reset-chain` to wipe chain data (preserves wallet.dat + mik_registration.dat)" << std::endl;
                                 std::cout << "  [WARN]   3. Use --addnode=138.197.68.128:8444 to connect directly to seed nodes" << std::endl;
                                 std::cout << "  [WARN]   4. If in a country with internet restrictions, use a VPN\n" << std::endl;
                             }

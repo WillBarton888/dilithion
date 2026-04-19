@@ -186,6 +186,11 @@ DilV only uses one CPU core, so it has minimal impact on your DIL mining perform
 - DilV blocks are small — sync should be fast. If stuck, try restarting.
 - Check that you have a stable internet connection
 - Make sure you have at least **1 GB free disk space**
+- If the chain state is truly wedged, reset chain data only:
+  ```
+  ./dilv-node --reset-chain
+  ```
+  Wipes `blocks/`, `chainstate/`, `headers/`, `dna_registry/`, `dfmp_identity/`, `mempool.dat`. **Preserves** `wallet.dat`, `mik_registration.dat` (saves ~25 min MIK PoW on re-sync), `peers.dat`, configs. Add `--yes` to skip the `RESET` confirmation prompt in scripts.
 
 ### "wallet.dat not found" or balance shows 0
 - The wallet is created on first run. If you just started, wait for the node to sync first.
