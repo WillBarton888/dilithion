@@ -435,3 +435,29 @@ src/digital_dna/fingerprint_run*.json
 /WEBSITE-FINAL-UPDATE.md
 /WEBSITE-UPDATE-v1.0.9.md
 /WINDOWS-DLL-FIX-*.md
+
+# ═══════════════════════════════════════
+#  Phase 2b: Obsolete scratch .txt (untracked 2026-04-19)
+# ═══════════════════════════════════════
+/# Dilithion Testnet Deployment Guid.txt
+/DISCORD-MESSAGE-*.txt
+/Dilithion External Miner.txt
+/Mining Output.txt
+/QUICK-START-TOMORROW.txt
+/TEST-ANALYSIS-SUMMARY.txt
+/Wallet output.txt
+/build-output.txt
+/calc_sizes.txt
+/commit_message.txt
+/error.txt
+/external miner log.txt
+/gdb.txt
+/genesis-error.txt
+/genesis-output.txt
+/genesis-v1.0.*.txt
+/genesis_output_light.txt
+/logo-base64.txt
+/my_address.txt
+/output.txt
+/seed node ip.txt
+/test.txt
