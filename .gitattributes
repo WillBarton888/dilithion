@@ -1,0 +1,51 @@
+# Prevent CRLF/LF drift between Windows dev machines and Linux seed nodes.
+# Without this, git on Windows checks out source as CRLF, and git on Linux
+# (seed nodes) then reports every file as "modified" on every pull, blocking
+# rolling deploys and masking real changes.
+
+# Default: treat as text, normalize to LF in the repo.
+* text=auto eol=lf
+
+# Source files — always LF.
+*.c       text eol=lf
+*.cc      text eol=lf
+*.cpp     text eol=lf
+*.h       text eol=lf
+*.hpp     text eol=lf
+*.py      text eol=lf
+*.sh      text eol=lf
+*.js      text eol=lf
+*.ts      text eol=lf
+*.json    text eol=lf
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.html    text eol=lf
+*.css     text eol=lf
+*.php     text eol=lf
+*.sql     text eol=lf
+Makefile  text eol=lf
+.env*     text eol=lf
+.htaccess text eol=lf
+
+# Windows-only scripts keep CRLF.
+*.bat     text eol=crlf
+*.cmd     text eol=crlf
+*.ps1     text eol=crlf
+
+# Binary — never touch.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.dll binary
+*.exe binary
+*.so  binary
+*.dylib binary
+*.wasm binary
+*.dat binary
+*.pdf binary
+*.zip binary
+*.gz  binary
+*.tar binary
