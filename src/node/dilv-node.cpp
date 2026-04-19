@@ -85,6 +85,7 @@
 #include <util/bench.h>  // Performance: Benchmarking
 #include <digital_dna/digital_dna_rpc.h>  // Digital DNA RPC commands
 #include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
+#include <digital_dna/sample_rate_limiter.h>   // Phase 1 propagation: receive-side rate limit
 #include <digital_dna/dna_verification.h>  // Phase 3: verification status for DFMP v3.4
 
 #include <algorithm>  // Phase 4: Trust-based relay sorting
@@ -303,6 +304,30 @@ CAsyncBroadcaster* g_async_broadcaster = nullptr;
 // Populated when we receive DNA identity responses from peers
 static std::map<std::array<uint8_t, 20>, int> g_mik_peer_map;
 static std::mutex g_mik_peer_mutex;
+
+// DNA Propagation Phase 1: rate limiter for received DNA samples.
+// Three layers: per-peer token bucket, per-MIK global interval, per-MIK-per-peer.
+static digital_dna::DNASampleRateLimiter g_dna_sample_limiter;
+
+// Helper: broadcast a DNA sample to all connected peers via dnaires.
+// Extracted from the initial-registration path so both that path and the
+// progressive-enrichment path can keep the network converged.
+static void BroadcastDNASample(const digital_dna::DigitalDNA& dna) {
+    if (!g_node_context.connman || !g_node_context.message_processor) return;
+    if (dna.mik_identity == std::array<uint8_t, 20>{}) return;
+    auto dna_data = dna.serialize();
+    auto msg = g_node_context.message_processor->CreateDNAIdentResMessage(
+        dna.mik_identity, true, dna_data);
+    auto nodes = g_node_context.connman->GetNodes();
+    int sent = 0;
+    for (auto* n : nodes) {
+        if (n && n->IsConnected()) {
+            g_node_context.connman->PushMessage(n->id, msg);
+            ++sent;
+        }
+    }
+    std::cout << "[DNA] Broadcast identity to " << sent << " peers" << std::endl;
+}
 
 // Phase 1.2: Global state now managed via NodeContext
 // Legacy globals kept for backward compatibility during migration
@@ -4207,12 +4232,50 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Check by MIK (not address) to match how discovery decides what to request
             auto existing = g_node_context.dna_registry->get_identity_by_mik(mik);
             if (!existing) {
+                // First time seeing this MIK — accept without rate-limiting, as the
+                // miner's initial-registration broadcast establishes the peer_id→MIK
+                // mapping that subsequent samples rely on for plausibility.
                 auto result = g_node_context.dna_registry->register_identity(*dna);
+                (void)result;
                 char hex[9];
                 snprintf(hex, sizeof(hex), "%02x%02x%02x%02x", mik[0], mik[1], mik[2], mik[3]);
                 std::cout << "[DNA] Stored DNA for MIK " << hex << "... from peer "
                           << peer_id << " (registry=" << g_node_context.dna_registry->count()
                           << ")" << std::endl;
+            } else {
+                // DNA Propagation Phase 1: accept enriched sample for already-registered MIK.
+                //   1. Plausibility — sender must be the currently-mapped peer for this MIK.
+                //   2. Rate-limit — three layers (per-peer bucket, per-MIK global, per-MIK-per-peer).
+                //   3. append_sample — archives old canonical to history, writes new as canonical,
+                //      with 100-entry history cap and a dim-loss guard.
+                //   Dropped samples are silent (no misbehaviour score) so mixed-version and
+                //   proxy-relay scenarios don't get anyone banned.
+                bool mapped = false;
+                {
+                    std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
+                    auto it = g_mik_peer_map.find(mik);
+                    mapped = (it != g_mik_peer_map.end() && it->second == peer_id);
+                }
+                if (mapped) {
+                    uint64_t now_sec = static_cast<uint64_t>(
+                        std::chrono::duration_cast<std::chrono::seconds>(
+                            std::chrono::system_clock::now().time_since_epoch()).count());
+                    if (g_dna_sample_limiter.allow(peer_id, mik, now_sec)) {
+                        auto result = g_node_context.dna_registry->append_sample(*dna);
+                        if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
+                            result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED) {
+                            char hex[9];
+                            snprintf(hex, sizeof(hex), "%02x%02x%02x%02x",
+                                     mik[0], mik[1], mik[2], mik[3]);
+                            std::cout << "[DNA] Appended sample for MIK " << hex
+                                      << "... from peer " << peer_id << std::endl;
+                        }
+                        // INVALID_DNA (dim-loss) and DB_ERROR are silent — expected under
+                        // mixed-version propagation and transient storage issues.
+                    }
+                }
+                // Unmapped peer: silent drop. The mapping update below lets future
+                // samples from this peer for this MIK pass.
             }
 
             // Phase 2: Track MIK -> peer_id mapping for verification routing
@@ -5823,51 +5886,35 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                                 g_node_context.trust_manager->on_registration(
                                                     dna_opt->address, static_cast<uint32_t>(curHeight));
                                             }
-                                            // Broadcast DNA to all connected peers
-                                            if (g_node_context.connman && g_node_context.message_processor &&
-                                                dna_opt->mik_identity != std::array<uint8_t, 20>{}) {
-                                                auto dna_data = dna_opt->serialize();
-                                                auto msg = g_node_context.message_processor->CreateDNAIdentResMessage(
-                                                    dna_opt->mik_identity, true, dna_data);
-                                                auto nodes = g_node_context.connman->GetNodes();
-                                                int sent = 0;
-                                                for (auto* n : nodes) {
-                                                    if (n && n->IsConnected()) {
-                                                        g_node_context.connman->PushMessage(n->id, msg);
-                                                        ++sent;
-                                                    }
-                                                }
-                                                std::cout << "[DNA] Broadcast identity to " << sent << " peers" << std::endl;
-                                            }
+                                            // Broadcast DNA to all connected peers.
+                                            BroadcastDNASample(*dna_opt);
                                         }
                                     } else {
-                                        // Progressive enrichment: update if more dimensions
-                                        auto existing = g_node_context.dna_registry->get_identity(dna_opt->address);
-                                        if (existing) {
-                                            auto count_dims = [](const digital_dna::DigitalDNA& d) {
-                                                return 3 + (d.memory ? 1 : 0) +
-                                                    (d.clock_drift ? 1 : 0) +
-                                                    (d.bandwidth ? 1 : 0) +
-                                                    (d.thermal ? 1 : 0) +
-                                                    (d.behavioral ? 1 : 0);
-                                            };
-                                            int old_dims = count_dims(*existing);
-                                            int new_dims = count_dims(*dna_opt);
-                                            if (new_dims > old_dims) {
-                                                auto result = g_node_context.dna_registry->update_identity(*dna_opt);
-                                                std::cout << "[DNA] Updated identity: " << old_dims
-                                                          << " -> " << new_dims << " dimensions" << std::endl;
-                                                // Phase 5: Apply trust penalty on DNA dimension changes
-                                                if (result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED &&
-                                                    g_node_context.trust_manager) {
-                                                    int rotationHeight = Dilithion::g_chainParams ?
-                                                        Dilithion::g_chainParams->dnaRotationActivationHeight : 999999999;
-                                                    if (curHeight >= rotationHeight) {
-                                                        g_node_context.trust_manager->on_dna_changed(
-                                                            dna_opt->address, static_cast<uint32_t>(curHeight));
-                                                        std::cout << "[DNA] Core dimensions changed at height " << curHeight
-                                                                  << " — trust penalty applied (-10)" << std::endl;
-                                                    }
+                                        // DNA Propagation Phase 1: drop the "new_dims > old_dims" gate
+                                        // that silently discarded same-dim value changes. append_sample
+                                        // accepts any non-shrinking sample, archives the old canonical
+                                        // to history, and caps history at 100 entries per MIK. On
+                                        // successful update, re-broadcast to peers so the network stays
+                                        // converged — the original code only broadcast on initial
+                                        // registration, which is why bandwidth/drift/perspective coverage
+                                        // stuck at 1-15% despite miners collecting the data locally.
+                                        auto result = g_node_context.dna_registry->append_sample(*dna_opt);
+                                        if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
+                                            result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED) {
+                                            BroadcastDNASample(*dna_opt);
+                                            // Phase 5: Apply trust penalty on DNA dimension changes.
+                                            // core_dimensions_changed gates on timing >10% or latency
+                                            // >20ms — bandwidth/drift/perspective/thermal value changes
+                                            // do NOT trigger this path.
+                                            if (result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED &&
+                                                g_node_context.trust_manager) {
+                                                int rotationHeight = Dilithion::g_chainParams ?
+                                                    Dilithion::g_chainParams->dnaRotationActivationHeight : 999999999;
+                                                if (curHeight >= rotationHeight) {
+                                                    g_node_context.trust_manager->on_dna_changed(
+                                                        dna_opt->address, static_cast<uint32_t>(curHeight));
+                                                    std::cout << "[DNA] Core dimensions changed at height " << curHeight
+                                                              << " — trust penalty applied (-10)" << std::endl;
                                                 }
                                             }
                                         }
@@ -5901,12 +5948,30 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                 }
 
                                 if (!peer_ids.empty()) {
-                                    // Collect MIKs missing from our DNA registry
+                                    // Collect MIKs missing OR stale from our DNA registry.
+                                    // Phase 1 propagation fix: we now also re-request DNA for
+                                    // MIKs whose stored record has fewer than 8 populated
+                                    // dimensions. Under mixed-version propagation, a miner's
+                                    // early (sparse) broadcast may have been accepted before
+                                    // bandwidth/drift/perspective collection caught up; a
+                                    // later fresh request gives the enriched sample a path in.
                                     std::vector<std::array<uint8_t, 20>> missing_miks;
                                     for (const auto& mik : known_miks) {
                                         if (mik == std::array<uint8_t, 20>{}) continue;
-                                        if (!g_node_context.dna_registry->get_identity_by_mik(mik))
+                                        auto existing = g_node_context.dna_registry->get_identity_by_mik(mik);
+                                        if (!existing) {
                                             missing_miks.push_back(mik);
+                                            continue;
+                                        }
+                                        int dims = 2   // latency + timing (always on valid DNA)
+                                            + ((existing->perspective.total_unique_peers() > 0 ||
+                                                !existing->perspective.snapshots.empty()) ? 1 : 0)
+                                            + (existing->memory      ? 1 : 0)
+                                            + (existing->clock_drift ? 1 : 0)
+                                            + (existing->bandwidth   ? 1 : 0)
+                                            + (existing->thermal     ? 1 : 0)
+                                            + (existing->behavioral  ? 1 : 0);
+                                        if (dims < 8) missing_miks.push_back(mik);
                                     }
 
                                     if (!missing_miks.empty()) {

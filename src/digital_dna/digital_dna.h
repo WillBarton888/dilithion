@@ -156,6 +156,28 @@ public:
 
     virtual RegisterResult register_identity(const DigitalDNA& dna) = 0;
     virtual RegisterResult update_identity(const DigitalDNA& dna) = 0;
+
+    /**
+     * Accept a continuous-sampling DNA update (Phase 1 propagation fix).
+     *
+     *   - If MIK is not yet registered, delegates to register_identity().
+     *   - Otherwise, archives the existing canonical DNA into the per-MIK
+     *     history keyspace (capped at MAX_HISTORY_PER_MIK) and writes the
+     *     new DNA as the canonical record.
+     *   - REJECTS (returns INVALID_DNA) if the incoming sample would *remove*
+     *     populated dimensions from the current record. Dimensions may change
+     *     value, may add, but may not silently disappear.
+     *
+     * This is the entry point for receiver-side acceptance of peer-broadcast
+     * samples after rate-limit / plausibility checks. `update_identity` is
+     * kept for callers that want the legacy semantics (strict "must already
+     * be registered" contract, no dimension-loss guard).
+     */
+    virtual RegisterResult append_sample(const DigitalDNA& dna) = 0;
+
+    /** Maximum history entries retained per MIK before oldest is evicted. */
+    static constexpr size_t MAX_HISTORY_PER_MIK = 100;
+
     virtual bool is_registered(const std::array<uint8_t, 20>& address) const = 0;
     virtual std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const = 0;
     virtual std::optional<DigitalDNA> get_identity_by_mik(const std::array<uint8_t, 20>& mik) const = 0;
@@ -286,6 +308,7 @@ public:
     // IDNARegistry implementation
     RegisterResult register_identity(const DigitalDNA& dna) override;
     RegisterResult update_identity(const DigitalDNA& dna) override;
+    RegisterResult append_sample(const DigitalDNA& dna) override;
     bool is_registered(const std::array<uint8_t, 20>& address) const override;
     std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const override;
     std::optional<DigitalDNA> get_identity_by_mik(const std::array<uint8_t, 20>& mik) const override;

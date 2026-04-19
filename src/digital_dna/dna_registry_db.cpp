@@ -164,6 +164,139 @@ IDNARegistry::RegisterResult DNARegistryDB::register_identity(const DigitalDNA& 
     return sybil_flagged ? RegisterResult::SYBIL_FLAGGED : RegisterResult::SUCCESS;
 }
 
+// Helper: count populated dimensions on a DigitalDNA record.
+// Latency and timing are always considered present (core dims baked in at collection).
+// Perspective counts as present if any peer data exists.
+static int count_populated_dimensions(const DigitalDNA& d) {
+    int n = 2;  // latency + timing always present on a valid DNA
+    if (d.perspective.total_unique_peers() > 0 || !d.perspective.snapshots.empty()) n++;
+    if (d.memory) n++;
+    if (d.clock_drift) n++;
+    if (d.bandwidth) n++;
+    if (d.thermal) n++;
+    if (d.behavioral) n++;
+    return n;
+}
+
+// Helper: returns true iff `new_dna` removes any populated dimension that `old_dna` had.
+// Same set or superset is OK. Value changes within the same set are OK.
+static bool removes_populated_dimensions(const DigitalDNA& old_dna, const DigitalDNA& new_dna) {
+    if (old_dna.perspective.total_unique_peers() > 0 &&
+        new_dna.perspective.total_unique_peers() == 0 &&
+        new_dna.perspective.snapshots.empty()) return true;
+    if (old_dna.memory && !new_dna.memory) return true;
+    if (old_dna.clock_drift && !new_dna.clock_drift) return true;
+    if (old_dna.bandwidth && !new_dna.bandwidth) return true;
+    if (old_dna.thermal && !new_dna.thermal) return true;
+    if (old_dna.behavioral && !new_dna.behavioral) return true;
+    return false;
+}
+
+// Helper: evict oldest history entries for a MIK until count is within cap.
+// Mutates the provided WriteBatch with Delete operations for evicted keys.
+// Caller must hold mutex_ and pass the open db_.
+static void evict_old_history(leveldb::DB* db,
+                              leveldb::WriteBatch& batch,
+                              const std::string& hist_prefix,
+                              size_t cap) {
+    if (!db) return;
+    // Collect all history keys for this MIK in lexicographic (chronological) order.
+    std::vector<std::string> keys;
+    std::unique_ptr<leveldb::Iterator> it(db->NewIterator(leveldb::ReadOptions()));
+    for (it->Seek(hist_prefix); it->Valid(); it->Next()) {
+        std::string key = it->key().ToString();
+        if (key.substr(0, hist_prefix.size()) != hist_prefix) break;
+        keys.push_back(key);
+    }
+    // Evict oldest until size <= cap. Note: this runs BEFORE the new entry is
+    // written, so the effective post-write count is (keys.size() - evicted + 1).
+    // We want post-write count <= cap, so evict until keys.size() < cap.
+    while (keys.size() >= cap) {
+        batch.Delete(keys.front());
+        keys.erase(keys.begin());
+    }
+}
+
+IDNARegistry::RegisterResult DNARegistryDB::append_sample(const DigitalDNA& dna) {
+    std::lock_guard<std::mutex> lock(mutex_);
+
+    if (!db_) return RegisterResult::DB_ERROR;
+    if (!dna.is_valid) return RegisterResult::INVALID_DNA;
+
+    std::string key = make_key(dna.address);
+    std::string existing;
+    leveldb::Status status = db_->Get(leveldb::ReadOptions(), key, &existing);
+
+    if (!status.ok()) {
+        // Not yet registered — mutex is NOT reentrant so we inline the register
+        // path rather than calling register_identity (which re-locks). The new
+        // entry writes go through the same helpers as register_identity, minus
+        // the Sybil-flag log (this is a receiver-side acceptance path, not a
+        // miner's first registration).
+        std::array<uint8_t, 20> zero_mik{};
+        auto data = dna.serialize();
+        std::string value(data.begin(), data.end());
+        leveldb::WriteBatch batch;
+        batch.Put(key, value);
+        if (dna.mik_identity != zero_mik) {
+            batch.Put(make_mik_key(dna.mik_identity), value);
+            mik_to_address_[dna.mik_identity] = dna.address;
+        }
+        status = db_->Write(leveldb::WriteOptions(), &batch);
+        if (!status.ok()) return RegisterResult::DB_ERROR;
+        if (cache_.size() >= MAX_CACHE_SIZE) cache_.erase(cache_.begin());
+        cache_[dna.address] = dna;
+        return RegisterResult::SUCCESS;
+    }
+
+    // Already registered — archive old, write new, cap history.
+    auto oldDna = DigitalDNA::deserialize(
+        std::vector<uint8_t>(existing.begin(), existing.end()));
+
+    // Dimension-loss guard: reject silently-shrinking samples.
+    if (oldDna && removes_populated_dimensions(*oldDna, dna)) {
+        return RegisterResult::INVALID_DNA;
+    }
+
+    bool dimensionsChanged = false;
+    if (oldDna) {
+        dimensionsChanged = core_dimensions_changed(*oldDna, dna);
+    }
+
+    uint64_t now = static_cast<uint64_t>(
+        std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+
+    auto data = dna.serialize();
+    std::string value(data.begin(), data.end());
+
+    leveldb::WriteBatch batch;
+    batch.Put(key, value);
+
+    std::array<uint8_t, 20> zero_mik{};
+    if (dna.mik_identity != zero_mik) {
+        batch.Put(make_mik_key(dna.mik_identity), value);
+        mik_to_address_[dna.mik_identity] = dna.address;
+
+        if (oldDna) {
+            std::string histPrefix = HIST_KEY_PREFIX + address_to_hex(dna.mik_identity) + ":";
+            // Evict oldest entries BEFORE adding new one so post-write count <= cap.
+            evict_old_history(db_.get(), batch, histPrefix, IDNARegistry::MAX_HISTORY_PER_MIK);
+
+            // Write history entry for the OLD DNA being superseded.
+            // Timestamp key ensures lexicographic (chronological) order.
+            std::string histKey = make_hist_key(dna.mik_identity, now);
+            batch.Put(histKey, existing);
+        }
+    }
+
+    status = db_->Write(leveldb::WriteOptions(), &batch);
+    if (!status.ok()) return RegisterResult::DB_ERROR;
+
+    cache_[dna.address] = dna;
+    return dimensionsChanged ? RegisterResult::DNA_CHANGED : RegisterResult::UPDATED;
+}
+
 IDNARegistry::RegisterResult DNARegistryDB::update_identity(const DigitalDNA& dna) {
     std::lock_guard<std::mutex> lock(mutex_);
 

@@ -587,6 +587,41 @@ IDNARegistry::RegisterResult DigitalDNARegistry::update_identity(const DigitalDN
     return dimensionsChanged ? RegisterResult::DNA_CHANGED : RegisterResult::UPDATED;
 }
 
+IDNARegistry::RegisterResult DigitalDNARegistry::append_sample(const DigitalDNA& dna) {
+    if (!dna.is_valid) {
+        return RegisterResult::INVALID_DNA;
+    }
+
+    auto it = std::find_if(identities_.begin(), identities_.end(),
+        [&](const DigitalDNA& d) { return d.address == dna.address; });
+
+    if (it == identities_.end()) {
+        // Not registered — add it (no Sybil advisory log in the sample path).
+        identities_.push_back(dna);
+        return RegisterResult::SUCCESS;
+    }
+
+    // Dimension-loss guard: reject silently-shrinking samples.
+    auto removes_dims = [](const DigitalDNA& old_dna, const DigitalDNA& new_dna) {
+        if (old_dna.perspective.total_unique_peers() > 0 &&
+            new_dna.perspective.total_unique_peers() == 0 &&
+            new_dna.perspective.snapshots.empty()) return true;
+        if (old_dna.memory && !new_dna.memory) return true;
+        if (old_dna.clock_drift && !new_dna.clock_drift) return true;
+        if (old_dna.bandwidth && !new_dna.bandwidth) return true;
+        if (old_dna.thermal && !new_dna.thermal) return true;
+        if (old_dna.behavioral && !new_dna.behavioral) return true;
+        return false;
+    };
+    if (removes_dims(*it, dna)) {
+        return RegisterResult::INVALID_DNA;
+    }
+
+    bool dimensionsChanged = core_dimensions_changed(*it, dna);
+    *it = dna;  // In-memory impl does not archive history (LevelDB impl does).
+    return dimensionsChanged ? RegisterResult::DNA_CHANGED : RegisterResult::UPDATED;
+}
+
 bool DigitalDNARegistry::is_registered(const std::array<uint8_t, 20>& address) const {
     return std::any_of(identities_.begin(), identities_.end(),
         [&](const DigitalDNA& d) { return d.address == address; });

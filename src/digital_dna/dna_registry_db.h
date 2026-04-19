@@ -54,6 +54,7 @@ public:
 
     RegisterResult register_identity(const DigitalDNA& dna) override;
     RegisterResult update_identity(const DigitalDNA& dna) override;
+    RegisterResult append_sample(const DigitalDNA& dna) override;
     bool is_registered(const std::array<uint8_t, 20>& address) const override;
     std::optional<DigitalDNA> get_identity(const std::array<uint8_t, 20>& address) const override;
     std::optional<DigitalDNA> get_identity_by_mik(const std::array<uint8_t, 20>& mik) const override;
