@@ -277,8 +277,11 @@ hangs/
 #  Dev cruft cleanup (Added 2026-04-19)
 # ═══════════════════════════════════════
 
-# Large release tarballs (belong on GitHub Releases, not git)
+# Release output directory (publish via GitHub Releases, not git)
 releases/
+
+# Local testing scratch directory
+local-test/
 
 # External data files (downloaded by users)
 ip2asn-v4.tsv
