@@ -404,3 +404,34 @@ depends/dilithium/ref/*.d
 # Bridge relayer scratch / test fixtures
 bridge/relayer/broadcast_body.json
 src/digital_dna/fingerprint_run*.json
+
+# ═══════════════════════════════════════
+#  Phase 2a: Obsolete session/phase docs (untracked 2026-04-19)
+# ═══════════════════════════════════════
+/BLOCK-PROPAGATION-IMPROVEMENT-HANDOFF.md
+/CHAIN-ID-IMPLEMENTATION.md
+/COMPLETE-USER-TEST-GUIDE.md
+/CRITICAL-FIX-MISSING-DLL-VALIDATION.md
+/CRITICAL-FIX-OPENSSL-DLLS.md
+/E2E-SESSION-STATUS-2025-11-21.md
+/E2E-TEST-PLAN.md
+/E2E-TEST-SESSION-STATUS.md
+/FINAL-v1.0.9-PACKAGE-UPDATE.md
+/IBD-FIXES-ACTION-PLAN.md
+/IBD-FIXES-QUICK-REFERENCE.md
+/IBD-ISSUES-DIAGNOSTIC-REPORT-2025-12-28.md
+/IBD-STALL-ANALYSIS-ROOT-CAUSE-REPORT.md
+/IMPLEMENTATION-ROADMAP.md
+/PACKAGE-ANALYSIS-v1.0.9.md
+/PACKAGE-VERIFICATION-REPORT.md
+/PHASE-*.md
+/PLAN-dfmp-ibd-fix.md
+/PROJECT-STATE.md
+/PROJECT-STATUS.md
+/SECURITY-FIXES-2025-11-11.md
+/TESTNET-RESET-ANNOUNCEMENT.md
+/TESTNET-RESET-GUIDE.md
+/V1.0.*.md
+/WEBSITE-FINAL-UPDATE.md
+/WEBSITE-UPDATE-v1.0.9.md
+/WINDOWS-DLL-FIX-*.md
