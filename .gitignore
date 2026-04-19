@@ -513,6 +513,29 @@ src/digital_dna/fingerprint_run*.json
 /difficulty_results_*.json
 
 # ═══════════════════════════════════════
+#  PR-B: Obsolete release artifacts (2026-04-19)
+# ═══════════════════════════════════════
+
+# Tarballs, zips, installers at repo root (publish via GitHub Releases)
+/dilithion-testnet-*.tar.gz
+/dilithion-testnet-*.zip
+/dilithion-testnet-*.run
+/dilithion-testnet-*.run.sha256
+/dilithion-testnet-*.exe.sha256
+
+# Extracted release package directories
+/dilithion-macos-package/
+/dilithion-testnet-*-macos-x64/
+/dilithion-testnet-*-windows-x64/
+/dilithion-testnet-*-linux-x64/
+/Desktop-test-*/
+/release-binaries/
+
+# Accidental Windows-path-escape directories (historical filename bugs)
+/UserswillDesktop*/
+/Userswilldilithion*/
+
+# ═══════════════════════════════════════
 #  Phase 2a: Obsolete session/phase docs (untracked 2026-04-19)
 # ═══════════════════════════════════════
 /BLOCK-PROPAGATION-IMPROVEMENT-HANDOFF.md
