@@ -101,7 +101,12 @@ codebase. Marketing-facing content lives on [dilithion.org](https://dilithion.or
 | [research/](research/) | Experimental / research notes |
 | [analysis/](analysis/) | Chain/network analyses |
 | [sessions/](sessions/) | Development session summaries |
-| [archive/](archive/) | Older documents kept for historical record |
+
+Historical notes (pre-April 2026 session reports, `docs/archive/`, and the
+`audit/` fix-completion reports) were moved off `main` to keep the primary
+branch focused on evergreen documentation. They remain fully available on the
+[`docs-archive-snapshot`](https://github.com/dilithion/dilithion/tree/docs-archive-snapshot)
+branch.
 
 ---
 
