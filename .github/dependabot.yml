@@ -1,0 +1,74 @@
+version: 2
+
+updates:
+  # Keep GitHub Actions workflows up to date.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "Australia/Adelaide"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "ci"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "github-actions"
+
+  # Bridge relayer / Hardhat / ethers.js stack.
+  - package-ecosystem: "npm"
+    directory: "/bridge"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(bridge)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "bridge"
+    # Group minor + patch updates into a single PR per week.
+    groups:
+      bridge-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # x402 SDK (Coinbase facilitator integration).
+  - package-ecosystem: "npm"
+    directory: "/x402-sdk"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps(x402)"
+      include: "scope"
+    labels:
+      - "dependencies"
+      - "x402"
+    groups:
+      x402-minor-patch:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Git submodules (Dilithium ref, RandomX, chiavdf).
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "deps(submodules)"
+    labels:
+      - "dependencies"
+      - "submodules"

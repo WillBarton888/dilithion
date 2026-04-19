@@ -1,0 +1,70 @@
+# EditorConfig — https://editorconfig.org
+#
+# Enforces consistent indentation, line endings, and charset across
+# editors/IDEs. Line-ending rules here must stay in sync with
+# .gitattributes (which is authoritative for what git stores).
+
+root = true
+
+# ────────────────────────────────────────
+# Defaults for everything
+# ────────────────────────────────────────
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+# ────────────────────────────────────────
+# C / C++ source (Bitcoin-Core-style)
+# ────────────────────────────────────────
+[*.{c,cc,cpp,h,hpp,ipp}]
+indent_style = space
+indent_size = 4
+
+# ────────────────────────────────────────
+# Makefiles require tabs
+# ────────────────────────────────────────
+[{Makefile,Makefile.*,*.mk}]
+indent_style = tab
+
+# ────────────────────────────────────────
+# Python
+# ────────────────────────────────────────
+[*.py]
+indent_style = space
+indent_size = 4
+max_line_length = 100
+
+# ────────────────────────────────────────
+# Shell scripts
+# ────────────────────────────────────────
+[*.sh]
+indent_style = space
+indent_size = 2
+
+# ────────────────────────────────────────
+# Web / docs / config (2-space is convention)
+# ────────────────────────────────────────
+[*.{js,ts,jsx,tsx,json,html,css,scss,yml,yaml,md,toml}]
+indent_style = space
+indent_size = 2
+
+# ────────────────────────────────────────
+# Windows scripts must keep CRLF (run under cmd.exe)
+# ────────────────────────────────────────
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+
+# ────────────────────────────────────────
+# Don't touch vendored / third-party code
+# ────────────────────────────────────────
+[depends/**]
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+[src/3rdparty/**]
+trim_trailing_whitespace = false
+insert_final_newline = false

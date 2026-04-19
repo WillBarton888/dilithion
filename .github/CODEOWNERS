@@ -1,0 +1,49 @@
+# Dilithion CODEOWNERS
+#
+# Rules applied in order — last matching pattern wins for a given file.
+# GitHub requires approval from a code owner when the path is changed
+# in a pull request (when branch protection has "Require review from
+# Code Owners" enabled).
+#
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything.
+*                                   @WillBarton888
+
+# ----- Security-critical: consensus & crypto -----
+# Changes here require extra scrutiny. Additional reviewers should be
+# added as the team grows.
+/src/consensus/                     @WillBarton888
+/src/crypto/                        @WillBarton888
+/src/dfmp/                          @WillBarton888
+/src/digital_dna/                   @WillBarton888
+/src/script/                        @WillBarton888
+/src/primitives/                    @WillBarton888
+/src/vdf/                           @WillBarton888
+
+# ----- Network / P2P -----
+/src/net/                           @WillBarton888
+/src/attestation/                   @WillBarton888
+
+# ----- Wallet & key handling -----
+/src/wallet/                        @WillBarton888
+/src/api/                           @WillBarton888
+/src/rpc/                           @WillBarton888
+
+# ----- Bridge (custodial funds) -----
+/bridge/                            @WillBarton888
+/bridge/contracts/                  @WillBarton888
+/bridge/relayer/                    @WillBarton888
+
+# ----- Build, release, CI -----
+/.github/                           @WillBarton888
+/Makefile                           @WillBarton888
+/package-*.sh                       @WillBarton888
+/package-*.bat                      @WillBarton888
+/build-release.sh                   @WillBarton888
+
+# ----- Docs -----
+/docs/                              @WillBarton888
+/README.md                          @WillBarton888
+/SECURITY.md                        @WillBarton888
+/CONTRIBUTING.md                    @WillBarton888
