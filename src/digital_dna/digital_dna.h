@@ -379,6 +379,68 @@ inline bool core_dimensions_changed(const DigitalDNA& old_dna, const DigitalDNA&
     return false;
 }
 
+/**
+ * Phase 1.1 merge helper — "fill-only" merge for propagation from unmapped peers.
+ *
+ * Starts from `existing` (the canonical record we already trust) and fills in
+ * ONLY dimensions that are currently unpopulated, taking each filled value
+ * from `incoming`. Core fields (address, mik_identity, latency, timing,
+ * registration_{height,time}) are always preserved from `existing`.
+ *
+ * This preserves data provenance: an unmapped peer can help us fill missing
+ * dimensions (beneficial — improves coverage) but cannot overwrite existing
+ * values (which would allow a relay peer to pollute readings claimed by the
+ * miner). The mapped-peer path in the receiver continues to accept full
+ * replacements for trust-equivalent updates.
+ *
+ * If `filled_count_out` is non-null, it is set to the number of dimensions
+ * this call actually filled (0 means nothing to do — caller should drop).
+ *
+ * Populated predicates match the coverage counters used elsewhere:
+ *   - optional<T>: populated iff engaged
+ *   - perspective: populated iff total_unique_peers() > 0 OR snapshots non-empty
+ *   - latency/timing: always "populated" (core), never merged from incoming
+ */
+inline DigitalDNA merge_fill_missing_dims(const DigitalDNA& existing,
+                                          const DigitalDNA& incoming,
+                                          int* filled_count_out = nullptr) {
+    DigitalDNA merged = existing;
+    int filled = 0;
+
+    if (!existing.memory && incoming.memory) {
+        merged.memory = incoming.memory;
+        ++filled;
+    }
+    if (!existing.clock_drift && incoming.clock_drift) {
+        merged.clock_drift = incoming.clock_drift;
+        ++filled;
+    }
+    if (!existing.bandwidth && incoming.bandwidth) {
+        merged.bandwidth = incoming.bandwidth;
+        ++filled;
+    }
+    if (!existing.thermal && incoming.thermal) {
+        merged.thermal = incoming.thermal;
+        ++filled;
+    }
+    if (!existing.behavioral && incoming.behavioral) {
+        merged.behavioral = incoming.behavioral;
+        ++filled;
+    }
+    // Perspective is not optional<T> but has a populated predicate.
+    bool existing_has_perspective = (existing.perspective.total_unique_peers() > 0
+                                     || !existing.perspective.snapshots.empty());
+    bool incoming_has_perspective = (incoming.perspective.total_unique_peers() > 0
+                                     || !incoming.perspective.snapshots.empty());
+    if (!existing_has_perspective && incoming_has_perspective) {
+        merged.perspective = incoming.perspective;
+        ++filled;
+    }
+
+    if (filled_count_out) *filled_count_out = filled;
+    return merged;
+}
+
 } // namespace digital_dna
 
 #endif // DILITHION_DIGITAL_DNA_H

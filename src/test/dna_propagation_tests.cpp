@@ -325,11 +325,133 @@ TEST(rate_limiter_reject_leaves_state_unchanged) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 1.1 merge-fill tests
+// ---------------------------------------------------------------------------
+
+TEST(merge_fill_fills_missing_dimension) {
+    // existing has no bandwidth; incoming has bandwidth → merged has bandwidth.
+    auto existing = make_dna(0xA0, true, true, false, false, false);  // mem+thermal
+    auto incoming = make_dna(0xA0, true, true, false, true,  false);  // mem+thermal+bw
+
+    int filled = -1;
+    auto merged = digital_dna::merge_fill_missing_dims(existing, incoming, &filled);
+
+    ASSERT_EQ(filled, 1, "should fill exactly one dim (bandwidth)");
+    ASSERT(merged.bandwidth.has_value(), "merged has bandwidth");
+    ASSERT(merged.memory.has_value(), "merged keeps memory");
+    ASSERT(merged.thermal.has_value(), "merged keeps thermal");
+    ASSERT(!merged.clock_drift.has_value(), "merged doesn't invent clock_drift");
+    ASSERT(!merged.behavioral.has_value(), "merged doesn't invent behavioral");
+}
+
+TEST(merge_fill_no_gap_returns_existing_with_zero_filled) {
+    // Both have the same populated set → filled=0.
+    auto existing = make_dna(0xA1, true, true, false, false, false);
+    auto incoming = make_dna(0xA1, true, true, false, false, false);
+
+    int filled = -1;
+    auto merged = digital_dna::merge_fill_missing_dims(existing, incoming, &filled);
+
+    ASSERT_EQ(filled, 0, "no dims to fill when both have same set");
+    // merged should be equivalent to existing.
+    ASSERT(merged.memory.has_value() == existing.memory.has_value(), "memory preserved");
+    ASSERT(merged.thermal.has_value() == existing.thermal.has_value(), "thermal preserved");
+    ASSERT(!merged.bandwidth.has_value(), "bandwidth still absent");
+}
+
+TEST(merge_fill_preserves_existing_values_on_conflict) {
+    // existing has memory populated; incoming has memory populated with a
+    // different marker. Merge must keep existing's value.
+    auto existing = make_dna(0xA2, true, true, false, false, false);
+    existing.timing.iterations_per_second = 100000.0;  // distinguishing marker
+
+    auto incoming = make_dna(0xA2, true, true, false, true, false);
+    incoming.timing.iterations_per_second = 777777.0;  // different value — must NOT win
+
+    int filled = 0;
+    auto merged = digital_dna::merge_fill_missing_dims(existing, incoming, &filled);
+
+    ASSERT_EQ(filled, 1, "only bandwidth filled");
+    ASSERT(merged.bandwidth.has_value(), "bandwidth now present");
+    // Core field (timing.iterations_per_second) must come from existing.
+    if (std::abs(merged.timing.iterations_per_second - 100000.0) > 1.0)
+        throw std::runtime_error("timing IPS must be preserved from existing, not overwritten");
+}
+
+TEST(merge_fill_multiple_missing_dims) {
+    auto existing = make_dna(0xA3, false, false, false, false, false);  // only core
+    auto incoming = make_dna(0xA3, true,  true,  true,  true,  true);   // all enriched
+
+    int filled = 0;
+    auto merged = digital_dna::merge_fill_missing_dims(existing, incoming, &filled);
+
+    // Counts: memory, thermal, clock_drift, bandwidth, behavioral = 5.
+    ASSERT_EQ(filled, 5, "should fill 5 dims");
+    ASSERT(merged.memory.has_value(), "memory filled");
+    ASSERT(merged.thermal.has_value(), "thermal filled");
+    ASSERT(merged.clock_drift.has_value(), "clock_drift filled");
+    ASSERT(merged.bandwidth.has_value(), "bandwidth filled");
+    ASSERT(merged.behavioral.has_value(), "behavioral filled");
+}
+
+TEST(merge_fill_then_append_sample_succeeds_with_dim_loss_guard) {
+    // End-to-end: seed the registry with a thin DNA (mapped-peer-equivalent,
+    // via append_sample on fresh MIK), then simulate an unmapped peer
+    // providing an enriched sample. Call merge + append and verify the
+    // canonical record has the new dim.
+    ScratchDir dir("mf_e2e");
+    DNARegistryDB reg;
+    ASSERT(reg.Open(dir.path.string()), "open db");
+
+    auto slim = make_dna(0xA4, true, true, false, false, false);   // 4 dims
+    ASSERT(reg.append_sample(slim) == IDNARegistry::RegisterResult::SUCCESS, "seed");
+
+    auto enriched_from_relay = make_dna(0xA4, true, true, false, true, false);  // +bw
+    int filled = 0;
+    auto merged = digital_dna::merge_fill_missing_dims(slim, enriched_from_relay, &filled);
+    ASSERT_EQ(filled, 1, "relay fills bandwidth");
+
+    auto r = reg.append_sample(merged);
+    ASSERT(r == IDNARegistry::RegisterResult::UPDATED ||
+           r == IDNARegistry::RegisterResult::DNA_CHANGED,
+           "merged sample should be accepted by append_sample");
+
+    auto canonical = reg.get_identity(slim.address);
+    ASSERT(canonical.has_value(), "canonical present");
+    ASSERT(canonical->bandwidth.has_value(), "canonical now has bandwidth after merge-append");
+}
+
+TEST(merge_fill_perspective_dim_is_fillable) {
+    // perspective isn't optional<T> — it has its own populated predicate.
+    // Verify merge treats it correctly.
+    auto existing = make_dna(0xA5, false, false, false, false, false);
+    // existing has zero peers in perspective by default.
+    ASSERT_EQ(existing.perspective.total_unique_peers(), (size_t)0, "existing has no peer data");
+
+    auto incoming = existing;  // same address
+    // Simulate incoming perspective with a snapshot.
+    digital_dna::PerspectiveSnapshot snap;
+    snap.timestamp = 1700000000;
+    snap.block_height = 100;
+    for (size_t i = 0; i < 20; ++i) {
+        std::array<uint8_t, 20> peer{};
+        for (size_t j = 0; j < 20; ++j) peer[j] = static_cast<uint8_t>(i + j);
+        snap.active_peers.push_back(peer);
+    }
+    incoming.perspective.snapshots.push_back(snap);
+
+    int filled = 0;
+    auto merged = digital_dna::merge_fill_missing_dims(existing, incoming, &filled);
+    ASSERT(filled >= 1, "perspective should count as a filled dim");
+    ASSERT(!merged.perspective.snapshots.empty(), "merged got the perspective snapshot");
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
 int main() {
-    std::cout << "\n" << YELLOW_ << "=== DNA Propagation Phase 1 Tests ===" << RESET_ << "\n" << std::endl;
+    std::cout << "\n" << YELLOW_ << "=== DNA Propagation Phase 1 + 1.1 Tests ===" << RESET_ << "\n" << std::endl;
 
     test_append_sample_unregistered_registers_wrapper();
     test_append_sample_enriches_and_archives_wrapper();
@@ -341,6 +463,14 @@ int main() {
     test_rate_limiter_per_mik_global_wrapper();
     test_rate_limiter_per_mik_per_peer_wrapper();
     test_rate_limiter_reject_leaves_state_unchanged_wrapper();
+
+    // Phase 1.1 merge-fill tests
+    test_merge_fill_fills_missing_dimension_wrapper();
+    test_merge_fill_no_gap_returns_existing_with_zero_filled_wrapper();
+    test_merge_fill_preserves_existing_values_on_conflict_wrapper();
+    test_merge_fill_multiple_missing_dims_wrapper();
+    test_merge_fill_then_append_sample_succeeds_with_dim_loss_guard_wrapper();
+    test_merge_fill_perspective_dim_is_fillable_wrapper();
 
     std::cout << "\n" << YELLOW_ << "=== Results ===" << RESET_ << std::endl;
     std::cout << GREEN_ << "Passed: " << g_tests_passed << RESET_ << std::endl;
