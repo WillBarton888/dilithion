@@ -105,8 +105,8 @@ public:
     verification::VerificationStatus get_verification_status(
         const std::array<uint8_t, 20>& mik) const;
 
-    /** Get all registered MIK identities (for verifier selection) */
-    std::vector<std::array<uint8_t, 20>> get_all_miks() const;
+    /** Get all registered MIK identities (for verifier selection and Phase 1.2 discovery) */
+    std::vector<std::array<uint8_t, 20>> get_all_miks() const override;
 
 private:
     std::shared_ptr<MLSybilDetector> ml_detector_;

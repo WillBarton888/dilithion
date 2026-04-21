@@ -302,6 +302,18 @@ extern std::atomic<bool> g_utxo_sync_enabled;
 // Global async broadcaster pointer (initialized in main)
 CAsyncBroadcaster* g_async_broadcaster = nullptr;
 
+// v4.0.17: Pending miner-win notifications. Pushed by the block-submit
+// handler when our mined block initially becomes tip; consumed by the
+// deferred-outcome block-connect callback once a child block is connected
+// on top (settling the round). See callback registration ~line 5350 for
+// the full rationale. Mirrors the dilv-node.cpp implementation.
+struct PendingMinerWin {
+    uint256 blockHash;
+    int     height;
+};
+static std::vector<PendingMinerWin> g_pendingMinerWins;
+static std::mutex g_pendingMinerWinsMutex;
+
 // Phase 2: MIK → peer_id mapping for DNA verification routing
 // Populated when we receive DNA identity responses from peers
 static std::map<std::array<uint8_t, 20>, int> g_mik_peer_map;
@@ -848,7 +860,7 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
                     for (auto b : g_cachedDnaHash) { if (b != 0) { allZero = false; break; } }
                     if (!allZero) {
                         g_dnaHashCached.store(true);
-                        std::cout << "[Mining] MIK registered — pre-cached DNA for future use" << std::endl;
+                        std::cout << "[Mining] MIK registered - pre-cached DNA for future use" << std::endl;
                     }
                 }
             }
@@ -1275,7 +1287,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                                     std::cout << std::dec << "...)" << std::endl;
                                     // Invalidate any PoW mined without DNA — must re-mine with DNA in challenge
                                     if (g_regNonceMined.load()) {
-                                        std::cout << "[Mining] Invalidating PoW (was mined without DNA) — will re-mine" << std::endl;
+                                        std::cout << "[Mining] Invalidating PoW (was mined without DNA) - will re-mine" << std::endl;
                                         g_regNonceMined.store(false);
                                     }
                                 }
@@ -1393,7 +1405,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
                 if (attestAge > Attestation::ATTESTATION_VALIDITY_WINDOW - 600) {
                     std::cout << "[Mining] Attestations are " << attestAge / 60
                               << "m old (max " << Attestation::ATTESTATION_VALIDITY_WINDOW / 60
-                              << "m) — refreshing..." << std::endl;
+                              << "m) - refreshing..." << std::endl;
                     needRefresh = true;
                 }
             }
@@ -1423,7 +1435,7 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
 
             // Guard: refuse to build registration block without valid attestations
             if (needRefresh) {
-                std::cerr << "[Mining] Template rejected — registration block at height "
+                std::cerr << "[Mining] Template rejected - registration block at height "
                           << nHeight << " requires seed attestations"
                           << " (collected=" << g_attestationsCollected.load()
                           << ", dna=" << g_dnaHashCached.load()
@@ -2239,7 +2251,7 @@ int main(int argc, char* argv[]) {
         auto report = Dilithion::ResetChainState(config.datadir);
         std::cout << "\n=== Reset complete ===" << std::endl;
         std::cout << "Removed:" << std::endl;
-        if (report.removed.empty()) std::cout << "  (nothing — chain state already absent)" << std::endl;
+        if (report.removed.empty()) std::cout << "  (nothing - chain state already absent)" << std::endl;
         for (const auto& p : report.removed) std::cout << "  - " << p << std::endl;
         std::cout << "\nPreserved:" << std::endl;
         if (report.preserved.empty()) std::cout << "  (none found)" << std::endl;
@@ -4677,7 +4689,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                     unsigned int h = static_cast<unsigned int>(g_chainstate.GetHeight());
                     int64_t mature = wallet.GetAvailableBalance(utxo_set, h);
-                    std::cout << "  [OK] Wallet synced — balance: " << std::fixed << std::setprecision(8)
+                    std::cout << "  [OK] Wallet synced - balance: " << std::fixed << std::setprecision(8)
                               << (static_cast<double>(mature) / 100000000.0) << " DIL" << std::endl;
                 } else {
                     std::cerr << "  WARNING: Failed to load wallet" << std::endl;
@@ -5349,6 +5361,52 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
         std::cout << "  [OK] VDF cooldown chain notification callbacks registered" << std::endl;
 
+        // =========================================================================
+        // v4.0.17: Deferred BLOCK CONFIRMED / BLOCK ORPHANED notifications.
+        //
+        // The previous "BLOCK CONFIRMED!" message fired at submit time when our
+        // mined block became the chain tip. While DIL (RandomX) is far less
+        // reorg-prone than DilV, brief same-height races still occur. The
+        // user-experience contract is "if we say CONFIRMED, the block is settled".
+        // We queue the win at submit time and only print CONFIRMED once a child
+        // block has been connected on top. If the pending block is no longer
+        // ancestor of the new tip at its height (a reorg displaced it), we fire
+        // BLOCK ORPHANED instead.
+        // =========================================================================
+        g_chainstate.RegisterBlockConnectCallback([](const CBlock& /*block*/, int height, const uint256& /*hash*/) {
+            std::lock_guard<std::mutex> lock(g_pendingMinerWinsMutex);
+            auto it = g_pendingMinerWins.begin();
+            while (it != g_pendingMinerWins.end()) {
+                if (it->height >= height) { ++it; continue; }  // not yet settled
+
+                CBlockIndex* tip    = g_chainstate.GetTip();
+                CBlockIndex* ourIdx = g_chainstate.GetBlockIndex(it->blockHash);
+                bool isCanonical = false;
+                if (ourIdx && tip) {
+                    CBlockIndex* ancestor = tip->GetAncestor(it->height);
+                    isCanonical = (ancestor == ourIdx);
+                }
+
+                if (isCanonical) {
+                    std::cout << std::endl
+                              << "======================================" << std::endl
+                              << "  BLOCK CONFIRMED!" << std::endl
+                              << "  Height: " << it->height << std::endl
+                              << "======================================" << std::endl;
+                } else {
+                    std::cout << std::endl
+                              << "======================================" << std::endl
+                              << "  BLOCK NOT SELECTED" << std::endl
+                              << "  Another miner's block won at height "
+                              << it->height << "." << std::endl
+                              << "  This is normal - better luck next block!" << std::endl
+                              << "======================================" << std::endl;
+                }
+                it = g_pendingMinerWins.erase(it);
+            }
+        });
+        std::cout << "  [OK] Deferred mining-outcome callback registered" << std::endl;
+
         // Digital DNA: Behavioral profile + trust scoring block hook
         g_chainstate.RegisterBlockConnectCallback([](const CBlock& block, int height, const uint256& hash) {
             int dnaAct = Dilithion::g_chainParams ?
@@ -5568,23 +5626,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Activate best chain (handles reorg if needed)
             bool reorgOccurred = false;
             if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
-                if (reorgOccurred) {
-                    std::cout << std::endl;
-                    std::cout << "======================================" << std::endl;
-                    std::cout << "  BLOCK NOT ACCEPTED" << std::endl;
-                    std::cout << "  Another miner's block was selected" << std::endl;
-                    std::cout << "  by the network. This is normal." << std::endl;
-                    std::cout << "======================================" << std::endl;
-                    std::cout << std::endl;
-
-                    // Stop mining - need to reassess chain state
-                    g_node_state.new_block_found = true;
-                } else if (g_chainstate.GetTip() == pblockIndexPtr) {
-                    std::cout << std::endl;
-                    std::cout << "======================================" << std::endl;
-                    std::cout << "  BLOCK CONFIRMED!" << std::endl;
-                    std::cout << "  Height: " << pblockIndexPtr->nHeight << std::endl;
-                    std::cout << "======================================" << std::endl;
+                if (g_chainstate.GetTip() == pblockIndexPtr) {
+                    // v4.0.17: our block became tip. Queue for deferred
+                    // CONFIRMED message — only print after a child block has
+                    // settled the round, in case a reorg displaces ours.
+                    {
+                        std::lock_guard<std::mutex> lock(g_pendingMinerWinsMutex);
+                        g_pendingMinerWins.push_back({blockHash, pblockIndexPtr->nHeight});
+                    }
+                    (void)reorgOccurred;
 
                     // Session accepted-blocks counter is maintained via
                     // RegisterBlockConnectCallback below. Do NOT increment
@@ -5723,15 +5773,19 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         g_node_state.new_block_found = true;
                     }
                 } else {
-                    // Stale block - another miner found a block at the same height
-                    // This is normal in a multi-miner network (race condition)
-                    std::cout << "[Blockchain] STALE BLOCK: Another miner found block at same height first" << std::endl;
-                    std::cout << "  Your block is valid but was beaten by: "
-                              << g_chainstate.GetTip()->GetBlockHash().GetHex().substr(0, 16)
-                              << " (height " << g_chainstate.GetHeight() << ")" << std::endl;
-                    std::cout << "  This is normal - continuing to mine on new tip" << std::endl;
-
-                    // Update template and continue mining
+                    // v4.0.17: print BLOCK NOT SELECTED immediately. We KNOW
+                    // we lost right now (block is valid but did not become
+                    // tip), so deferring would just hide the outcome behind
+                    // the next round's BLOCK PRODUCED message. Height label
+                    // distinguishes from any concurrently-firing deferred
+                    // notification for an earlier round.
+                    std::cout << std::endl
+                              << "======================================" << std::endl
+                              << "  BLOCK NOT SELECTED" << std::endl
+                              << "  Another miner's block won at height "
+                              << pblockIndexPtr->nHeight << "." << std::endl
+                              << "  This is normal - better luck next block!" << std::endl
+                              << "======================================" << std::endl;
                     g_node_state.new_block_found = true;
                 }
             } else {
@@ -5783,8 +5837,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             bool reorgOccurred = false;
             if (g_chainstate.ActivateBestChain(pblockIndexPtr, block, reorgOccurred)) {
                 if (g_chainstate.GetTip() == pblockIndexPtr) {
-                    std::cout << "[VDF] Block became new chain tip at height "
-                              << pblockIndexPtr->nHeight << std::endl;
+                    // v4.0.17: defer the BLOCK CONFIRMED message — queue and
+                    // let the deferred-outcome callback print once the round
+                    // is settled (see callback registration ~line 5350).
+                    {
+                        std::lock_guard<std::mutex> lock(g_pendingMinerWinsMutex);
+                        g_pendingMinerWins.push_back({blockHash, pblockIndexPtr->nHeight});
+                    }
+                    std::cout << "[VDF] Block submitted at height "
+                              << pblockIndexPtr->nHeight
+                              << " - awaiting settlement..." << std::endl;
 
                     // Session accepted-blocks counter maintained via
                     // RegisterBlockConnectCallback (don't double-count here).
@@ -6108,7 +6170,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                                     g_node_context.trust_manager->on_dna_changed(
                                                         dna_opt->address, static_cast<uint32_t>(curHeight));
                                                     std::cout << "[DNA] Core dimensions changed at height " << curHeight
-                                                              << " — trust penalty applied (-10)" << std::endl;
+                                                              << " - trust penalty applied (-10)" << std::endl;
                                                 }
                                             }
                                         }
@@ -6128,13 +6190,28 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             now_disc - last_dna_discovery).count();
 
                         if (disc_elapsed >= 60 && g_node_context.dna_registry &&
-                            g_node_context.cooldown_tracker &&
                             g_node_context.connman && g_node_context.message_processor) {
                             int dnaActDisc = Dilithion::g_chainParams ?
                                 Dilithion::g_chainParams->digitalDnaActivationHeight : 999999999;
                             if (g_chainstate.GetHeight() >= dnaActDisc) {
                                 last_dna_discovery = now_disc;
-                                auto known_miks = g_node_context.cooldown_tracker->GetKnownAddresses();
+                                // Phase 1.2: source MIKs from dna_registry (always populated
+                                // once DNA has been received) unioned with cooldown_tracker
+                                // (VDF-only — empty on DIL). Pre-fix, DIL's discovery loop
+                                // iterated over an empty cooldown_tracker and never sent a
+                                // single dnaireq; bandwidth/clock_drift coverage stayed ~1%.
+                                std::vector<std::array<uint8_t, 20>> known_miks =
+                                    g_node_context.dna_registry->get_all_miks();
+                                if (g_node_context.cooldown_tracker) {
+                                    auto ct_miks = g_node_context.cooldown_tracker->GetKnownAddresses();
+                                    for (const auto& m : ct_miks) {
+                                        bool dup = false;
+                                        for (const auto& e : known_miks) {
+                                            if (e == m) { dup = true; break; }
+                                        }
+                                        if (!dup) known_miks.push_back(m);
+                                    }
+                                }
                                 auto nodes = g_node_context.connman->GetNodes();
                                 std::vector<int> peer_ids;
                                 for (auto* n : nodes) {

@@ -288,6 +288,24 @@ private:
     // WALLET-006 FIX: UTXO locking mechanism to prevent concurrent transaction conflicts
     std::set<COutPoint> setLockedCoins;  // UTXOs locked for transaction creation (protected by cs_wallet)
 
+    // v4.0.17: deferred mining-reward notifications
+    //
+    // DilV uses lowest-VDF-output tiebreak which causes 3-8 same-height tip
+    // swaps within ~2s before a round settles. The previous behaviour fired
+    // "MINING REWARD CREDITED" inline at block-connect time, so users saw
+    // 4-8 reward messages for a single height while their balance never
+    // changed. Now we queue the notification at connect, drop it silently if
+    // the same block hash is later disconnected, and only print once a
+    // higher block has been connected on top (the round is settled).
+    struct PendingMiningNotification {
+        uint256 blockHash;
+        int     blockHeight;
+        int64_t reward;
+        int64_t balanceSnapshot;
+        std::string addressStr;
+    };
+    std::vector<PendingMiningNotification> m_pendingMiningNotifications;  // protected by cs_wallet
+
     // ============================================================================
     // HD Wallet (Hierarchical Deterministic) - BIP32/BIP44
     // ============================================================================
@@ -377,7 +395,16 @@ private:
      * @param connecting True if block is being connected, false if disconnecting
      * @note Assumes caller holds cs_wallet lock
      */
-    void ProcessBlockTransactionsUnlocked(const class CBlock& block, int height, bool connecting);
+    void ProcessBlockTransactionsUnlocked(const class CBlock& block, int height, bool connecting, const uint256& blockHash);
+
+    // v4.0.17: settle / drop deferred mining-reward notifications.
+    // FlushSettled prints any queued notifications whose block has now been
+    // buried by at least one further block (round is settled). DropForBlock
+    // silently removes notifications belonging to a specific block hash —
+    // called from the disconnect path so transient tip-swap blocks never
+    // produce a visible reward message.
+    void FlushSettledMiningNotificationsUnlocked(int currentHeight);
+    void DropPendingMiningNotificationsForBlockUnlocked(const uint256& blockHash);
 
     /**
      * Update best block pointer and persist to disk (Bitcoin Core: SetLastBlockProcessed)

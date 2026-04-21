@@ -67,7 +67,7 @@ ChainParams ChainParams::Mainnet() {
     // PoW and MIK signature verification skipped for historical blocks during IBD.
     // This fixes IBD where identity database is empty/incomplete.
     // NOTE: Chain built with MIK bypassed - cannot be removed, only raised
-    params.dfmpAssumeValidHeight = 34000;  // BUG #284: match checkpoint height — skip cooldown/ban validation for checkpointed blocks during IBD
+    params.dfmpAssumeValidHeight = 44000;  // v4.0.17: match new checkpoint at 44000 — skip cooldown/ban validation for checkpointed blocks during IBD
 
     // DFMP v3.0 activation - payout heat tracking, reduced free tier, dormancy decay
     params.dfmpV3ActivationHeight = 7000;
@@ -198,6 +198,7 @@ ChainParams ChainParams::Mainnet() {
     // Checkpoint at height 34000 - post v3.9.0 stabilization
     params.checkpoints.emplace_back(34000, uint256S("00000009b2312644f10b286934ed982520e92aaa54b2736e46f365a77bd92d98"));
     params.checkpoints.emplace_back(40000, uint256S("000000271909e84a5a31fe60c27a9e40a2a51828efc89c6af059a2db2f6e2576"));
+    params.checkpoints.emplace_back(44000, uint256S("0000002751fc99551f4fce1f2e92053b2432788f1dc12412fd81223204d11377"));
 
     // ASSUME-VALID: Skip DFMP penalty validation below this block
     // Empty = validate everything (populate after mainnet has established blocks)
@@ -413,7 +414,7 @@ ChainParams ChainParams::DilV() {
     // Genesis block itself is exempt (code at chain.cpp:889-890 skips height 0)
     // MIK required from block 1 onward
     params.dfmpActivationHeight = 0;
-    params.dfmpAssumeValidHeight = 18700;  // Raised: block 18619 has cooldown violation from VDF distribution race (BUG #285). Match checkpoint height.
+    params.dfmpAssumeValidHeight = 36500;  // v4.0.17: match new checkpoint at 36500 — skip cooldown/ban validation for checkpointed blocks during IBD
 
     // All DFMP versions active from genesis — use modern rules from day one
     params.dfmpV3ActivationHeight = 0;
@@ -520,6 +521,7 @@ ChainParams ChainParams::DilV() {
     params.checkpoints.emplace_back(8370, uint256S("ef1e3a7de515523cde0b224865b26dc049c92033bc5a86b31e0e32cd1ca852be"));
     params.checkpoints.emplace_back(15000, uint256S("45f5877adcc1ec2dab453412d6a5cb3fd9383fc97a184aa4ec855db55212f5d6"));
     params.checkpoints.emplace_back(18700, uint256S("1fbcf55c40c735596b68772af0072b98342a098bd5c1ff0b3bb26423720e9295"));
+    params.checkpoints.emplace_back(36500, uint256S("3a6c72ee0ac27508fe82b76ed561dc93bc52ee5a26825cbf3f693bbc7070fd63"));
 
     // No assume-valid yet
     params.defaultAssumeValid = "";

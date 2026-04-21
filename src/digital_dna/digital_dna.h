@@ -188,6 +188,11 @@ public:
     virtual std::vector<DigitalDNA> get_all() const = 0;
     virtual size_t count() const = 0;
 
+    /** Phase 1.2 — DNA propagation: return all MIKs known to this registry.
+     *  Used as the primary source for the discovery-request loop so DIL
+     *  (RandomX, no VDF-gated cooldown tracker) can find peers to ask. */
+    virtual std::vector<std::array<uint8_t, 20>> get_all_miks() const = 0;
+
     /** Get DNA change history for a MIK identity (oldest first).
      *  Each entry is a previous DNA snapshot archived when update_identity() was called.
      *  Single change = likely new hardware/location. Multiple regular changes = suspicious. */
@@ -319,6 +324,7 @@ public:
     SimilarityScore compare(const DigitalDNA& a, const DigitalDNA& b) const override;
     std::vector<DigitalDNA> get_all() const override;
     size_t count() const override { return identities_.size(); }
+    std::vector<std::array<uint8_t, 20>> get_all_miks() const override;
     std::vector<std::pair<uint64_t, DigitalDNA>> get_dna_history(
         const std::array<uint8_t, 20>& mik, size_t max_entries = 100) const override;
 

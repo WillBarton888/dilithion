@@ -601,7 +601,12 @@ void CWallet::blockConnected(const CBlock& block, int height, const uint256& has
     std::lock_guard<std::mutex> lock(cs_wallet);
 
     // Process all transactions in the block
-    ProcessBlockTransactionsUnlocked(block, height, true /* connecting */);
+    ProcessBlockTransactionsUnlocked(block, height, true /* connecting */, hash);
+
+    // v4.0.17: any queued mining-reward notification whose block was buried
+    // by this connect (i.e. its height < current height) is now considered
+    // settled — print and drop it.
+    FlushSettledMiningNotificationsUnlocked(height);
 
     // Update best block pointer and persist to disk
     // IBD OPTIMIZATION: Use passed hash instead of computing RandomX hash
@@ -618,15 +623,19 @@ void CWallet::blockConnected(const CBlock& block, int height, const uint256& has
 void CWallet::blockDisconnected(const CBlock& block, int height, const uint256& hash) {
     std::lock_guard<std::mutex> lock(cs_wallet);
 
+    // v4.0.17: silently drop any pending mining-reward notifications for
+    // this block — it lost the round and the reward never settled.
+    DropPendingMiningNotificationsForBlockUnlocked(hash);
+
     // Process transactions in REVERSE to undo the effects
-    ProcessBlockTransactionsUnlocked(block, height, false /* disconnecting */);
+    ProcessBlockTransactionsUnlocked(block, height, false /* disconnecting */, hash);
 
     // Update best block pointer to previous block
     // Note: We use hashPrevBlock from the disconnected block
     SetLastBlockProcessedUnlocked(block.hashPrevBlock, height - 1);
 }
 
-void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, bool connecting) {
+void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, bool connecting, const uint256& blockHash) {
     // Note: Caller must hold cs_wallet lock
 
     // Build set of wallet pubkey hashes for fast lookup
@@ -700,27 +709,21 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
                                     }
                                 }
 
-                                double rewardDIL = static_cast<double>(out.nValue) / 100000000.0;
-                                double balanceDIL = static_cast<double>(newBalance) / 100000000.0;
-
-                                // Thread-safe formatting: use snprintf instead of
-                                // std::fixed/setprecision which modify std::cout's
-                                // persistent format state (race condition with P2P thread)
-                                char rewardStr[64], balanceStr[64];
-                                snprintf(rewardStr, sizeof(rewardStr), "%.8f", rewardDIL);
-                                snprintf(balanceStr, sizeof(balanceStr), "%.8f", balanceDIL);
-
-                                const char* coinLabel = (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) ? "DilV" : "DIL";
-                                std::cout << "\n"
-                                    << "============================================================\n"
-                                    << "  MINING REWARD CREDITED!\n"
-                                    << "============================================================\n"
-                                    << "  Block Height:    " << height << "\n"
-                                    << "  Reward:          +" << rewardStr << " " << coinLabel << "\n"
-                                    << "  New Balance:     " << balanceStr << " " << coinLabel << "\n"
-                                    << "  Address:         " << addr.ToString() << "\n"
-                                    << "============================================================"
-                                    << std::endl;
+                                // v4.0.17: don't print MINING REWARD CREDITED inline.
+                                // On DilV, lowest-VDF-output tiebreaks displace this
+                                // block within ~2s in 30-50% of rounds. Queue the
+                                // notification; it will print from
+                                // FlushSettledMiningNotificationsUnlocked() once a
+                                // higher block is connected on top, or be silently
+                                // dropped from DropPendingMiningNotificationsForBlockUnlocked()
+                                // if this block loses the round.
+                                m_pendingMiningNotifications.push_back({
+                                    blockHash,
+                                    height,
+                                    static_cast<int64_t>(out.nValue),
+                                    newBalance,
+                                    addr.ToString()
+                                });
 
                                 // BUG #99 FIX: Immediately save wallet after mining reward
                                 // This ensures check-wallet-balance can see the new balance
@@ -782,6 +785,53 @@ void CWallet::ProcessBlockTransactionsUnlocked(const CBlock& block, int height, 
     }
 }
 
+void CWallet::FlushSettledMiningNotificationsUnlocked(int currentHeight) {
+    // Print and remove any pending notifications whose block has now been
+    // buried by ≥ 1 further block (the round is settled). Same-height
+    // tip-swap reorgs at the original height never reach here because the
+    // disconnect path in blockDisconnected() drops them first.
+    auto it = m_pendingMiningNotifications.begin();
+    while (it != m_pendingMiningNotifications.end()) {
+        if (it->blockHeight < currentHeight) {
+            double rewardCoins  = static_cast<double>(it->reward) / 100000000.0;
+            double balanceCoins = static_cast<double>(it->balanceSnapshot) / 100000000.0;
+
+            char rewardStr[64], balanceStr[64];
+            snprintf(rewardStr,  sizeof(rewardStr),  "%.8f", rewardCoins);
+            snprintf(balanceStr, sizeof(balanceStr), "%.8f", balanceCoins);
+
+            const char* coinLabel =
+                (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) ? "DilV" : "DIL";
+
+            std::cout << "\n"
+                << "============================================================\n"
+                << "  MINING REWARD CREDITED!\n"
+                << "============================================================\n"
+                << "  Block Height:    " << it->blockHeight << "\n"
+                << "  Reward:          +" << rewardStr << " " << coinLabel << "\n"
+                << "  New Balance:     " << balanceStr << " " << coinLabel << "\n"
+                << "  Address:         " << it->addressStr << "\n"
+                << "============================================================"
+                << std::endl;
+
+            it = m_pendingMiningNotifications.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
+void CWallet::DropPendingMiningNotificationsForBlockUnlocked(const uint256& blockHash) {
+    m_pendingMiningNotifications.erase(
+        std::remove_if(m_pendingMiningNotifications.begin(),
+                       m_pendingMiningNotifications.end(),
+                       [&blockHash](const PendingMiningNotification& n) {
+                           return n.blockHash == blockHash;
+                       }),
+        m_pendingMiningNotifications.end()
+    );
+}
+
 void CWallet::SetLastBlockProcessedUnlocked(const uint256& hash, int height) {
     // Note: Caller must hold cs_wallet lock
 
@@ -835,7 +885,10 @@ bool CWallet::RescanFromHeight(CChainState& chainstate, CBlockchainDB& blockchai
             std::lock_guard<std::mutex> lock(cs_wallet);
 
             size_t txsBefore = mapWalletTx.size();
-            ProcessBlockTransactionsUnlocked(block, height, true);
+            ProcessBlockTransactionsUnlocked(block, height, true, blockHash);
+            // v4.0.17: rescan path is replaying historical blocks; never
+            // print mining reward popups for them. Drop anything queued.
+            DropPendingMiningNotificationsForBlockUnlocked(blockHash);
             size_t txsAfter = mapWalletTx.size();
 
             if (txsAfter > txsBefore) {

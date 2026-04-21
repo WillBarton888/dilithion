@@ -782,6 +782,16 @@ std::vector<DigitalDNA> DigitalDNARegistry::get_all() const {
     return identities_;
 }
 
+std::vector<std::array<uint8_t, 20>> DigitalDNARegistry::get_all_miks() const {
+    std::vector<std::array<uint8_t, 20>> result;
+    result.reserve(identities_.size());
+    for (const auto& dna : identities_) {
+        if (dna.mik_identity == std::array<uint8_t, 20>{}) continue;
+        result.push_back(dna.mik_identity);
+    }
+    return result;
+}
+
 std::vector<std::pair<uint64_t, DigitalDNA>> DigitalDNARegistry::get_dna_history(
     const std::array<uint8_t, 20>& /*mik*/, size_t /*max_entries*/) const {
     // In-memory registry doesn't track history
