@@ -1,5 +1,7 @@
 // Copyright (c) 2025 The Dilithion Core developers
 // Distributed under the MIT software license
+// AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY
+// Generated from website/miner.html by scripts/gen-embedded-html.sh
 
 #ifndef DILITHION_API_MINER_HTML_H
 #define DILITHION_API_MINER_HTML_H
@@ -7,7 +9,7 @@
 #include <string>
 
 inline const std::string& GetMinerHTML() {
-    static const std::string miner_html = R"MINER_HTML(
+    static const std::string html = R"MINER_HTML(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1398,8 +1400,8 @@ inline const std::string& GetMinerHTML() {
         </div>
         <div class="stat-card">
             <div class="stat-label">Balance</div>
-            <div class="stat-value" id="balance">0.00 DIL</div>
-            <div class="stat-sub" id="immatureBalance">Immature: 0.00 DIL</div>
+            <div class="stat-value" id="balance">0.00 <span class="coin-unit">DIL</span></div>
+            <div class="stat-sub" id="immatureBalance">Immature: 0.00 <span class="coin-unit">DIL</span></div>
         </div>
         <div class="stat-card">
             <div class="stat-label">Uptime</div>
@@ -1456,8 +1458,8 @@ inline const std::string& GetMinerHTML() {
     <!-- Balance Card -->
     <div class="wallet-balance-card">
         <div class="wallet-balance-label">Total Balance</div>
-        <div class="wallet-balance-amount" id="walletBalance">0.00 DIL</div>
-        <div class="wallet-balance-sub" id="walletBalanceSub">Immature: 0.00 DIL</div>
+        <div class="wallet-balance-amount" id="walletBalance">0.00 <span class="coin-unit">DIL</span></div>
+        <div class="wallet-balance-sub" id="walletBalanceSub">Immature: 0.00 <span class="coin-unit">DIL</span></div>
     </div>
 
     <!-- Send / Receive -->
@@ -1465,14 +1467,14 @@ inline const std::string& GetMinerHTML() {
 
         <!-- Send -->
         <div class="wallet-action-card">
-            <div class="wallet-action-title">Send DIL</div>
+            <div class="wallet-action-title">Send <span class="coin-unit">DIL</span></div>
             <div class="wallet-form-group">
                 <label class="wallet-form-label">Recipient Address</label>
                 <input type="text" class="wallet-input" id="sendAddress"
                     placeholder="D...">
             </div>
             <div class="wallet-form-group">
-                <label class="wallet-form-label">Amount (DIL)</label>
+                <label class="wallet-form-label">Amount (<span class="coin-unit">DIL</span>)</label>
                 <input type="number" class="wallet-input" id="sendAmount"
                     placeholder="0.00" step="0.00000001" min="0.00000001">
             </div>
@@ -1482,7 +1484,7 @@ inline const std::string& GetMinerHTML() {
 
         <!-- Receive -->
         <div class="wallet-action-card">
-            <div class="wallet-action-title">Receive DIL</div>
+            <div class="wallet-action-title">Receive <span class="coin-unit">DIL</span></div>
             <div class="receive-address-display">
                 <div class="receive-address-text" id="receiveAddress">Loading...</div>
             </div>
@@ -1534,6 +1536,7 @@ let walletEncrypted = false;
 let walletLocked = false;
 let pendingUnlockAction = null; // 'send' or 'mine'
 let threadSliderInit = false;
+let coinUnit = 'DIL'; // Detected from chain: 'DIL' or 'DilV'
 let miningStoppedPending = false; // debounce template rebuilds
 let userClickedStop = false;
 
@@ -1585,7 +1588,7 @@ function formatHashrate(h) {
 }
 
 function formatBalance(amount) {
-    return parseFloat(amount).toFixed(2) + ' DIL';
+    return parseFloat(amount).toFixed(2) + ' ' + coinUnit;
 }
 
 function formatUptime(seconds) {
@@ -1866,8 +1869,8 @@ async function handleSend() {
         alertEl.innerHTML = `
             <strong>Confirm Transaction</strong><br>
             To: <span style="font-family:'JetBrains Mono',monospace;font-size:0.75rem;">${escapeHtml(address)}</span><br>
-            Amount: ${amount} DIL<br>
-            Fee: ${typeof fee === 'number' ? fee.toFixed(8) : fee} DIL
+            Amount: ${amount} ${coinUnit}<br>
+            Fee: ${typeof fee === 'number' ? fee.toFixed(8) : fee} ${coinUnit}
             <div class="confirm-actions">
                 <button class="confirm-btn yes" onclick="confirmSend()">Confirm</button>
                 <button class="confirm-btn no" onclick="cancelSend()">Cancel</button>
@@ -1914,7 +1917,7 @@ async function executeSend() {
         alertEl.textContent = 'Transaction sent successfully!';
         document.getElementById('sendAddress').value = '';
         document.getElementById('sendAmount').value = '';
-        addLog('Sent ' + pendingSend.amount + ' DIL to ' + pendingSend.address.substring(0, 12) + '...');
+        addLog('Sent ' + pendingSend.amount + ' ' + coinUnit + ' to ' + pendingSend.address.substring(0, 12) + '...');
         pendingSend = null;
 
         // Refresh transactions
@@ -2050,7 +2053,7 @@ async function loadTransactions() {
         const txList = document.getElementById('txList');
 
         if (!result || !result.transactions || result.transactions.length === 0) {
-            txList.innerHTML = '<div class="tx-empty">No transactions yet. Start mining to earn DIL!</div>';
+            txList.innerHTML = '<div class="tx-empty">No transactions yet. Start mining to earn ' + coinUnit + '!</div>';
             return;
         }
 
@@ -2109,8 +2112,8 @@ async function loadTransactions() {
 
 function formatTxAmount(amount) {
     const val = parseFloat(amount);
-    if (Math.abs(val) >= 1) return val.toFixed(2) + ' DIL';
-    return val.toFixed(8) + ' DIL';
+    if (Math.abs(val) >= 1) return val.toFixed(2) + ' ' + coinUnit;
+    return val.toFixed(8) + ' ' + coinUnit;
 }
 
 // ─── Polling ─────────────────────────────────────────────────
@@ -2145,13 +2148,13 @@ async function pollNode() {
             document.getElementById('hashrate').textContent = formatHashrate(hashrate);
             document.getElementById('chartHashrate').textContent = formatHashrate(hashrate);
             document.getElementById('blocksFound').textContent = miningInfo.blocks_found || 0;
-            document.getElementById('blocksTotal').textContent = 'Total: ' + (miningInfo.blocks_found_total || 0);
+            document.getElementById('blocksTotal').textContent = 'Accepted: ' + (miningInfo.blocks_accepted || 0);
 
-            if (miningInfo.blocks_found_total > previousBlocksTotal && previousBlocksTotal > 0) {
-                addLog('BLOCK SUBMITTED — waiting for confirmation. Total: ' + miningInfo.blocks_found_total, 'block');
+            if (miningInfo.blocks_accepted > previousBlocksTotal && previousBlocksTotal > 0) {
+                addLog('BLOCK ACCEPTED onto chain. Accepted: ' + miningInfo.blocks_accepted, 'block');
             }
             previousBlocksFound = miningInfo.blocks_found || 0;
-            previousBlocksTotal = miningInfo.blocks_found_total || 0;
+            previousBlocksTotal = miningInfo.blocks_accepted || 0;
 
             if (miningInfo.threads) {
                 const slider = document.getElementById('threadSlider');
@@ -2206,7 +2209,14 @@ async function pollNode() {
         // Chain info
         if (chainInfo) {
             document.getElementById('blockHeight').textContent = 'Height: ' + chainInfo.blocks.toLocaleString();
-            document.getElementById('networkLabel').textContent = chainInfo.chain === 'main' ? 'Mainnet' : 'Testnet';
+            const isMainDil = chainInfo.chain === 'main';
+            const isDilV = chainInfo.chain === 'dilv' || chainInfo.chain === 'dilv_main';
+            document.getElementById('networkLabel').textContent = isDilV ? 'DilV Mainnet' : (isMainDil ? 'Mainnet' : 'Testnet');
+            const newUnit = isDilV ? 'DilV' : 'DIL';
+            if (newUnit !== coinUnit) {
+                coinUnit = newUnit;
+                document.querySelectorAll('.coin-unit').forEach(el => el.textContent = coinUnit);
+            }
         }
 
         // Connection count
@@ -2293,10 +2303,8 @@ async function toggleMining() {
                 }
             } catch (e) { /* wallet might not be encrypted */ }
 
-            addLog('Starting mining (first-time registration may take ~10-15 minutes)...');
-            btn.textContent = 'Registering...';
             await rpcCall('startmining');
-            addLog('Mining started!');
+            addLog('Start mining requested');
             miningStartTime = Date.now();
         }
     } catch (err) {
@@ -2357,7 +2365,7 @@ init();
 </body>
 </html>
 )MINER_HTML";
-    return miner_html;
+    return html;
 }
 
 #endif // DILITHION_API_MINER_HTML_H

@@ -154,8 +154,12 @@ private:
     // Atomic swap state store
     SwapStore m_swapStore;
 
-    // Persistent total blocks mined counter (loaded from file, survives restarts)
-    std::atomic<uint64_t> m_totalBlocksMined{0};
+    // Session accepted-blocks counter: # of blocks on the canonical chain
+    // mined by our MIK this process lifetime. Incremented when a block
+    // connects and its coinbase MIK == ours; decremented when one of our
+    // blocks disconnects (tiebreak reorg in VDF lowest-output distribution).
+    // Resets on process start.
+    std::atomic<uint64_t> m_acceptedSession{0};
     // Network manager placeholder — not yet needed (P2P layer handles networking directly)
 
     // RPC handlers
@@ -489,14 +493,19 @@ public:
     void SetDataDir(const std::string& dataDir);
 
 
-    /** Set total blocks mined (loaded from persistent file on startup) */
-    void SetTotalBlocksMined(uint64_t count) { m_totalBlocksMined.store(count); }
+    /** Increment session accepted-blocks counter (one of our MIK's blocks just connected to the chain) */
+    void IncrementAcceptedSession() { ++m_acceptedSession; }
 
-    /** Increment total blocks mined (called when block becomes chain tip) */
-    uint64_t IncrementTotalBlocksMined() { return ++m_totalBlocksMined; }
+    /** Decrement session accepted-blocks counter (one of our MIK's blocks was disconnected, e.g. VDF tiebreak reorg) */
+    void DecrementAcceptedSession() {
+        // Atomic saturating decrement — don't underflow if a disconnect fires
+        // for a block whose corresponding connect wasn't seen this session.
+        uint64_t cur = m_acceptedSession.load();
+        while (cur > 0 && !m_acceptedSession.compare_exchange_weak(cur, cur - 1)) {}
+    }
 
-    /** Get total blocks mined */
-    uint64_t GetTotalBlocksMined() const { return m_totalBlocksMined.load(); }
+    /** Get session accepted blocks count */
+    uint64_t GetAcceptedSession() const { return m_acceptedSession.load(); }
 
     /**
      * Register Digital DNA RPC handler

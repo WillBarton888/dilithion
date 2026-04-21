@@ -1,16 +1,15 @@
 // Copyright (c) 2025 The Dilithion Core developers
 // Distributed under the MIT software license
 // AUTO-GENERATED FILE - DO NOT EDIT DIRECTLY
-// Generated from website/wallet.html
+// Generated from website/wallet.html by scripts/gen-embedded-html.sh
 
 #ifndef DILITHION_API_WALLET_HTML_H
 #define DILITHION_API_WALLET_HTML_H
 
 #include <string>
 
-// Embedded wallet HTML content
 inline const std::string& GetWalletHTML() {
-    static const std::string wallet_html = R"WALLET_HTML(
+    static const std::string html = R"WALLET_HTML(
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -980,6 +979,9 @@ inline const std::string& GetWalletHTML() {
                     </div>
                     <button class="btn btn-primary" onclick="welcomeDoUnlock()" style="width: 100%;">Unlock</button>
                     <button class="btn" onclick="welcomeUnlockBack()" style="width: 100%; margin-top: 8px; background: transparent; color: var(--text-secondary);">Back</button>
+                    <p style="text-align: center; margin-top: 12px; font-size: 0.8rem; color: var(--text-muted);">
+                        Forgot your password? Go back and choose <strong>Restore Wallet</strong> using your 24-word recovery phrase.
+                    </p>
                 </div>
             </div>
 
@@ -1124,6 +1126,9 @@ inline const std::string& GetWalletHTML() {
                         <button class="btn btn-primary" onclick="dashboardQuickUnlock()" style="padding: 8px 16px; white-space: nowrap;">Unlock</button>
                     </div>
                 </div>
+                <div style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);">
+                    Forgot your password? Go to Settings and restore your wallet using your 24-word recovery phrase.
+                </div>
             </div>
 
             <!-- Chain Health Warning Banner -->
@@ -1141,30 +1146,59 @@ inline const std::string& GetWalletHTML() {
                             <span id="optimizeUtxoCount"></span>
                         </div>
                     </div>
-                    <button class="btn btn-primary" id="optimizeBtn" onclick="showConsolidateModal()" style="white-space: nowrap;" title="Combines many small mining payments into a single larger one, making future sends faster and cheaper. You choose which address receives the combined funds.">
+                    <button class="btn btn-primary" id="optimizeBtn" onclick="optimizeWallet()" style="white-space: nowrap;">
                         Optimize Now
                     </button>
                 </div>
             </div>
 
-            <!-- Consolidation Destination Modal -->
-            <div id="consolidateModal" style="display: none; position: fixed; top: 0; left: 0; right: 0; bottom: 0; background: rgba(0,0,0,0.8); z-index: 1000; align-items: center; justify-content: center;">
-                <div style="background: var(--bg-secondary, #1a1a18); border: 1px solid rgba(200,162,78,0.3); border-radius: 12px; padding: 24px; max-width: 480px; width: 90%; margin: auto; position: relative; top: 50%; transform: translateY(-50%);">
-                    <div style="font-weight: 600; font-size: 16px; color: var(--text-primary, #e8e8e0); margin-bottom: 4px;">Consolidate Payments</div>
-                    <div style="font-size: 13px; color: var(--text-secondary, #8A8A80); margin-bottom: 16px;">
-                        Combine <span id="consolidateUtxoInfo" style="color: #C8B560;"></span> small payments into one. Choose which address receives the combined amount.
+            <!-- Wallet Encryption Warning Banner (shown when wallet is NOT encrypted) -->
+            <div id="encryptionWarningBanner" style="display: none; background: rgba(255,68,68,0.06); border: 1px solid rgba(255,68,68,0.4); border-radius: 10px; padding: 20px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: flex-start; gap: 12px; margin-bottom: 16px;">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#ff4444" stroke-width="2" style="flex-shrink: 0; margin-top: 2px;">
+                        <path d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"></path>
+                        <line x1="12" y1="9" x2="12" y2="13"></line>
+                        <line x1="12" y1="17" x2="12.01" y2="17"></line>
+                    </svg>
+                    <div>
+                        <div style="font-weight: 700; color: #ff4444; font-size: 1rem; margin-bottom: 4px;">Your wallet is not encrypted</div>
+                        <div style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.5;">
+                            Anyone with access to your computer can spend your funds. Set a password to protect your wallet.
+                        </div>
                     </div>
-                    <div style="margin-bottom: 16px;">
-                        <label style="display: block; font-size: 12px; color: var(--text-secondary, #8A8A80); margin-bottom: 6px;">Destination Address</label>
-                        <select id="consolidateDestSelect" style="width: 100%; padding: 10px 12px; background: var(--bg-primary, #0f0f0e); color: var(--text-primary, #e8e8e0); border: 1px solid rgba(138,138,128,0.3); border-radius: 8px; font-family: monospace; font-size: 13px; cursor: pointer;">
-                        </select>
+                </div>
+                <div id="encryptBannerForm">
+                    <div style="display: flex; flex-direction: column; gap: 10px;">
+                        <div style="position: relative;">
+                            <input type="password" class="form-input" id="bannerEncryptPw" placeholder="Enter password (min 8 characters)" style="padding-right: 50px;">
+                            <button type="button" onclick="togglePasswordVisibility('bannerEncryptPw', this)" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 0.85rem;">Show</button>
+                        </div>
+                        <div style="position: relative;">
+                            <input type="password" class="form-input" id="bannerEncryptPwConfirm" placeholder="Confirm password" style="padding-right: 50px;">
+                            <button type="button" onclick="togglePasswordVisibility('bannerEncryptPwConfirm', this)" style="position: absolute; right: 8px; top: 50%; transform: translateY(-50%); background: none; border: none; color: var(--text-muted); cursor: pointer; padding: 4px 8px; font-size: 0.85rem;">Show</button>
+                        </div>
+                        <div style="display: flex; gap: 12px; align-items: center;">
+                            <button class="btn btn-primary" onclick="encryptFromBanner()" style="padding: 10px 24px;">
+                                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="margin-right: 6px; vertical-align: middle;">
+                                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                                    <path d="M7 11V7a5 5 0 0110 0v4"></path>
+                                </svg>
+                                Encrypt Wallet
+                            </button>
+                            <span style="font-size: 0.8rem; color: var(--text-muted);">You'll need this password to unlock for mining &amp; sending</span>
+                        </div>
                     </div>
-                    <div id="consolidatePreview" style="background: rgba(200,162,78,0.06); border: 1px solid rgba(200,162,78,0.15); border-radius: 8px; padding: 12px; margin-bottom: 16px; font-size: 13px; color: var(--text-secondary, #8A8A80);">
-                    </div>
-                    <div style="display: flex; gap: 12px; justify-content: flex-end;">
-                        <button class="btn" onclick="closeConsolidateModal()" style="padding: 8px 20px;">Cancel</button>
-                        <button class="btn btn-primary" id="consolidateConfirmBtn" onclick="executeConsolidate()" style="padding: 8px 20px;">Consolidate</button>
-                    </div>
+                </div>
+            </div>
+
+            <!-- Wallet Encrypted Confirmation (shown briefly after encrypting, or on load when encrypted) -->
+            <div id="encryptionOkBanner" style="display: none; background: rgba(76,175,80,0.06); border: 1px solid rgba(76,175,80,0.3); border-radius: 10px; padding: 14px 20px; margin-bottom: 16px;">
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4caf50" stroke-width="2" style="flex-shrink: 0;">
+                        <rect x="3" y="11" width="18" height="11" rx="2" ry="2"></rect>
+                        <path d="M7 11V7a5 5 0 0110 0v4"></path>
+                    </svg>
+                    <span style="font-size: 0.9rem; color: #4caf50; font-weight: 600;">Wallet is encrypted</span>
                 </div>
             </div>
 
@@ -1198,7 +1232,10 @@ inline const std::string& GetWalletHTML() {
                         <button class="btn btn-primary" onclick="unlockNodeWalletFromDash()">Unlock</button>
                     </div>
                     <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 8px;">
-                        ⚠️ Mining requires wallet to be unlocked for block signing
+                        Mining requires wallet to be unlocked for block signing
+                    </p>
+                    <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 4px;">
+                        Forgot your password? Stop the node, restart it, and restore from your 24-word recovery phrase.
                     </p>
                 </div>
             </div>
@@ -1243,7 +1280,7 @@ inline const std::string& GetWalletHTML() {
                             <span class="info-value" id="dashHashRate">0 H/s</span>
                         </div>
                         <div class="info-item">
-                            <span class="info-label" style="color: #8A8A80; font-size: 12px;">Blocks Found</span>
+                            <span class="info-label" style="color: #8A8A80; font-size: 12px;" title="Both numbers are for this node session (reset on restart). Accepted = blocks currently on the canonical chain mined by your MIK. Submitted = VDF blocks your miner has solved and broadcast. Gap is expected: DilV uses lowest-VDF-output-wins distribution, so competing miners' lower outputs cause some of your submitted blocks to be reorged out. Each identity earns roughly its fair share (≈ network_blocks / active_miners). Your wallet transaction history is the source of truth for lifetime rewards.">Blocks Mined &nbsp;<span style="opacity:0.5;">ⓘ</span></span>
                             <span class="info-value" id="blocksFound">0</span>
                         </div>
                         <div class="info-item">
@@ -1740,6 +1777,9 @@ inline const std::string& GetWalletHTML() {
                                 </div>
                             </div>
                             <button class="btn btn-primary" onclick="changeNodeWalletPassword()">Change Password</button>
+                            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 12px;">
+                                Forgot your current password? Stop the node, restart it, and choose <strong>Restore Wallet</strong> with your 24-word recovery phrase. This will create a new wallet file with a new password.
+                            </p>
                         </div>
                     </details>
                 </div>
@@ -1805,8 +1845,8 @@ inline const std::string& GetWalletHTML() {
                                       placeholder="Enter your 24 words separated by spaces"></textarea>
                         </div>
                         <div class="form-group">
-                            <label class="form-label">New Password</label>
-                            <input type="password" class="form-input" id="restoreLightPassword" placeholder="Minimum 8 characters">
+                            <label class="form-label">Password <span style="color: var(--text-muted); font-weight: normal;">(optional)</span></label>
+                            <input type="password" class="form-input" id="restoreLightPassword" placeholder="Leave blank to restore without encryption">
                         </div>
                         <div style="display: flex; gap: 12px;">
                             <button class="btn btn-primary" onclick="restoreLightWallet()">Restore Wallet</button>
@@ -2154,7 +2194,13 @@ inline const std::string& GetWalletHTML() {
         // Active chain: 'dil' or 'dilv'
         let activeChain = 'dil';  // Always start on DIL
         let chainSwitchGen = 0;   // Generation counter to discard stale async responses
-        const chainPorts = { dil: 8332, dilv: 9332 };
+        let chainPorts = { dil: 8332, dilv: 9332 };
+        try {
+            const savedPorts = JSON.parse(localStorage.getItem('dilithionChainPorts') || 'null');
+            if (savedPorts && Number.isInteger(savedPorts.dil) && Number.isInteger(savedPorts.dilv)) {
+                chainPorts = savedPorts;
+            }
+        } catch(e) {}
         const chainUnits = { dil: 'DIL', dilv: 'DilV' };
 
         function switchChain(chain) {
@@ -2256,7 +2302,6 @@ inline const std::string& GetWalletHTML() {
         }
 
         function showChainSwitchOverlay(chain) {
-            console.log('[ChainSwitch] Showing overlay for', chain);
             let overlay = document.getElementById('chainSwitchOverlay');
             if (!overlay) {
                 overlay = document.createElement('div');
@@ -2272,7 +2317,6 @@ inline const std::string& GetWalletHTML() {
         }
 
         function hideChainSwitchOverlay() {
-            console.log('[ChainSwitch] Hiding overlay');
             const overlay = document.getElementById('chainSwitchOverlay');
             if (overlay) {
                 overlay.remove();
@@ -2320,6 +2364,8 @@ inline const std::string& GetWalletHTML() {
             if (saved) {
                 try {
                     rpcConfig = JSON.parse(saved);
+                    // Prefer per-chain port for current activeChain over the last-saved port
+                    if (chainPorts[activeChain]) rpcConfig.port = chainPorts[activeChain];
                     document.getElementById('rpcHost').value = rpcConfig.host;
                     document.getElementById('rpcPort').value = rpcConfig.port;
                     document.getElementById('rpcUser').value = rpcConfig.user || 'rpc';
@@ -2337,6 +2383,8 @@ inline const std::string& GetWalletHTML() {
             rpcConfig.port = parseInt(document.getElementById('rpcPort').value);
             rpcConfig.user = document.getElementById('rpcUser').value;
             rpcConfig.pass = document.getElementById('rpcPass').value;
+            chainPorts[activeChain] = rpcConfig.port;
+            localStorage.setItem('dilithionChainPorts', JSON.stringify(chainPorts));
             localStorage.setItem('dilithionWalletConfig', JSON.stringify(rpcConfig));
             showNotification('Settings saved. Connecting...', 'info');
             connect();
@@ -2557,9 +2605,10 @@ inline const std::string& GetWalletHTML() {
                 console.log('[Connect] Waiting 1 second before loading data...');
                 await new Promise(r => setTimeout(r, 1000));
 
-                // MINIMAL initial load - just get balance
+                // MINIMAL initial load - just get balance + check encryption
                 console.log('[Connect] Loading initial balance...');
                 await refreshBalance();
+                await updateDashboardEncryptionBanner();
                 console.log('[Connect] Initial load complete');
 
             } catch(e) {
@@ -2979,14 +3028,21 @@ inline const std::string& GetWalletHTML() {
                 hashRateEl.textContent = hashrate.toFixed(2) + ' H/s';
             }
 
-            // Display blocks found (session + lifetime total from persistent counter)
-            const sessionBlocks = miningInfo.blocks_found || 0;
-            const totalBlocks = miningInfo.blocks_found_total || 0;
+            // Both counters reset on node process start.
+            //  submitted = blocks this miner has VDF-solved and broadcast.
+            //  accepted  = blocks on the canonical chain mined by our MIK (mirrors reorgs).
+            // Gap is expected: DilV uses lowest-VDF-output-wins distribution, so
+            // competing miners' lower outputs cause our submitted blocks to be
+            // reorged out. DFMP per-MIK fair-share caps also limit acceptance.
+            const submitted = miningInfo.blocks_found || 0;
+            const accepted = miningInfo.blocks_accepted || 0;
             const blocksEl = document.getElementById('blocksFound');
-            if (totalBlocks > 0 && totalBlocks !== sessionBlocks) {
-                blocksEl.textContent = totalBlocks + ' (' + sessionBlocks + ' this session)';
+            if (submitted > 0 && submitted !== accepted) {
+                blocksEl.innerHTML = '<span style="color:#C8B560;">' + accepted + '</span>' +
+                    ' <span style="color:#8A8A80;font-size:11px;">accepted &middot; ' +
+                    submitted + ' submitted</span>';
             } else {
-                blocksEl.textContent = totalBlocks;
+                blocksEl.textContent = accepted;
             }
 
             // Calculate estimated time to block
@@ -3174,136 +3230,33 @@ inline const std::string& GetWalletHTML() {
             }
         }
 
-        // Consolidation modal state
-        let consolidateAddresses = [];
-        let consolidateUtxoCount = 0;
-
-        async function showConsolidateModal() {
-            try {
-                // Gather wallet addresses with balances
-                const utxos = await rpcCall('listunspent');
-                if (!Array.isArray(utxos) || utxos.length <= 1) {
-                    showNotification('Nothing to consolidate', 'info');
-                    return;
-                }
-                consolidateUtxoCount = utxos.length;
-
-                // Aggregate balances by address
-                const balanceMap = {};
-                const utxoCountMap = {};
-                for (const u of utxos) {
-                    const addr = u.address || 'unknown';
-                    balanceMap[addr] = (balanceMap[addr] || 0) + (u.amount || 0);
-                    utxoCountMap[addr] = (utxoCountMap[addr] || 0) + 1;
-                }
-
-                // Get mining address for labeling
-                let miningAddr = null;
-                try {
-                    const ma = await rpcCall('getminingaddress');
-                    if (ma && ma.address) miningAddr = ma.address;
-                } catch(e) {}
-
-                // Sort by balance descending
-                consolidateAddresses = Object.entries(balanceMap)
-                    .map(([addr, bal]) => ({ address: addr, balance: bal, utxos: utxoCountMap[addr] || 0, isMining: addr === miningAddr }))
-                    .sort((a, b) => b.balance - a.balance);
-
-                // Populate dropdown
-                const select = document.getElementById('consolidateDestSelect');
-                const coinLabel = (typeof currentChain !== 'undefined' && currentChain === 'dilv') ? 'DilV' : 'DIL';
-                select.innerHTML = '';
-                for (const a of consolidateAddresses) {
-                    const opt = document.createElement('option');
-                    opt.value = a.address;
-                    const short = a.address.substring(0, 10) + '...' + a.address.substring(a.address.length - 6);
-                    const tag = a.isMining ? ' [MINING]' : '';
-                    opt.textContent = short + tag + '  —  ' + a.balance.toFixed(4) + ' ' + coinLabel + ' (' + a.utxos + ' UTXOs)';
-                    select.appendChild(opt);
-                }
-
-                // Pre-select: mining address if set, otherwise highest balance
-                if (miningAddr && consolidateAddresses.some(a => a.address === miningAddr)) {
-                    select.value = miningAddr;
-                }
-
-                // Update preview
-                updateConsolidatePreview();
-                select.onchange = updateConsolidatePreview;
-
-                // Show info
-                document.getElementById('consolidateUtxoInfo').textContent = consolidateUtxoCount;
-
-                // Show modal
-                document.getElementById('consolidateModal').style.display = 'block';
-            } catch(e) {
-                const msg = e.message || String(e);
-                if (msg.includes('locked')) {
-                    showNotification('Unlock wallet first', 'error');
-                } else {
-                    showNotification('Error: ' + msg, 'error');
-                }
-            }
-        }
-
-        function updateConsolidatePreview() {
-            const select = document.getElementById('consolidateDestSelect');
-            const dest = select.value;
-            const preview = document.getElementById('consolidatePreview');
-            const coinLabel = (typeof currentChain !== 'undefined' && currentChain === 'dilv') ? 'DilV' : 'DIL';
-
-            // Count UTXOs that will be consolidated (up to 50 smallest)
-            const batchSize = Math.min(consolidateUtxoCount, 50);
-            const destInfo = consolidateAddresses.find(a => a.address === dest);
-            const short = dest.substring(0, 14) + '...' + dest.substring(dest.length - 8);
-
-            preview.innerHTML =
-                '<div style="margin-bottom: 6px;"><strong>Summary:</strong></div>' +
-                '<div>Combining up to <strong>' + batchSize + '</strong> of ' + consolidateUtxoCount + ' payments</div>' +
-                '<div>Destination: <span style="font-family: monospace; color: #C8B560;">' + short + '</span></div>' +
-                (destInfo ? '<div>Current balance: ' + destInfo.balance.toFixed(8) + ' ' + coinLabel + '</div>' : '') +
-                (consolidateUtxoCount > 50 ? '<div style="margin-top: 6px; font-size: 12px; color: #8A8A80;">You may need to click Optimize multiple times to consolidate all ' + consolidateUtxoCount + ' payments.</div>' : '');
-        }
-
-        function closeConsolidateModal() {
-            document.getElementById('consolidateModal').style.display = 'none';
-        }
-
-        async function executeConsolidate() {
-            const select = document.getElementById('consolidateDestSelect');
-            const destAddress = select.value;
-            const btn = document.getElementById('consolidateConfirmBtn');
+        async function optimizeWallet() {
+            const btn = document.getElementById('optimizeBtn');
             const originalText = btn.textContent;
-            btn.textContent = 'Consolidating...';
+            btn.textContent = 'Optimizing...';
             btn.disabled = true;
-
             try {
-                const result = await rpcCall('consolidateutxos', {max_inputs: 50, address: destAddress}, 60000);
-                btn.textContent = 'Done!';
-                const count = result.inputs_consolidated || '?';
-                closeConsolidateModal();
-                showNotification('Combined ' + count + ' payments into ' + destAddress.substring(0, 10) + '...', 'success');
+                const result = await rpcCall('consolidateutxos', {max_inputs: 50}, 60000);
+                btn.textContent = 'Done! Combined ' + (result.inputs_consolidated || '?') + ' payments';
                 await refreshBalance();
+                // Check if more consolidation needed
                 setTimeout(async () => {
                     await checkUtxoHealth();
                     btn.textContent = originalText;
                     btn.disabled = false;
-                }, 2000);
+                }, 3000);
             } catch(e) {
                 const msg = e.message || String(e);
-                btn.textContent = originalText;
-                btn.disabled = false;
                 if (msg.includes('locked')) {
-                    closeConsolidateModal();
-                    showNotification('Unlock wallet first', 'error');
+                    btn.textContent = 'Unlock wallet first';
                 } else if (msg.includes('Nothing to consolidate')) {
-                    closeConsolidateModal();
-                    showNotification('Already optimized!', 'info');
+                    btn.textContent = 'Already optimized!';
                     document.getElementById('optimizeBanner').style.display = 'none';
                 } else {
-                    showNotification('Failed: ' + msg, 'error');
-                    console.error('[Consolidate]', msg);
+                    btn.textContent = 'Failed — try again';
+                    console.error('[Optimize]', msg);
                 }
+                setTimeout(() => { btn.textContent = originalText; btn.disabled = false; }, 3000);
             }
         }
 
@@ -3748,14 +3701,23 @@ inline const std::string& GetWalletHTML() {
                     }
                     addressBalances.sort((a, b) => b.balance - a.balance);
 
-                } else if (!isFullNode && localWallet && localWallet.isWalletUnlocked()) {
-                    // Light wallet mode — show addresses (no balance without node)
+                } else if (!isFullNode) {
+                    // Light wallet mode — query balances via HTTPS API
+                    if (!localWallet || !localWallet.isWalletUnlocked()) {
+                        content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Unlock your wallet to see address balances</div>';
+                        return;
+                    }
                     const addresses = await localWallet.getAddresses();
                     for (const a of addresses) {
-                        addressBalances.push({ address: a.address, balance: null, isMining: false });
+                        let bal = 0;
+                        try {
+                            const balInfo = await connectionManager.getBalance(a.address);
+                            bal = (balInfo.confirmed || 0) / 100000000;
+                        } catch (e) {}
+                        addressBalances.push({ address: a.address, balance: bal, isMining: false });
                     }
                 } else {
-                    content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Connect to a node to see address balances</div>';
+                    content.innerHTML = '<div style="color: #8A8A80; font-size: 13px; padding: 12px 0;">Connecting...</div>';
                     return;
                 }
 
@@ -3765,7 +3727,7 @@ inline const std::string& GetWalletHTML() {
                 }
 
                 // Determine coin label
-                const coinLabel = (typeof currentChain !== 'undefined' && currentChain === 'dilv') ? 'DilV' : 'DIL';
+                const coinLabel = (typeof activeChain !== 'undefined' && activeChain === 'dilv') ? 'DilV' : 'DIL';
 
                 // Split into addresses with balance and empty addresses
                 const withBalance = addressBalances.filter(a => a.balance > 0 || a.isMining);
@@ -5043,6 +5005,9 @@ inline const std::string& GetWalletHTML() {
                 checkSecurityStatus();
                 checkNodeWalletEncryption();
             }
+            if (pageName === 'dashboard') {
+                updateDashboardEncryptionBanner();
+            }
             if (pageName === 'mining-stats') {
                 refreshMiningStats();
             }
@@ -5176,6 +5141,7 @@ inline const std::string& GetWalletHTML() {
 
             // Update node wallet security card visibility
             await checkNodeWalletEncryption();
+            await updateDashboardEncryptionBanner();
 
             // Update wallet UI (same wallet, just different connection)
             await updateLightWalletUI();
@@ -5199,10 +5165,18 @@ inline const std::string& GetWalletHTML() {
                 unlockSection.style.display = 'none';
                 unlockedSection.style.display = 'none';
             } else if (!localWallet.isWalletUnlocked()) {
-                // Wallet exists but locked
-                createSection.style.display = 'none';
-                unlockSection.style.display = 'block';
-                unlockedSection.style.display = 'none';
+                // Wallet exists but locked — auto-unlock if unencrypted
+                const isEncrypted = await localWallet.isWalletEncrypted();
+                if (!isEncrypted) {
+                    await localWallet.unlock(null);
+                    createSection.style.display = 'none';
+                    unlockSection.style.display = 'none';
+                    unlockedSection.style.display = 'block';
+                } else {
+                    createSection.style.display = 'none';
+                    unlockSection.style.display = 'block';
+                    unlockedSection.style.display = 'none';
+                }
             } else {
                 // Wallet unlocked
                 createSection.style.display = 'none';
@@ -5287,7 +5261,9 @@ inline const std::string& GetWalletHTML() {
                 showNotification('Please enter your mnemonic phrase', 'error');
                 return;
             }
-            if (password.length < 8) {
+
+            // If password provided, validate minimum length
+            if (password && password.length > 0 && password.length < 8) {
                 showNotification('Password must be at least 8 characters', 'error');
                 return;
             }
@@ -5300,11 +5276,17 @@ inline const std::string& GetWalletHTML() {
 
             try {
                 showNotification('Restoring wallet...', 'info');
-                await localWallet.importWallet(password, mnemonic);
+                const usePassword = password && password.length >= 8 ? password : null;
+                await localWallet.importWallet(usePassword, mnemonic);
 
                 closeLightWalletModal();
                 updateLightWalletUI();
-                showNotification('Wallet restored successfully!', 'success');
+
+                if (usePassword) {
+                    showNotification('Wallet restored and encrypted successfully!', 'success');
+                } else {
+                    showNotification('Wallet restored! Consider encrypting your wallet for added security.', 'warning');
+                }
 
             } catch (e) {
                 showNotification('Failed to restore wallet: ' + e.message, 'error');
@@ -5356,7 +5338,7 @@ inline const std::string& GetWalletHTML() {
 
         // Show backup mnemonic (placeholder - needs password verification)
         function showBackupMnemonic() {
-            showNotification('Mnemonic backup requires re-entering your password. Feature coming soon.', 'info');
+            showNotification('Your recovery phrase was shown when you created your wallet. For security, it is not stored in the browser. Make sure to keep a backup of your wallet.dat file.', 'info');
         }
 
         // ============================================================
@@ -5432,6 +5414,78 @@ inline const std::string& GetWalletHTML() {
                 setTimeout(() => checkNodeWalletEncryption(), 2000);
             } catch (e) {
                 showNotification('Failed to encrypt wallet: ' + e.message, 'error');
+            }
+        }
+
+        // Encrypt wallet from dashboard banner
+        async function encryptFromBanner() {
+            const password = document.getElementById('bannerEncryptPw').value;
+            const confirmPassword = document.getElementById('bannerEncryptPwConfirm').value;
+
+            if (!password || password.length < 8) {
+                showNotification('Password must be at least 8 characters', 'error');
+                return;
+            }
+
+            if (password !== confirmPassword) {
+                showNotification('Passwords do not match', 'error');
+                return;
+            }
+
+            try {
+                showNotification('Encrypting wallet...', 'info');
+                await rpcCall('encryptwallet', {passphrase: password});
+
+                // Clear password fields
+                document.getElementById('bannerEncryptPw').value = '';
+                document.getElementById('bannerEncryptPwConfirm').value = '';
+
+                showNotification('Wallet encrypted successfully! You will need this password to unlock for mining and sending.', 'success');
+
+                // Update banners
+                document.getElementById('encryptionWarningBanner').style.display = 'none';
+                document.getElementById('encryptionOkBanner').style.display = 'block';
+
+                // Refresh encryption status after node processes the change
+                setTimeout(() => {
+                    checkNodeWalletEncryption();
+                    updateDashboardEncryptionBanner();
+                }, 2000);
+            } catch (e) {
+                showNotification('Failed to encrypt wallet: ' + e.message, 'error');
+            }
+        }
+
+        // Update dashboard encryption banner based on wallet state
+        async function updateDashboardEncryptionBanner() {
+            const mode = connectionManager ? connectionManager.getMode() : 'full';
+            const warningBanner = document.getElementById('encryptionWarningBanner');
+            const okBanner = document.getElementById('encryptionOkBanner');
+
+            // Only show in full node mode when connected
+            if (mode !== 'full' || !connected) {
+                warningBanner.style.display = 'none';
+                okBanner.style.display = 'none';
+                return;
+            }
+
+            try {
+                const walletInfo = await rpcCall('getwalletinfo');
+                const isEncrypted = walletInfo.encrypted === true || walletInfo.encrypted === 'true';
+
+                warningBanner.style.display = isEncrypted ? 'none' : 'block';
+                okBanner.style.display = isEncrypted ? 'block' : 'none';
+
+                // Auto-hide the "encrypted OK" banner after 10 seconds (not a permanent fixture)
+                if (isEncrypted) {
+                    setTimeout(() => {
+                        okBanner.style.display = 'none';
+                    }, 10000);
+                }
+            } catch (e) {
+                // If we can't check, hide both banners
+                warningBanner.style.display = 'none';
+                okBanner.style.display = 'none';
             }
         }
 
@@ -5701,16 +5755,24 @@ inline const std::string& GetWalletHTML() {
             }
 
             try {
-                const result = await localWallet.scanHDAddresses(connectionManager, (index, found, addr, hasBalance) => {
+                const result = await localWallet.scanHDAddresses(connectionManager, (index, found) => {
                     const el = document.getElementById('hdScanProgress');
-                    if (el) el.textContent = `Checked ${index} addresses, found ${found} with balance...`;
+                    if (el) el.textContent = `Checking address ${index} (found ${found} with balance)...`;
                 });
 
+                if (scanStatus) {
+                    scanStatus.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--success);">' +
+                        `Scan complete: found ${result.found} addresses across ${result.scanned} checked.</div>`;
+                }
                 showNotification(`Scan complete: found ${result.found} additional addresses`, 'success');
                 await refreshBalance();
                 await refreshTransactions();
             } catch (e) {
                 console.warn('[HDScan] Error:', e.message);
+                if (scanStatus) {
+                    scanStatus.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--text-secondary);">Scan finished.</div>';
+                }
+                await refreshBalance();
             }
         }
 
@@ -5851,7 +5913,7 @@ inline const std::string& GetWalletHTML() {
 </body>
 </html>
 )WALLET_HTML";
-    return wallet_html;
+    return html;
 }
 
 #endif // DILITHION_API_WALLET_HTML_H

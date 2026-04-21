@@ -4355,7 +4355,7 @@ std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
         oss << "\"threads\":1,";
         oss << "\"current_height\":" << m_vdfMiner->GetCurrentHeight() << ",";
         oss << "\"blocks_found\":" << m_vdfMiner->GetBlocksFound() << ",";
-        oss << "\"blocks_found_total\":" << m_totalBlocksMined.load();
+        oss << "\"blocks_accepted\":" << m_acceptedSession.load();
         oss << "}";
         return oss.str();
     }
@@ -4372,7 +4372,7 @@ std::string CRPCServer::RPC_GetMiningInfo(const std::string& params) {
     oss << "\"hashrate\":" << m_miner->GetHashRate() << ",";
     oss << "\"threads\":" << m_miner->GetThreadCount() << ",";
     oss << "\"blocks_found\":" << stats.nBlocksFound.load() << ",";
-    oss << "\"blocks_found_total\":" << m_totalBlocksMined.load();
+    oss << "\"blocks_accepted\":" << m_acceptedSession.load();
     oss << "}";
     return oss.str();
 }

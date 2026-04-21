@@ -5294,6 +5294,36 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         std::cout << "  [OK] DFMP chain notification callbacks registered" << std::endl;
 
         // =========================================================================
+        // Session accepted-blocks counter: mirror the canonical chain.
+        //
+        // Increment when a block connects whose coinbase MIK == ours.
+        // Decrement when a block with our MIK disconnects (reorg).
+        // Resets on process start — the wallet's tx history is the source of
+        // truth for lifetime.
+        // =========================================================================
+        g_chainstate.RegisterBlockConnectCallback([&wallet](const CBlock& block, int /*height*/, const uint256& /*hash*/) {
+            if (!g_node_state.rpc_server) return;
+            DFMP::Identity ourMik = wallet.GetMIKIdentity();
+            if (ourMik.IsNull()) return;
+            std::array<uint8_t, 20> blockMik{};
+            if (!ExtractCoinbaseMIKIdentity(block, blockMik)) return;
+            if (std::memcmp(blockMik.data(), ourMik.data, 20) == 0) {
+                g_node_state.rpc_server->IncrementAcceptedSession();
+            }
+        });
+        g_chainstate.RegisterBlockDisconnectCallback([&wallet](const CBlock& block, int /*height*/, const uint256& /*hash*/) {
+            if (!g_node_state.rpc_server) return;
+            DFMP::Identity ourMik = wallet.GetMIKIdentity();
+            if (ourMik.IsNull()) return;
+            std::array<uint8_t, 20> blockMik{};
+            if (!ExtractCoinbaseMIKIdentity(block, blockMik)) return;
+            if (std::memcmp(blockMik.data(), ourMik.data, 20) == 0) {
+                g_node_state.rpc_server->DecrementAcceptedSession();
+            }
+        });
+        std::cout << "  [OK] Session accepted-blocks callbacks registered" << std::endl;
+
+        // =========================================================================
         // VDF: Register block connect/disconnect callbacks for cooldown tracker.
         //
         // Fires for ALL blocks (self-mined and peer-received) via ConnectTip/
@@ -5443,11 +5473,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         g_resource_monitor = &resource_monitor;
         std::cout << "  [OK] Resource monitor started (" << (mem_limit / (1024 * 1024)) << "MB limit, 85% of system RAM)" << std::endl;
 
-        // Path for persistent blocks-mined counter
-        std::string blocksMined_path = config.datadir + "/blocks_mined.dat";
-
         // Set up block found callback to save mined blocks and credit wallet
-        miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set, blocksMined_path](const CBlock& block) {
+        miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set](const CBlock& block) {
             // CRITICAL: Check shutdown flag FIRST to prevent database corruption during shutdown
             if (!g_node_state.running) {
                 // Shutting down - discard this block to prevent race condition
@@ -5559,12 +5586,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "  Height: " << pblockIndexPtr->nHeight << std::endl;
                     std::cout << "======================================" << std::endl;
 
-                    // Persist total blocks mined counter
-                    if (g_node_state.rpc_server) {
-                        uint64_t total = g_node_state.rpc_server->IncrementTotalBlocksMined();
-                        std::ofstream ofs(blocksMined_path, std::ios::trunc);
-                        if (ofs) ofs << total;
-                    }
+                    // Session accepted-blocks counter is maintained via
+                    // RegisterBlockConnectCallback below. Do NOT increment
+                    // here or we'd double-count.
 
                     // BUG #95 FIX: Only credit wallet when block actually becomes chain tip
                     // This prevents crediting for orphaned/stale blocks on competing chains
@@ -5716,7 +5740,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         });
 
         // Set up VDF miner callbacks (same block found handler, plus template provider)
-        vdf_miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set, blocksMined_path](const CBlock& block) {
+        vdf_miner.SetBlockFoundCallback([&blockchain, &wallet, &utxo_set](const CBlock& block) {
             // Reuse the same block processing logic as RandomX miner.
             // The block found callback above (for RandomX) handles saving, chain activation,
             // wallet crediting, etc. We replicate the reference to the same callback.
@@ -5762,12 +5786,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "[VDF] Block became new chain tip at height "
                               << pblockIndexPtr->nHeight << std::endl;
 
-                    // Persist total blocks mined counter
-                    if (g_node_state.rpc_server) {
-                        uint64_t total = g_node_state.rpc_server->IncrementTotalBlocksMined();
-                        std::ofstream ofs(blocksMined_path, std::ios::trunc);
-                        if (ofs) ofs << total;
-                    }
+                    // Session accepted-blocks counter maintained via
+                    // RegisterBlockConnectCallback (don't double-count here).
 
                     // NOTE: Cooldown tracker is now updated via chainstate
                     // RegisterBlockConnectCallback (fires for ALL blocks including
@@ -6519,41 +6539,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (!g_node_context.trust_manager->has_score(mik)) return -1.0;
             return g_node_context.trust_manager->get_score(mik).current_score;
         };
-
-        // Count blocks mined by scanning chain for our MIK identity
-        // This is always accurate, even after reorgs or forks.
-        {
-            DFMP::Identity ourMik = wallet.GetMIKIdentity();
-            uint64_t totalMined = 0;
-            if (!ourMik.IsNull()) {
-                CBlockIndex* pindexTip = g_chainstate.GetTip();
-                int chainHeight = pindexTip ? pindexTip->nHeight : 0;
-                std::cout << "  Counting blocks mined by our MIK..." << std::flush;
-                for (int h = 1; h <= chainHeight; h++) {
-                    std::vector<uint256> hashes = g_chainstate.GetBlocksAtHeight(h);
-                    if (hashes.empty()) continue;
-                    CBlock blk;
-                    if (!blockchain.ReadBlock(hashes[0], blk)) continue;
-                    std::array<uint8_t, 20> blockMik{};
-                    if (!ExtractCoinbaseMIKIdentity(blk, blockMik)) continue;
-                    if (std::memcmp(blockMik.data(), ourMik.data, 20) == 0) {
-                        totalMined++;
-                    }
-                }
-                rpc_server.SetTotalBlocksMined(totalMined);
-                std::cout << " " << totalMined << " blocks found" << std::endl;
-                // Update persistent file to match
-                std::ofstream ofs(blocksMined_path, std::ios::trunc);
-                if (ofs) ofs << totalMined;
-            } else {
-                // No MIK yet — fall back to persisted file
-                std::ifstream ifs(blocksMined_path);
-                if (ifs >> totalMined) {
-                    rpc_server.SetTotalBlocksMined(totalMined);
-                    std::cout << " (lifetime blocks mined: " << totalMined << ")" << std::endl;
-                }
-            }
-        }
 
         // Phase 1: Initialize authentication and permissions
         std::string rpcuser = config_parser.GetString("rpcuser", "");
