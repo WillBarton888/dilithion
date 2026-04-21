@@ -30,6 +30,12 @@ updates:
     labels:
       - "dependencies"
       - "bridge"
+    # Major version bumps require manual migration work (e.g. Hardhat v2→v3
+    # is ESM-only and breaks the entire config). Skip them — we'll do majors
+    # as deliberate migration PRs if and when we decide to.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     # Group minor + patch updates into a single PR per week.
     groups:
       bridge-minor-patch:
@@ -52,6 +58,10 @@ updates:
     labels:
       - "dependencies"
       - "x402"
+    # Major version bumps require manual migration — skip them.
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
     groups:
       x402-minor-patch:
         patterns:
@@ -60,7 +70,21 @@ updates:
           - "minor"
           - "patch"
 
-  # Git submodules (Dilithium ref, RandomX, chiavdf).
+  # Git submodules.
+  #
+  # CRITICAL: the randomx and chiavdf submodules implement DIL and DilV
+  # consensus respectively. Any commit bump can be a hard fork (see
+  # https://github.com/dilithion/dilithion/pull/7 — a dependabot PR that
+  # silently included "RandomX v2", a breaking PoW algorithm change).
+  # Consensus-critical submodules are only bumped manually via a dedicated
+  # hard-fork activation plan, never auto-merged.
+  #
+  # openssl-src is unused by any build (macOS/Linux/Windows all link
+  # system libssl via brew/apt/msys2). Leave it out of auto-bumps until
+  # we either delete the submodule or wire it in.
+  #
+  # dilithium and leveldb are left auto-tracked — they're library deps,
+  # not consensus-critical.
   - package-ecosystem: "gitsubmodule"
     directory: "/"
     schedule:
@@ -72,3 +96,7 @@ updates:
     labels:
       - "dependencies"
       - "submodules"
+    ignore:
+      - dependency-name: "depends/randomx"      # DIL consensus — manual bump only
+      - dependency-name: "depends/chiavdf"      # DilV VDF consensus — manual bump only
+      - dependency-name: "depends/openssl-src"  # unused submodule — delete or pin before enabling
