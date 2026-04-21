@@ -1,0 +1,42 @@
+name: Repo Hygiene
+
+# Prevents cruft (build artifacts, session docs, coverage HTML dumps,
+# private dev config, Windows path-escape bugs) from landing in main.
+# Runs on every PR and every push to main.
+#
+# The actual checks live in scripts/check-repo-hygiene.sh — that script
+# is the single source of truth and can also be run locally:
+#
+#     ./scripts/check-repo-hygiene.sh
+#
+# To add a new allowed root-level file, edit ALLOWED_ROOT_FILES in
+# that script and explain why in the PR description.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  hygiene:
+    name: Check repo hygiene
+    runs-on: ubuntu-24.04
+    timeout-minutes: 2
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # We only need current state, not full history.
+          fetch-depth: 1
+
+      - name: Make hygiene script executable
+        run: chmod +x scripts/check-repo-hygiene.sh
+
+      - name: Run repo hygiene checks
+        run: ./scripts/check-repo-hygiene.sh
