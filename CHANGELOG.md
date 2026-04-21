@@ -23,6 +23,55 @@ Tracked but not yet shipped. See `git log origin/main...HEAD` on a fresh checkou
 
 ---
 
+## [v4.0.17] — 2026-04-21
+
+### Added
+- **Digital DNA propagation** now functions on DIL for the first time. Three-stage fix shipping together:
+  - Phase 1 — receiver accepts progressively enriched DNA for already-registered MIKs; sender re-broadcasts on local enrichment; discovery refreshes stale records.
+  - Phase 1.1 — relay seeds can dim-fill missing dimensions on behalf of unmapped peers while preserving data provenance (core fields stay authoritative to the miner).
+  - Phase 1.2 — discovery now sources known MIKs from the DNA registry (plus the legacy VDF cooldown tracker), unblocking the discovery loop on DIL where the cooldown tracker was always empty.
+- **Mining**: MIK registration PoW is now persisted to `mik_registration.dat` and restored on startup. Miners no longer re-solve the ~25-minute 28-bit PoW after a chain wipe or restart.
+- **Node**: `--reset-chain` flag wipes chain-derived state (blocks, chainstate, headers, dna_registry, dfmp_identity, dna_trust, wal, mempool, DFMP heat files) while preserving wallet, MIK registration, peers, and configs. Requires typing `RESET` to proceed, or `--yes` for scripts.
+- **Consensus**: peers sending headers with timestamps far in the future now receive misbehavior penalty (20 points / offense, ban after 5) instead of being silently tolerated.
+- **Wallet RPC**: `gettransaction` now returns a top-level `wallet:{category, amount, fee, to_address, time}` block and a Bitcoin-Core-style `details[]` array, enabling forensic enumeration of outbound sends.
+
+### Fixed
+- **Mining dashboard**: `blocks_accepted` counter is now rebuilt from the canonical chain via connect/disconnect callbacks. The previous optimistic counter overcounted DilV blocks 4–5× because lowest-VDF-output tiebreaks routinely displace a briefly-tip block. The dashboard now shows `accepted · submitted` session-scoped values.
+- **Wallet coin selection**: size-aware with a 999 KB per-transaction cap. Prevents building 50 MB sends that the mempool would reject, and returns a distinct "consolidate first" error instead of failing silently later.
+- **Wallet fee estimator**: `EstimateDilithiumTxSize` no longer underestimates by 2 bytes when input/output counts cross 252 (varint boundary) — fixes self-rejected sends at high input counts.
+- **Wallet REST API**: `/api/v1/utxos` and `/api/v1/balance` now filter UTXOs that are already spent by in-flight mempool transactions. Light wallets no longer broadcast double-spend attempts after the first send.
+- **Light wallet JS**: floors fee rate at consensus minimum (5000 ions/KB) so a buggy server response cannot produce sub-consensus broadcasts. Connection manager fallback raised from 1000/500 to 5000/5000.
+- **Wallet UX**: custom RPC port now persists per-chain across DIL ↔ DilV toggles. Previously the toggle overwrote the port from a hardcoded table.
+- **Wallet persistence**: outbound sends are now saved synchronously on record. Previous "mark as dirty" stub silently dropped send history if the process was killed before a block-triggered flush.
+- **Consensus auto-rebuild (BUG #277)**: chain-wipe helper now also clears `dfmp_identity/`, closing a footgun where stale identity state caused a Reference-coinbase emit before the registration block existed on the rebuilt chain.
+
+### Changed
+- **VDF tip-swap logs** on DilV are now gated behind `--verbose`. They fire ~5/min at normal steady state and were flooding the console while contending for `cs_main` against the REST API thread.
+- **`getchaintips` RPC**: filters out stale tips more than 100 blocks behind the active tip to prevent unbounded accumulation of orphaned VDF competing blocks.
+- **Mining outcome messages** (`BLOCK CONFIRMED!` / `BLOCK NOT SELECTED`) are now deferred until the round is settled — i.e. a child block has been connected on top of the candidate. Previously DilV's lowest-VDF-output tiebreak could displace a same-height tip block within ~2-15s, so users saw "Your block won this round!" followed by no reward — eroding trust. Same fix applied to DIL's RandomX and VDF block-found paths. Loss messages use friendly plain-English tone (no "orphaned"/"reorged out" jargon).
+- **`MINING REWARD CREDITED!` message** is now deferred via the wallet's per-block callback. Only one message per settled height instead of 3-8 messages from transient tip-swap reorgs. Disconnects of pending notifications drop them silently.
+
+### Security
+- **New checkpoints added** to lock in canonical chain history and accelerate IBD:
+  - DIL: height 44,000 → `0000002751fc99551f4fce1f2e92053b2432788f1dc12412fd81223204d11377`
+  - DilV: height 36,500 → `3a6c72ee0ac27508fe82b76ed561dc93bc52ee5a26825cbf3f693bbc7070fd63`
+  - `dfmpAssumeValidHeight` raised on both chains to match (skips signature validation below the assume-valid line during IBD).
+  - Verified consensus across all 4 mainnet seeds (NYC, LDN, SGP, SYD) before locking in the hashes.
+
+### Infrastructure / Developer
+- Repo hygiene: build artifacts, release tarballs, session docs, scratch scripts, and screenshots untracked. Repo-hygiene CI check added to prevent cruft regression.
+- Dependabot config hardened against consensus-breaking auto-bumps.
+- Documentation refresh: authoritative `BUILDING.md` and `RELEASING.md`; updated `CHANGELOG.md` legacy link; `THREAT-MODEL.md` refreshed for mainnet-live posture.
+- Line endings pinned via `.gitattributes` (`eol=lf`).
+- New scripts: `consolidate-wallet.py` for Tier 1 UTXO consolidation; explorer API helpers committed from NYC.
+
+### Notes for miners
+- **Required action**: none. Run the new binary and mining continues normally.
+- **Benefit**: Digital DNA coverage (bandwidth, clock drift, thermal) should begin climbing as your node broadcasts enriched samples and accepts them from peers. Check your own DNA coverage with `getmydigitaldna` and network-wide stats with `getdnamonitor`.
+- **One-time save**: MIK registration PoW now persists, so subsequent restarts or `--reset-chain` runs do not re-mine the 25-minute PoW.
+
+---
+
 ## [v4.0.16] — 2026-04-13
 
 ### Fixed

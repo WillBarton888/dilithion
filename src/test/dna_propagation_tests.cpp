@@ -447,6 +447,83 @@ TEST(merge_fill_perspective_dim_is_fillable) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 1.2 — discovery MIK source (dna_registry ∪ cooldown_tracker)
+// ---------------------------------------------------------------------------
+
+// Mirrors the linear-dedup union used in the discovery block of both node
+// binaries. Tested here instead of extracted because the production site is
+// six lines and co-locating the test with the inline code would pull the
+// whole `g_node_context` graph into unit tests.
+static std::vector<std::array<uint8_t, 20>>
+union_dedupe_miks(std::vector<std::array<uint8_t, 20>> a,
+                  const std::vector<std::array<uint8_t, 20>>& b) {
+    for (const auto& m : b) {
+        bool dup = false;
+        for (const auto& e : a) { if (e == m) { dup = true; break; } }
+        if (!dup) a.push_back(m);
+    }
+    return a;
+}
+
+TEST(discovery_source_dil_empty_cooldown_tracker_returns_registry_miks) {
+    // DIL reality: cooldown_tracker is populated only via VDF block-connect
+    // callbacks, so on RandomX chains GetKnownAddresses() is always empty.
+    // The Phase 1.2 fix sources from dna_registry first so discovery can
+    // still fire. This test asserts the in-memory path used by unit tests
+    // and by relay-only nodes that haven't opened a LevelDB registry.
+    digital_dna::DigitalDNARegistry reg;
+    ASSERT(reg.register_identity(make_dna(0x10)) == IDNARegistry::RegisterResult::SUCCESS, "r1");
+    ASSERT(reg.register_identity(make_dna(0x20)) == IDNARegistry::RegisterResult::SUCCESS, "r2");
+    ASSERT(reg.register_identity(make_dna(0x30)) == IDNARegistry::RegisterResult::SUCCESS, "r3");
+
+    std::vector<std::array<uint8_t, 20>> empty_cooldown;
+    auto sourced = union_dedupe_miks(reg.get_all_miks(), empty_cooldown);
+
+    ASSERT_EQ(sourced.size(), (size_t)3, "all three registry MIKs surface when cooldown is empty");
+}
+
+TEST(discovery_source_union_dedupes_overlap) {
+    // MIKs appearing in both dna_registry and cooldown_tracker must be
+    // emitted exactly once. With 120 live miners on mainnet today a
+    // non-deduped source would blow up the round-robin window and fire
+    // duplicate dnaireq messages at the same peer.
+    digital_dna::DigitalDNARegistry reg;
+    auto dna_a = make_dna(0xA0);
+    auto dna_b = make_dna(0xB0);
+    ASSERT(reg.register_identity(dna_a) == IDNARegistry::RegisterResult::SUCCESS, "ra");
+    ASSERT(reg.register_identity(dna_b) == IDNARegistry::RegisterResult::SUCCESS, "rb");
+
+    std::vector<std::array<uint8_t, 20>> cooldown{
+        dna_a.mik_identity,              // overlap with registry
+        make_mik(0xC0),                  // unique to cooldown
+    };
+
+    auto sourced = union_dedupe_miks(reg.get_all_miks(), cooldown);
+
+    ASSERT_EQ(sourced.size(), (size_t)3, "A, B, C — A deduped to single copy");
+    size_t count_a = 0;
+    for (const auto& m : sourced) {
+        if (m == dna_a.mik_identity) ++count_a;
+    }
+    ASSERT_EQ(count_a, (size_t)1, "A appears exactly once");
+}
+
+TEST(dna_registry_db_get_all_miks_returns_stored_miks) {
+    // Parallel check: the LevelDB-backed registry (production path) exposes
+    // get_all_miks via the IDNARegistry interface after Phase 1.2.
+    ScratchDir dir("gam");
+    DNARegistryDB reg;
+    ASSERT(reg.Open(dir.path.string()), "open db");
+
+    ASSERT(reg.append_sample(make_dna(0x70)) == IDNARegistry::RegisterResult::SUCCESS, "s1");
+    ASSERT(reg.append_sample(make_dna(0x80)) == IDNARegistry::RegisterResult::SUCCESS, "s2");
+
+    IDNARegistry* iface = &reg;  // go through the interface, not the concrete class
+    auto miks = iface->get_all_miks();
+    ASSERT_EQ(miks.size(), (size_t)2, "two MIKs surfaced via interface");
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -471,6 +548,11 @@ int main() {
     test_merge_fill_multiple_missing_dims_wrapper();
     test_merge_fill_then_append_sample_succeeds_with_dim_loss_guard_wrapper();
     test_merge_fill_perspective_dim_is_fillable_wrapper();
+
+    // Phase 1.2 discovery source tests
+    test_discovery_source_dil_empty_cooldown_tracker_returns_registry_miks_wrapper();
+    test_discovery_source_union_dedupes_overlap_wrapper();
+    test_dna_registry_db_get_all_miks_returns_stored_miks_wrapper();
 
     std::cout << "\n" << YELLOW_ << "=== Results ===" << RESET_ << std::endl;
     std::cout << GREEN_ << "Passed: " << g_tests_passed << RESET_ << std::endl;
