@@ -1268,7 +1268,7 @@
                             <span class="info-value" id="dashHashRate">0 H/s</span>
                         </div>
                         <div class="info-item">
-                            <span class="info-label" style="color: #8A8A80; font-size: 12px;">Blocks Found</span>
+                            <span class="info-label" style="color: #8A8A80; font-size: 12px;" title="Both numbers are for this node session (reset on restart). Accepted = blocks currently on the canonical chain mined by your MIK. Submitted = VDF blocks your miner has solved and broadcast. Gap is expected: DilV uses lowest-VDF-output-wins distribution, so competing miners' lower outputs cause some of your submitted blocks to be reorged out. Each identity earns roughly its fair share (≈ network_blocks / active_miners). Your wallet transaction history is the source of truth for lifetime rewards.">Blocks Mined &nbsp;<span style="opacity:0.5;">ⓘ</span></span>
                             <span class="info-value" id="blocksFound">0</span>
                         </div>
                         <div class="info-item">
@@ -3016,14 +3016,21 @@
                 hashRateEl.textContent = hashrate.toFixed(2) + ' H/s';
             }
 
-            // Display blocks found (session + lifetime total from persistent counter)
-            const sessionBlocks = miningInfo.blocks_found || 0;
-            const totalBlocks = miningInfo.blocks_found_total || 0;
+            // Both counters reset on node process start.
+            //  submitted = blocks this miner has VDF-solved and broadcast.
+            //  accepted  = blocks on the canonical chain mined by our MIK (mirrors reorgs).
+            // Gap is expected: DilV uses lowest-VDF-output-wins distribution, so
+            // competing miners' lower outputs cause our submitted blocks to be
+            // reorged out. DFMP per-MIK fair-share caps also limit acceptance.
+            const submitted = miningInfo.blocks_found || 0;
+            const accepted = miningInfo.blocks_accepted || 0;
             const blocksEl = document.getElementById('blocksFound');
-            if (totalBlocks > 0 && totalBlocks !== sessionBlocks) {
-                blocksEl.textContent = totalBlocks + ' (' + sessionBlocks + ' this session)';
+            if (submitted > 0 && submitted !== accepted) {
+                blocksEl.innerHTML = '<span style="color:#C8B560;">' + accepted + '</span>' +
+                    ' <span style="color:#8A8A80;font-size:11px;">accepted &middot; ' +
+                    submitted + ' submitted</span>';
             } else {
-                blocksEl.textContent = totalBlocks;
+                blocksEl.textContent = accepted;
             }
 
             // Calculate estimated time to block

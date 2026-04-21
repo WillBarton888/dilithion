@@ -2136,13 +2136,13 @@ async function pollNode() {
             document.getElementById('hashrate').textContent = formatHashrate(hashrate);
             document.getElementById('chartHashrate').textContent = formatHashrate(hashrate);
             document.getElementById('blocksFound').textContent = miningInfo.blocks_found || 0;
-            document.getElementById('blocksTotal').textContent = 'Total: ' + (miningInfo.blocks_found_total || 0);
+            document.getElementById('blocksTotal').textContent = 'Accepted: ' + (miningInfo.blocks_accepted || 0);
 
-            if (miningInfo.blocks_found_total > previousBlocksTotal && previousBlocksTotal > 0) {
-                addLog('BLOCK FOUND! Total: ' + miningInfo.blocks_found_total, 'block');
+            if (miningInfo.blocks_accepted > previousBlocksTotal && previousBlocksTotal > 0) {
+                addLog('BLOCK ACCEPTED onto chain. Accepted: ' + miningInfo.blocks_accepted, 'block');
             }
             previousBlocksFound = miningInfo.blocks_found || 0;
-            previousBlocksTotal = miningInfo.blocks_found_total || 0;
+            previousBlocksTotal = miningInfo.blocks_accepted || 0;
 
             if (miningInfo.threads) {
                 const slider = document.getElementById('threadSlider');
