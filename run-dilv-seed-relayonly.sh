@@ -1,10 +1,16 @@
 #!/bin/bash
-# Auto-restart wrapper for DilV seed nodes
+# Auto-restart wrapper for DilV relay-only seed nodes (LDN/SGP/SYD).
+#
+# NYC is different: NYC's DilV node loads the bridge wallet and runs WITHOUT
+# --relay-only. Do NOT use this wrapper on NYC — NYC uses a separate
+# top-level script at /root/run-dilv-seed.sh that omits --relay-only.
+# See .claude/skills/deploy/SKILL.md for the per-host wrapper matrix.
+#
 # Handles BUG #277 auto-rebuild: if the node detects UTXO corruption,
 # it writes an auto_rebuild marker and shuts down. This script restarts
 # it, and the node's startup code handles the cleanup automatically.
 #
-# Usage: nohup ./run-dilv-seed.sh > /root/dilv-seed.log 2>&1 &
+# Usage: nohup ./run-dilv-seed-relayonly.sh > /root/dilv-seed.log 2>&1 &
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BINARY="$SCRIPT_DIR/dilv-node"
