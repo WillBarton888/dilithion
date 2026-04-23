@@ -840,6 +840,35 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
     EnsureRegistrationManagerInitialized(wallet);
     if (!s_registrationManager) return false;
 
+    // First-time miner banner — fires once per process lifetime, only for
+    // unregistered MIKs. Sets accurate expectations so users don't think
+    // the node is stuck during the DNA-bound registration PoW.
+    static bool s_bannerShown = false;
+    if (!s_bannerShown && !DFMP::g_identityDb->HasMIKPubKey(identity)) {
+        std::cout << std::endl;
+        std::cout << "+----------------------------------------------------------------------+" << std::endl;
+        std::cout << "|  FIRST-TIME MINER SETUP (DilV)                                       |" << std::endl;
+        std::cout << "|                                                                      |" << std::endl;
+        std::cout << "|  Your miner identity is not yet registered on DilV. Before your      |" << std::endl;
+        std::cout << "|  first block, the node runs a ONE-TIME setup sequence:               |" << std::endl;
+        std::cout << "|                                                                      |" << std::endl;
+        std::cout << "|    1. Digital DNA fingerprint (hardware-bound, passive)              |" << std::endl;
+        std::cout << "|    2. Seed attestations (need 3 of 4 seed signatures, seconds)       |" << std::endl;
+        std::cout << "|    3. Registration proof-of-work (DNA-bound)                         |" << std::endl;
+        std::cout << "|                                                                      |" << std::endl;
+        std::cout << "|  The proof-of-work dominates total time. On a modern CPU, typical    |" << std::endl;
+        std::cout << "|  completion is 15-30 minutes. PoW is RANDOMLY PROBABILISTIC: you     |" << std::endl;
+        std::cout << "|  may finish significantly faster, and ~12% of miners see 2x or       |" << std::endl;
+        std::cout << "|  more (up to an hour). Both fast and slow outcomes are NORMAL hash   |" << std::endl;
+        std::cout << "|  luck, not a stuck node. Let it run.                                 |" << std::endl;
+        std::cout << "|                                                                      |" << std::endl;
+        std::cout << "|  After setup, the solved PoW is saved to mik_registration.dat --     |" << std::endl;
+        std::cout << "|  subsequent restarts skip all of this and begin mining immediately.  |" << std::endl;
+        std::cout << "+----------------------------------------------------------------------+" << std::endl;
+        std::cout << std::endl;
+        s_bannerShown = true;
+    }
+
     // Drive the manager and wait for readiness. The manager's worker thread
     // does DNA collection, seed attestations, and PoW; we poll the snapshot
     // and log progress every 10s.
