@@ -52,6 +52,7 @@
 #include <vdf/vdf.h>
 #include <vdf/cooldown_tracker.h>
 #include <node/peer_mik_tracker.h>
+#include <node/registration_manager.h>  // v4.0.18: first-time registration state machine
 #include <consensus/vdf_validation.h>
 #include <wallet/wallet.h>
 #include <wallet/passphrase_validator.h>
@@ -775,57 +776,54 @@ struct NodeConfig {
 static CTransactionRef g_currentCoinbase;
 static std::mutex g_coinbaseMutex;
 
-// File-scope MIK registration PoW cache
-// Shared between EnsureMIKRegistered() and BuildMiningTemplate()
-static uint64_t s_cachedRegNonce = 0;
-static std::atomic<bool> s_regNonceMined{false};
-static std::atomic<bool> s_regPowInProgress{false};
-static DFMP::Identity s_regNonceIdentity;
-
-// Phase 2+3: Cached seed attestations (collected before registration PoW, embedded in coinbase)
-static Attestation::CAttestationSet s_cachedAttestations;
-static std::atomic<bool> s_attestationsCollected{false};
-
-// Cached DNA hash from registration (used for attestation, PoW, and block commitment consistency)
-static std::array<uint8_t, 32> s_cachedDnaHash{};
-static std::atomic<bool> s_dnaHashCached{false};
+// v4.0.18: CRegistrationManager owns all first-time MIK registration state.
+// BuildMiningTemplate is now a pure reader of its published snapshot.
+// The old s_cachedRegNonce / s_regNonceMined / s_cachedDnaHash / s_cachedAttestations
+// file-scope statics have been removed — they were the race-condition anchor point.
+static std::unique_ptr<CRegistrationManager> s_registrationManager;
 
 // DilV data directory for MIK registration persistence (set in main before PoW).
 extern std::string g_datadir;
 
-static void PersistRegistrationPoW_DilV(const std::vector<uint8_t>& pubkey) {
-    if (g_datadir.empty() || pubkey.empty()) return;
-    std::array<uint8_t, 32> dnaHash{};
-    if (s_dnaHashCached.load()) dnaHash = s_cachedDnaHash;
-    int64_t now = static_cast<int64_t>(std::time(nullptr));
-    if (DFMP::SaveMIKRegistration(g_datadir, pubkey, dnaHash, s_cachedRegNonce, now)) {
-        std::cout << "  [Mining] Registration PoW saved to disk (skips re-solve on restart)" << std::endl;
-    } else {
-        std::cerr << "  [Mining] WARNING: failed to persist registration PoW" << std::endl;
-    }
+/**
+ * Ensure the registration manager exists; lazily construct on first call.
+ * Requires wallet + g_node_context + g_chainParams to be fully initialized.
+ */
+static void EnsureRegistrationManagerInitialized(CWallet& wallet) {
+    if (s_registrationManager) return;
+    if (!Dilithion::g_chainParams) return;  // too early
+
+    auto env = std::make_shared<CProductionRegistrationEnv>(
+        wallet,
+        g_node_context,
+        g_datadir,
+        Dilithion::g_chainParams->registrationPowBits,
+        Dilithion::g_chainParams->dnaCommitmentActivationHeight,
+        Dilithion::g_chainParams->seedAttestationActivationHeight);
+    s_registrationManager = std::make_unique<CRegistrationManager>(std::move(env));
 }
 
 /**
- * Ensure MIK identity is registered before mining begins.
- * This is a one-time operation for new miners (~10-15 minutes).
- * Must be called before BuildMiningTemplate() on the startup path
- * so the user sees clear progress instead of cryptic template errors.
+ * Drive the CRegistrationManager and block until registration is ready or
+ * a fatal error occurs. Replaces the old inline DNA/attestation/PoW flow.
  *
- * @param wallet Reference to wallet (for MIK identity)
- * @param nextHeight The height of the next block to be mined
- * @return true if registration is complete (or not needed), false on failure
+ * Semantics match the old EnsureMIKRegistered():
+ *   - true:  registration is ready (CanMine() == true) OR node below activation height
+ *   - false: fatal or user-actionable error; mining must be deferred
+ *
+ * Progress logging is driven off the manager's Snapshot/StatusForUI so the
+ * user always knows which phase they are in. The old silent 30-minute waits
+ * on BuildMiningTemplate's inline PoW path are gone; this path is now the
+ * single place registration work can happen.
  */
 bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
-    // Guard: identity DB must be available
     if (!DFMP::g_identityDb) return true;
-
-    // Guard: DFMP v3 PoW only required at/above activation height
     if (!Dilithion::g_chainParams ||
         static_cast<int>(nextHeight) < Dilithion::g_chainParams->dfmpV3ActivationHeight) {
         return true;
     }
 
-    // Get or generate MIK identity
+    // Generate MIK identity if wallet does not have one yet.
     DFMP::Identity identity = wallet.GetMIKIdentity();
     if (identity.IsNull()) {
         if (!wallet.GenerateMIK()) {
@@ -836,224 +834,53 @@ bool EnsureMIKRegistered(CWallet& wallet, unsigned int nextHeight) {
         std::cout << "[Mining] Generated new miner identity: " << identity.GetHex() << std::endl;
     }
 
-    // Already registered in identity DB?
-    if (DFMP::g_identityDb->HasMIKPubKey(identity)) {
-        // BUG #284: Pre-cache DNA even when MIK is registered, in case the
-        // registration block gets orphaned later. Without cached DNA, the
-        // template builder cannot re-collect attestations for re-registration.
-        if (!s_dnaHashCached.load() && Dilithion::g_chainParams &&
-            static_cast<int>(nextHeight) >= Dilithion::g_chainParams->dnaCommitmentActivationHeight) {
-            auto collector = g_node_context.GetDNACollector();
-            if (collector) {
-                auto dna = collector->get_dna();
-                if (dna) {
-                    s_cachedDnaHash = dna->hash();
-                    bool allZero = true;
-                    for (auto b : s_cachedDnaHash) { if (b != 0) { allZero = false; break; } }
-                    if (!allZero) {
-                        s_dnaHashCached.store(true);
-                        std::cout << "[Mining] MIK registered - pre-cached DNA for future use" << std::endl;
-                    }
-                }
-            }
-        }
-        return true;
-    }
+    EnsureRegistrationManagerInitialized(wallet);
+    if (!s_registrationManager) return false;
 
-    // Already cached from a previous call?
-    if (s_regNonceMined.load() && s_regNonceIdentity == identity) return true;
+    // Drive the manager and wait for readiness. The manager's worker thread
+    // does DNA collection, seed attestations, and PoW; we poll the snapshot
+    // and log progress every 10s.
+    auto tipHeight = (g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0);
+    s_registrationManager->Tick(tipHeight, g_node_state.running.load());
 
-    // Get public key for PoW
-    std::vector<uint8_t> mikPubkey;
-    if (!wallet.GetMIKPubKey(mikPubkey)) {
-        std::cerr << "[Mining] WARNING: Failed to get MIK public key (wallet may be locked)" << std::endl;
-        return false;
-    }
+    using State = CRegistrationManager::State;
+    using Reason = CRegistrationManager::MineGateReason;
+    Reason lastReason = Reason::BLOCKED_UNINITIALIZED;
+    int waitSec = 0;
+    while (g_node_state.running.load()) {
+        auto snap = s_registrationManager->GetSnapshot();
 
-    // Restore cached registration PoW from mik_registration.dat if present.
-    // Survives --reset-chain and normal restarts so miners don't re-solve the
-    // ~25 min PoW every time chain state is wiped.
-    if (!s_regNonceMined.load() && !g_datadir.empty()) {
-        DFMP::MIKRegistrationFile rec;
-        auto res = DFMP::LoadMIKRegistration(g_datadir, mikPubkey, rec);
-        if (res == DFMP::MIKRegFileLoadResult::OK) {
-            s_cachedRegNonce = rec.nonce;
-            s_regNonceIdentity = identity;
-            s_regNonceMined.store(true);
-            s_cachedDnaHash = rec.dnaHash;
-            bool nonZeroDna = false;
-            for (auto b : rec.dnaHash) { if (b != 0) { nonZeroDna = true; break; } }
-            if (nonZeroDna) s_dnaHashCached.store(true);
-            std::cout << "  [Mining] MIK registration restored from disk (saves ~25 min PoW)" << std::endl;
-        } else if (res == DFMP::MIKRegFileLoadResult::PubkeyMismatch) {
-            std::cout << "  [Mining] Found stale mik_registration.dat (wallet MIK changed), ignoring" << std::endl;
-        } else if (res == DFMP::MIKRegFileLoadResult::Corrupt) {
-            std::cerr << "  [Mining] mik_registration.dat corrupt, solving new PoW" << std::endl;
-        }
-    }
-
-    if (s_regNonceMined.load() && s_regNonceIdentity == identity) return true;
-
-    // ========================================================================
-    // Step 1: Collect Digital DNA (mandatory on DilV from block 1)
-    // ========================================================================
-    // DNA must be collected before attestation and registration PoW.
-    // The DNA hash binds the miner's hardware identity to their MIK.
-    if (!s_dnaHashCached.load()) {
-        int dnaCommitHeight = Dilithion::g_chainParams ?
-            Dilithion::g_chainParams->dnaCommitmentActivationHeight : 999999999;
-
-        if (static_cast<int>(nextHeight) >= dnaCommitHeight) {
-            std::cout << std::endl;
-            std::cout << "  [Mining] Collecting Digital DNA fingerprint..." << std::endl;
-            std::cout << "  [Mining] DNA binds your hardware identity to your miner key." << std::endl;
-
-            // Wait for DNA collector to have data (up to 120s)
-            auto collector = g_node_context.GetDNACollector();
-            int waitSec = 0;
-            const int maxWaitSec = 120;
-            while (g_node_state.running && waitSec < maxWaitSec) {
-                if (collector) {
-                    auto dna = collector->get_dna();
-                    if (dna) {
-                        s_cachedDnaHash = dna->hash();
-                        // Verify non-zero
-                        bool allZero = true;
-                        for (auto b : s_cachedDnaHash) { if (b != 0) { allZero = false; break; } }
-                        if (!allZero) {
-                            s_dnaHashCached.store(true);
-                            std::cout << "  [Mining] DNA collected (hash " << std::hex;
-                            for (int i = 0; i < 4; i++) std::cout << std::setfill('0') << std::setw(2) << (int)s_cachedDnaHash[i];
-                            std::cout << std::dec << "...)" << std::endl;
-                            break;
-                        }
-                    }
-                }
-                if (waitSec % 10 == 0 && waitSec > 0) {
-                    std::cout << "  [Mining] Waiting for DNA collection... (" << waitSec << "s / " << maxWaitSec << "s)" << std::endl;
-                }
-                std::this_thread::sleep_for(std::chrono::seconds(1));
-                waitSec++;
-            }
-
-            if (!s_dnaHashCached.load()) {
-                if (!g_node_state.running) return false;
-                std::cerr << "  [Mining] ERROR: DNA collection timed out after " << maxWaitSec << "s." << std::endl;
-                std::cerr << "  [Mining] DNA is mandatory for mining. Retrying next cycle." << std::endl;
-                return false;
-            }
-        }
-    }
-
-    // ========================================================================
-    // Step 2: Collect seed attestations (DilV only, uses DNA hash)
-    // ========================================================================
-    // Seeds sign: MIK_pubkey + DNA_hash + timestamp + seed_id
-    if (!s_attestationsCollected.load() &&
-        Dilithion::g_chainParams &&
-        !Dilithion::g_chainParams->seedAttestationIPs.empty()) {
-
-        int attestationHeight = Dilithion::g_chainParams->seedAttestationActivationHeight;
-        if (static_cast<int>(nextHeight) >= attestationHeight) {
-            std::cout << std::endl;
-            std::cout << "  [Mining] Requesting seed attestations for MIK registration..." << std::endl;
-
-            std::string mikPubkeyHex = HexStr(mikPubkey);
-            std::string dnaHashHex = HexStr(s_cachedDnaHash.data(), 32);
-
-            Attestation::CAttestationSet attestations;
-            std::string attestError;
-            bool gotAttestations = Attestation::CollectAttestations(
-                Dilithion::g_chainParams->seedAttestationIPs,
-                Dilithion::g_chainParams->seedAttestationRPCPort,
-                mikPubkeyHex, dnaHashHex,
-                attestations, attestError);
-
-            if (gotAttestations) {
-                s_cachedAttestations = std::move(attestations);
-                s_attestationsCollected.store(true);
-                std::cout << "  [Mining] Seed attestations collected successfully!" << std::endl;
-            } else {
-                std::cerr << "  [Mining] WARNING: " << attestError << std::endl;
-                std::cerr << "  [Mining] Attestations required. Retrying next cycle." << std::endl;
-                return false;
-            }
-            std::cout << std::endl;
-        }
-    }
-
-    // ========================================================================
-    // Step 3: Mine registration PoW (includes DNA hash in challenge)
-    // ========================================================================
-    // PoW challenge: SHA3-256(pubkey || dna_hash || nonce)
-    int regPowBits = Dilithion::g_chainParams ?
-        Dilithion::g_chainParams->registrationPowBits : 30;
-
-    std::cout << std::endl;
-    std::cout << "  [Mining] First-time setup: Registering miner identity..." << std::endl;
-    std::cout << "  [Mining] Registration PoW: " << regPowBits << " bits (~"
-              << (regPowBits >= 30 ? "40-60 min" : "1-2 min") << ")" << std::endl;
-    std::cout << "  [Mining] DNA-bound: yes (hardware fingerprint included in PoW challenge)" << std::endl;
-    std::cout << std::endl;
-
-    // Determine DNA hash pointer for PoW (null if DNA not active at this height)
-    const std::array<uint8_t, 32>* dnaForPow = s_dnaHashCached.load() ? &s_cachedDnaHash : nullptr;
-
-    if (!s_regPowInProgress.exchange(true)) {
-        uint64_t nonce = 0;
-        if (DFMP::MineRegistrationPoW(mikPubkey, regPowBits, nonce, &g_node_state.running, dnaForPow)) {
-            s_cachedRegNonce = nonce;
-            s_regNonceIdentity = identity;
-            s_regNonceMined.store(true);
-            s_regPowInProgress.store(false);
-            PersistRegistrationPoW_DilV(mikPubkey);
-            std::cout << std::endl;
-            std::cout << "  [Mining] Miner identity registered successfully!" << std::endl;
-            std::cout << std::endl;
+        if (snap->state == State::CONFIRMED ||
+            snap->state == State::READY ||
+            snap->state == State::SUBMITTED) {
             return true;
-        } else {
-            s_regPowInProgress.store(false);
-            if (!g_node_state.running) {
-                std::cout << "[Mining] Registration PoW cancelled (shutting down)" << std::endl;
-            } else {
-                std::cerr << "[Mining] WARNING: Failed to mine registration PoW" << std::endl;
+        }
+        if (snap->state == State::FAILED_FATAL) {
+            std::cerr << "[Mining] Registration fatal error: " << snap->lastError << std::endl;
+            return false;
+        }
+        if (snap->state == State::LONG_BACKOFF_USER_ACTIONABLE) {
+            std::cerr << "[Mining] Registration blocked: " << snap->lastError << std::endl;
+            if (!snap->userActionHint.empty()) {
+                std::cerr << "[Mining]   -> " << snap->userActionHint << std::endl;
             }
             return false;
         }
-    } else {
-        // BUG #278 FIX: Another thread is already mining registration PoW.
-        std::cout << "  [Mining] Registration PoW already in progress on another thread, waiting..." << std::endl;
-        int wait_sec = 0;
-        while (s_regPowInProgress.load(std::memory_order_acquire) && g_node_state.running) {
-            std::this_thread::sleep_for(std::chrono::seconds(1));
-            wait_sec++;
-            if (wait_sec % 30 == 0) {
-                std::cout << "  [Mining] Still waiting for registration PoW... (" << wait_sec << "s)" << std::endl;
-            }
+
+        if (snap->mineGate != lastReason) {
+            auto status = s_registrationManager->GetStatusForUI();
+            std::cout << "  [Mining] Phase: " << status.phase
+                      << " — " << status.message;
+            if (!status.etaText.empty()) std::cout << " (" << status.etaText << ")";
+            std::cout << std::endl;
+            lastReason = snap->mineGate;
         }
-        if (!g_node_state.running) return false;
-        if (s_regNonceMined.load() && s_regNonceIdentity == identity) {
-            std::cout << "  [Mining] Registration PoW completed by other thread!" << std::endl;
-            return true;
-        }
-        std::cerr << "[Mining] WARNING: Registration PoW failed on other thread, retrying..." << std::endl;
-        if (!s_regPowInProgress.exchange(true)) {
-            uint64_t nonce = 0;
-            if (DFMP::MineRegistrationPoW(mikPubkey, regPowBits, nonce, &g_node_state.running, dnaForPow)) {
-                s_cachedRegNonce = nonce;
-                s_regNonceIdentity = identity;
-                s_regNonceMined.store(true);
-                s_regPowInProgress.store(false);
-                PersistRegistrationPoW_DilV(mikPubkey);
-                std::cout << "  [Mining] Miner identity registered successfully!" << std::endl;
-                return true;
-            } else {
-                s_regPowInProgress.store(false);
-                return false;
-            }
-        }
-        return false;
+
+        std::this_thread::sleep_for(std::chrono::seconds(1));
+        waitSec++;
+        s_registrationManager->Tick(tipHeight, g_node_state.running.load());
     }
+    return false;
 }
 
 /**
@@ -1235,72 +1062,27 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
             bool isRegistered = DFMP::g_identityDb && DFMP::g_identityDb->HasMIKPubKey(mikIdentity);
 
             if (!isRegistered) {
-                // First block with this MIK - include full pubkey (registration)
+                // First block with this MIK — registration path. All registration
+                // material (pubkey, DNA hash, attestations, nonce) comes from the
+                // RegistrationManager's published snapshot. BuildMiningTemplate is
+                // a PURE READER — it never mines PoW, collects DNA, or requests
+                // attestations. That work lives in the manager's worker thread.
                 std::vector<uint8_t> mikPubkey;
-                if (wallet.GetMIKPubKey(mikPubkey)) {
-                    // BUG #284 FIX: Ensure DNA is cached before registration PoW.
-                    // If EnsureMIKRegistered() returned early (MIK was registered at
-                    // startup but later orphaned by reorg), s_dnaHashCached is false.
-                    // Without DNA, PoW is mined without it and attestation re-collection
-                    // is impossible, causing infinite template rejection loops.
-                    if (!s_dnaHashCached.load() && Dilithion::g_chainParams &&
-                        static_cast<int>(nHeight) >= Dilithion::g_chainParams->dnaCommitmentActivationHeight) {
-                        auto collector = g_node_context.GetDNACollector();
-                        if (collector) {
-                            auto dna = collector->get_dna();
-                            if (dna) {
-                                s_cachedDnaHash = dna->hash();
-                                bool allZero = true;
-                                for (auto b : s_cachedDnaHash) { if (b != 0) { allZero = false; break; } }
-                                if (!allZero) {
-                                    s_dnaHashCached.store(true);
-                                    std::cout << "[Mining] DNA collected inline for registration (hash " << std::hex;
-                                    for (int i = 0; i < 4; i++) std::cout << std::setfill('0') << std::setw(2) << (int)s_cachedDnaHash[i];
-                                    std::cout << std::dec << "...)" << std::endl;
-                                    // Invalidate any PoW mined without DNA — must re-mine with DNA in challenge
-                                    if (s_regNonceMined.load()) {
-                                        std::cout << "[Mining] Invalidating PoW (was mined without DNA) - will re-mine" << std::endl;
-                                        s_regNonceMined.store(false);
-                                    }
-                                }
-                            }
-                        }
-                    }
+                std::shared_ptr<const CRegistrationManager::Snapshot> regSnap;
+                if (s_registrationManager) regSnap = s_registrationManager->GetSnapshot();
 
-                    // DFMP v3.0: Mine registration PoW nonce (cached to avoid re-mining)
-                    // Thread-safety: atomic flag prevents duplicate PoW mining when
-                    // BuildMiningTemplate is called concurrently (e.g. main thread
-                    // startup + chain tip callback from P2P thread)
-                    // NOTE: s_cachedRegNonce, s_regNonceMined, s_regPowInProgress,
-                    // s_regNonceIdentity are file-scope (shared with EnsureMIKRegistered)
-                    uint64_t regNonce = 0;
-                    if (Dilithion::g_chainParams && nHeight >= Dilithion::g_chainParams->dfmpV3ActivationHeight) {
-                        if (s_regNonceMined.load() && s_regNonceIdentity == mikIdentity) {
-                            regNonce = s_cachedRegNonce;
-                        } else if (!s_regPowInProgress.exchange(true)) {
-                            // We acquired the lock - mine the PoW
-                            std::cout << "[DFMP v3.0] Mining registration PoW for new MIK identity..." << std::endl;
-                            int rpBits = Dilithion::g_chainParams ? Dilithion::g_chainParams->registrationPowBits : 30;
-                            const std::array<uint8_t, 32>* dnaPtr = s_dnaHashCached.load() ? &s_cachedDnaHash : nullptr;
-                            if (DFMP::MineRegistrationPoW(mikPubkey, rpBits, regNonce, &g_node_state.running, dnaPtr)) {
-                                s_cachedRegNonce = regNonce;
-                                s_regNonceIdentity = mikIdentity;
-                                s_regNonceMined.store(true);
-                                PersistRegistrationPoW_DilV(mikPubkey);
-                            } else {
-                                std::cerr << "[DFMP v3.0] Failed to mine registration PoW!" << std::endl;
-                                regNonce = UINT64_MAX;  // Sentinel: skip registration (prevents nonce=0 template)
-                            }
-                            s_regPowInProgress.store(false);
-                        } else {
-                            // Another thread is already mining registration PoW - skip MIK for this template.
-                            // The next template rebuild (after PoW completes) will include the cached nonce.
-                            std::cout << "[DFMP v3.0] Registration PoW already in progress on another thread, skipping MIK..." << std::endl;
-                            regNonce = UINT64_MAX;  // Sentinel: skip registration
-                        }
+                if (!regSnap || !regSnap->hasRegNonce || !regSnap->hasDnaHash ||
+                    regSnap->mikPubkey.empty()) {
+                    // Manager not ready — skip the registration MIK data for this
+                    // template. The guard block below returns nullopt if we're
+                    // past dfmpAssumeValidHeight and no MIK data was included.
+                    if (verbose) {
+                        std::cout << "  MIK: Skipped (registration manager not ready)" << std::endl;
                     }
-
-                    if (regNonce != UINT64_MAX && DFMP::BuildMIKScriptSigRegistration(mikPubkey, mikSignature, regNonce, mikData)) {
+                } else {
+                    mikPubkey = regSnap->mikPubkey;
+                    uint64_t regNonce = regSnap->regNonce;
+                    if (DFMP::BuildMIKScriptSigRegistration(mikPubkey, mikSignature, regNonce, mikData)) {
                         scriptSig.insert(scriptSig.end(), mikData.begin(), mikData.end());
                         mikDataIncluded = true;
                         if (verbose) {
@@ -1326,19 +1108,23 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
     }
 
     // Digital DNA commitment: append 0xDD + 32-byte hash after MIK data (VDF blocks only)
-    // For registration blocks: use the cached DNA hash (same one used for attestation + PoW)
-    // For normal blocks: use live DNA from collector
+    // For registration blocks: use the manager's cached DNA hash (consensus-consistent
+    // with attestation + PoW since all three were locked together at session start).
+    // For normal blocks: use live DNA from collector.
     if (mikDataIncluded && Dilithion::g_chainParams &&
         static_cast<int>(nHeight) >= Dilithion::g_chainParams->dnaCommitmentActivationHeight) {
         bool isRegBlock = DFMP::g_identityDb && !mikIdentity.IsNull() &&
             !DFMP::g_identityDb->HasMIKPubKey(mikIdentity);
 
-        if (isRegBlock && s_dnaHashCached.load()) {
-            // Registration block: use cached DNA hash for consistency with attestation + PoW
-            DFMP::BuildDNACommitment(s_cachedDnaHash, scriptSig);
+        std::shared_ptr<const CRegistrationManager::Snapshot> regSnap;
+        if (s_registrationManager) regSnap = s_registrationManager->GetSnapshot();
+
+        if (isRegBlock && regSnap && regSnap->hasDnaHash) {
+            // Registration block: use session DNA hash for consistency with attestation + PoW
+            DFMP::BuildDNACommitment(regSnap->dnaHash, scriptSig);
             if (verbose) {
-                std::cout << "  DNA: Registration commitment (cached hash " << std::hex;
-                for (int i = 0; i < 4; i++) std::cout << std::setfill('0') << std::setw(2) << (int)s_cachedDnaHash[i];
+                std::cout << "  DNA: Registration commitment (session hash " << std::hex;
+                for (int i = 0; i < 4; i++) std::cout << std::setfill('0') << std::setw(2) << (int)regSnap->dnaHash[i];
                 std::cout << std::dec << "...)" << std::endl;
             }
         } else {
@@ -1358,7 +1144,11 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         }
     }
 
-    // Phase 2+3: Append seed attestation data after DNA commitment (registration blocks only)
+    // Phase 2+3: Append seed attestation data after DNA commitment (registration blocks only).
+    // The CRegistrationManager owns attestation collection + freshness — BuildMiningTemplate
+    // only READS the attestation set from the snapshot. Stale attestations are refreshed
+    // automatically by the manager's worker (HandleReady_). If the manager doesn't have
+    // a fresh attestation set, we return nullopt and the miner waits for the next template.
     bool isRegistrationBlock = mikDataIncluded &&
         DFMP::g_identityDb && !mikIdentity.IsNull() &&
         !DFMP::g_identityDb->HasMIKPubKey(mikIdentity);
@@ -1366,64 +1156,28 @@ std::optional<CBlockTemplate> BuildMiningTemplate(CBlockchainDB& blockchain, CWa
         int activationHeight = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->seedAttestationActivationHeight : 999999999;
 
+        std::shared_ptr<const CRegistrationManager::Snapshot> regSnap;
+        if (s_registrationManager) regSnap = s_registrationManager->GetSnapshot();
+
         if (static_cast<int>(nHeight) >= activationHeight) {
-            // BUG #283 FIX: Re-collect stale attestations inline.
-            // EnsureMIKRegistered() only runs once at startup. If attestations expire
-            // (1-hour validity window) or the rejection handler clears the cache, the
-            // template builder must handle re-collection itself — otherwise every
-            // registration block is built without attestations and rejected by consensus.
-            bool needRefresh = !s_attestationsCollected.load() || !s_cachedAttestations.HasMinimum();
-            if (!needRefresh) {
-                int64_t attestAge = std::time(nullptr) - static_cast<int64_t>(s_cachedAttestations.attestations[0].timestamp);
-                if (attestAge > Attestation::ATTESTATION_VALIDITY_WINDOW - 600) {
-                    std::cout << "[Mining] Attestations are " << attestAge / 60
-                              << "m old (max " << Attestation::ATTESTATION_VALIDITY_WINDOW / 60
-                              << "m) - refreshing..." << std::endl;
-                    needRefresh = true;
-                }
-            }
-
-            if (needRefresh && Dilithion::g_chainParams &&
-                !Dilithion::g_chainParams->seedAttestationIPs.empty() &&
-                s_dnaHashCached.load()) {  // DNA hash must be valid — attestations are bound to it
-                std::vector<uint8_t> mikPubkey;
-                if (wallet.GetMIKPubKey(mikPubkey)) {
-                    std::string mikHex = HexStr(mikPubkey);
-                    std::string dnaHex = HexStr(s_cachedDnaHash.data(), 32);
-                    Attestation::CAttestationSet freshAttest;
-                    std::string attestErr;
-                    if (Attestation::CollectAttestations(
-                            Dilithion::g_chainParams->seedAttestationIPs,
-                            Dilithion::g_chainParams->seedAttestationRPCPort,
-                            mikHex, dnaHex, freshAttest, attestErr)) {
-                        s_cachedAttestations = std::move(freshAttest);
-                        s_attestationsCollected.store(true);
-                        std::cout << "[Mining] Fresh attestations collected for registration block" << std::endl;
-                        needRefresh = false;
-                    } else {
-                        std::cerr << "[Mining] Attestation re-collection failed: " << attestErr << std::endl;
-                    }
-                }
-            }
-
-            // Guard: refuse to build registration block without valid attestations
-            if (needRefresh) {
-                std::cerr << "[Mining] Template rejected - registration block at height "
-                          << nHeight << " requires seed attestations"
-                          << " (collected=" << s_attestationsCollected.load()
-                          << ", dna=" << s_dnaHashCached.load()
-                          << ", mikPub=" << (wallet.HasMIK() ? "yes" : "no") << ")" << std::endl;
+            if (!regSnap || !regSnap->hasAttestations || !regSnap->attestations ||
+                !regSnap->attestations->HasMinimum()) {
+                std::cerr << "[Mining] Template deferred - registration block at height "
+                          << nHeight << " waiting for seed attestations (manager state="
+                          << StateToString(regSnap ? regSnap->state
+                                                    : CRegistrationManager::State::UNINITIALIZED)
+                          << ")" << std::endl;
                 return std::nullopt;
             }
         }
 
-        // Include attestations in coinbase (must meet consensus quorum)
-        if (s_attestationsCollected.load() && s_cachedAttestations.HasMinimum()) {
+        // Include attestations in coinbase (manager guarantees quorum).
+        if (regSnap && regSnap->attestations && regSnap->attestations->HasMinimum()) {
             std::vector<uint8_t> attestData;
-            if (Attestation::BuildAttestationScriptData(s_cachedAttestations, attestData)) {
+            if (Attestation::BuildAttestationScriptData(*regSnap->attestations, attestData)) {
                 scriptSig.insert(scriptSig.end(), attestData.begin(), attestData.end());
                 if (verbose) {
-                    std::cout << "  Attestations: " << s_cachedAttestations.Count()
+                    std::cout << "  Attestations: " << regSnap->attestations->Count()
                               << " seed attestations included ("
                               << attestData.size() << " bytes)" << std::endl;
                 }
@@ -5749,33 +5503,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
                 g_node_state.new_block_found = true;
             } else {
-                // Block rejected — if attestation cache is stale, re-collect
-                // This handles seed_id changes, key rotations, or expired attestations
-                // without requiring a full node restart or PoW redo
-                if (s_attestationsCollected.load() &&
-                    Dilithion::g_chainParams &&
-                    !Dilithion::g_chainParams->seedAttestationIPs.empty()) {
-                    std::cout << "[VDF] Block rejected - re-collecting seed attestations..." << std::endl;
-                    s_attestationsCollected.store(false);
-
-                    std::vector<uint8_t> mikPubkey;
-                    if (wallet.GetMIKPubKey(mikPubkey) && s_dnaHashCached.load()) {
-                        std::string mikHex = HexStr(mikPubkey);
-                        std::string dnaHex = HexStr(s_cachedDnaHash.data(), 32);
-
-                        Attestation::CAttestationSet freshAttest;
-                        std::string attestErr;
-                        if (Attestation::CollectAttestations(
-                                Dilithion::g_chainParams->seedAttestationIPs,
-                                Dilithion::g_chainParams->seedAttestationRPCPort,
-                                mikHex, dnaHex, freshAttest, attestErr)) {
-                            s_cachedAttestations = std::move(freshAttest);
-                            s_attestationsCollected.store(true);
-                            std::cout << "[VDF] Fresh attestations collected - next block should succeed" << std::endl;
-                        } else {
-                            std::cerr << "[VDF] WARNING: Attestation re-collection failed: " << attestErr << std::endl;
-                        }
-                    }
+                // Block rejected. Notify the RegistrationManager so it can decide
+                // whether to re-collect attestations (SUBMITTED → ATTEST_PENDING) or
+                // retry submission (SUBMITTED → READY). Bounded retry budget inside
+                // the manager prevents infinite re-collect loops.
+                if (s_registrationManager) {
+                    std::cout << "[VDF] Block rejected - notifying registration manager" << std::endl;
+                    s_registrationManager->TestingInjectEvent(
+                        CRegistrationManager::Event::SUBMIT_TIMEOUT_OR_REJECTED,
+                        "block rejected by validation");
                 }
             }
         });
@@ -6734,6 +6470,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Main loop
         while (g_node_state.running) {
+            // v4.0.18: keep the RegistrationManager driving on every iteration.
+            // Non-blocking: just publishes fresh inputs and wakes its worker.
+            if (s_registrationManager) {
+                auto tipH = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+                s_registrationManager->Tick(static_cast<uint32_t>(tipH),
+                                             g_node_state.running.load());
+            }
             std::this_thread::sleep_for(std::chrono::seconds(1));
 
             // Check if new block was found and mining template needs update
@@ -6754,27 +6497,45 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // DilV: VDF miner handles new blocks via OnNewBlock() above
                 // No RandomX template rebuild needed
 
-                // Resume VDF mining if it was paused and conditions allow
+                // Resume VDF mining if it was paused and conditions allow.
+                // v4.0.18 FIX: gate on RegistrationManager.CanMine() — this used to
+                // be the race-condition path where the P2P tip callback started VDF
+                // mining before EnsureMIKRegistered had completed DNA collection,
+                // producing a PoW bound to an empty DNA hash that was later invalidated
+                // (the 30-minute-waste loop observed in v4.0.17).
                 if (g_node_state.mining_enabled.load() && !IsInitialBlockDownload()
                     && !mining_paused_no_peers && !mining_paused_fork && !mining_paused_consensus_fork
                     && !mining_paused_tip_divergence && !vdf_miner.IsRunning()) {
 
-                    std::cout << "[Mining] Resuming VDF mining at height " << next_height << std::endl;
-                    std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
-                    if (pubKeyHash.size() >= 20) {
-                        std::array<uint8_t, 20> addr{};
-                        std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
-                        vdf_miner.SetMinerAddress(addr);
-                    }
-                    {
-                        DFMP::Identity mikId = wallet.GetMIKIdentity();
-                        if (!mikId.IsNull()) {
-                            std::array<uint8_t, 20> mikArr{};
-                            std::memcpy(mikArr.data(), mikId.data, 20);
-                            vdf_miner.SetMIKIdentity(mikArr);
+                    if (s_registrationManager) {
+                        CRegistrationManager::MineGateReason reason;
+                        if (!s_registrationManager->CanMine(&reason)) {
+                            static CRegistrationManager::MineGateReason s_lastLoggedReason =
+                                CRegistrationManager::MineGateReason::OK_REGISTERED;
+                            if (reason != s_lastLoggedReason) {
+                                std::cout << "[Mining] Deferred VDF start at height " << next_height
+                                          << " — " << MineGateReasonToString(reason) << std::endl;
+                                s_lastLoggedReason = reason;
+                            }
+                        } else {
+                            std::cout << "[Mining] Resuming VDF mining at height " << next_height << std::endl;
+                            std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                            if (pubKeyHash.size() >= 20) {
+                                std::array<uint8_t, 20> addr{};
+                                std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                                vdf_miner.SetMinerAddress(addr);
+                            }
+                            {
+                                DFMP::Identity mikId = wallet.GetMIKIdentity();
+                                if (!mikId.IsNull()) {
+                                    std::array<uint8_t, 20> mikArr{};
+                                    std::memcpy(mikArr.data(), mikId.data, 20);
+                                    vdf_miner.SetMIKIdentity(mikArr);
+                                }
+                            }
+                            vdf_miner.Start();
                         }
                     }
-                    vdf_miner.Start();
                 }
 
                 // Clear flag
