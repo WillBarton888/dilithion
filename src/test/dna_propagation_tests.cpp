@@ -12,6 +12,15 @@
  * Wire-level receiver handler rewrite (which uses both of the above plus
  * `g_mik_peer_map` plausibility) is exercised in-process when the node binary
  * runs; end-to-end two-node scenarios are deferred to manual deploy testing.
+ *
+ * Mapping semantics (post-`fix/mik-peer-map-semantics`, 2026-04-23):
+ *   `g_mik_peer_map[mik] = peer_id` is set ONLY when `register_identity`
+ *   succeeds on a previously-unseen MIK (SUCCESS or SYBIL_FLAGGED result).
+ *   Merge-fill paths and silent-drop paths MUST NOT update the mapping.
+ *   This prevents relays from promoting themselves to mapped-peer status
+ *   simply by forwarding a benign `dnaires`. The signed-envelope path
+ *   (Phase 1.5) is the authenticated route for unmapped peers to push
+ *   full replacements.
  */
 
 #include <digital_dna/digital_dna.h>

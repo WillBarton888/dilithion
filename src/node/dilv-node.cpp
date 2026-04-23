@@ -4248,12 +4248,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 // miner's initial-registration broadcast establishes the peer_id→MIK
                 // mapping that subsequent samples rely on for plausibility.
                 auto result = g_node_context.dna_registry->register_identity(*dna);
-                (void)result;
-                char hex[9];
-                snprintf(hex, sizeof(hex), "%02x%02x%02x%02x", mik[0], mik[1], mik[2], mik[3]);
-                std::cout << "[DNA] Stored DNA for MIK " << hex << "... from peer "
-                          << peer_id << " (registry=" << g_node_context.dna_registry->count()
-                          << ")" << std::endl;
+                const bool stored =
+                    (result == digital_dna::IDNARegistry::RegisterResult::SUCCESS ||
+                     result == digital_dna::IDNARegistry::RegisterResult::SYBIL_FLAGGED);
+                if (stored) {
+                    // Set mapping only on successful registration. Never set on
+                    // merge-fill or silent-drop paths below — doing so would let any
+                    // relay forwarding a benign dnaires become "mapped" for a MIK,
+                    // bypassing the skip-crypto trust gate on later full replacements.
+                    std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
+                    g_mik_peer_map[mik] = peer_id;
+                    char hex[9];
+                    snprintf(hex, sizeof(hex), "%02x%02x%02x%02x", mik[0], mik[1], mik[2], mik[3]);
+                    std::cout << "[DNA] Stored DNA for MIK " << hex << "... from peer "
+                              << peer_id << " (registry=" << g_node_context.dna_registry->count()
+                              << ")" << std::endl;
+                }
             } else {
                 // DNA Propagation Phase 1: accept enriched sample for already-registered MIK.
                 //   1. Plausibility — sender must be the currently-mapped peer for this MIK.
@@ -4293,6 +4303,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // data provenance from relay-peer pollution while unblocking
                     // propagation for the common case (discovery response from a
                     // peer that happens to have enriched DNA for this MIK).
+                    //
+                    // The mapping is NOT updated here. Unmapped merge-fill is a
+                    // weak-trust path; promoting its sender to mapped status would
+                    // let any relay gain full-replacement authority on subsequent
+                    // messages. The signed-envelope path (Phase 1.5) provides the
+                    // authenticated way for unmapped peers to push full updates.
                     int filled = 0;
                     auto merged = digital_dna::merge_fill_missing_dims(*existing, *dna, &filled);
                     if (filled == 0) {
@@ -4310,12 +4326,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         }
                     }
                 }
-            }
-
-            // Phase 2: Track MIK -> peer_id mapping for verification routing
-            {
-                std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
-                g_mik_peer_map[mik] = peer_id;
             }
         });
 
