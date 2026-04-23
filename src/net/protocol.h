@@ -19,9 +19,15 @@ static const uint32_t REGTEST_MAGIC = 0xFABFB5DA;
 static const uint32_t DILV_MAGIC    = 0xD17FD100;  // DilV chain
 
 /** Protocol version */
-static const int PROTOCOL_VERSION = 70010;          // v4.0.0: DilV reset + DIL attestation
+static const int PROTOCOL_VERSION = 70011;          // v4.0.18: DNA Phase 1.5 signed sample envelope
 static const int MIN_PEER_PROTO_VERSION = 70005;    // DIL: Allow old nodes until attestation activates at 40,000
 static const int DILV_MIN_PEER_PROTO_VERSION = 70010; // DilV: Require v4.0.0 (new genesis)
+
+/** DNA Phase 1.5 (v4.0.18): minimum peer version that understands the SMP1
+ *  trailer on dnaires. Senders MUST NOT emit the trailer to peers reporting
+ *  a negotiated nVersion below this number — older receivers have a payload
+ *  cap that would treat the oversized message as misbehaviour. */
+static const int DNA_SMP1_MIN_PROTOCOL_VERSION = 70011;
 
 /** Default network port */
 static const uint16_t DEFAULT_PORT = 8444;

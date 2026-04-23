@@ -25,16 +25,26 @@
 
 #include <digital_dna/digital_dna.h>
 #include <digital_dna/dna_registry_db.h>
+#include <digital_dna/sample_envelope.h>
 #include <digital_dna/sample_rate_limiter.h>
+#include <dfmp/mik.h>  // MIK_PRIVKEY_SIZE, MIK_PUBKEY_SIZE, MIK_SIGNATURE_SIZE
 
 #include <array>
 #include <chrono>
 #include <cstdint>
+#include <cstring>
 #include <filesystem>
 #include <iostream>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+// Dilithium3 keypair — declared here because the test needs to fabricate
+// a real keypair for sign/verify round-trips (not available via the public
+// wallet path in a pure unit test).
+extern "C" {
+    int pqcrystals_dilithium3_ref_keypair(uint8_t *pk, uint8_t *sk);
+}
 
 #define RESET_  "\033[0m"
 #define GREEN_  "\033[32m"
@@ -533,11 +543,329 @@ TEST(dna_registry_db_get_all_miks_returns_stored_miks) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 1.5 — SampleEnvelope sign/verify, TryParse negatives,
+//             replay cache, staged rate-limiter APIs.
+// ---------------------------------------------------------------------------
+
+namespace p15 {
+
+struct Keypair {
+    std::vector<uint8_t> pubkey;
+    std::vector<uint8_t> privkey;
+};
+
+static Keypair make_keypair() {
+    Keypair k;
+    k.pubkey.resize(DFMP::MIK_PUBKEY_SIZE);
+    k.privkey.resize(DFMP::MIK_PRIVKEY_SIZE);
+    int rc = pqcrystals_dilithium3_ref_keypair(k.pubkey.data(), k.privkey.data());
+    if (rc != 0) throw std::runtime_error("keypair generation failed");
+    return k;
+}
+
+static std::array<uint8_t, 20> make_mik(uint8_t seed) {
+    std::array<uint8_t, 20> m{};
+    for (size_t i = 0; i < m.size(); ++i) m[i] = seed + static_cast<uint8_t>(i);
+    return m;
+}
+
+static std::vector<uint8_t> make_dna_bytes(uint8_t seed, size_t len = 256) {
+    std::vector<uint8_t> out(len);
+    for (size_t i = 0; i < len; ++i) out[i] = static_cast<uint8_t>(seed ^ (i * 31));
+    return out;
+}
+
+} // namespace p15
+
+using digital_dna::SampleEnvelope;
+
+TEST(envelope_sign_verify_roundtrip) {
+    auto kp = p15::make_keypair();
+    auto mik = p15::make_mik(0x01);
+    auto dna = p15::make_dna_bytes(0x42);
+    std::vector<uint8_t> sig;
+    bool ok = SampleEnvelope::Sign(
+        kp.privkey.data(), kp.privkey.size(), mik,
+        1700000000ULL, 0xdeadbeefULL, dna, sig);
+    ASSERT(ok, "Sign should succeed");
+    ASSERT_EQ(sig.size(), DFMP::MIK_SIGNATURE_SIZE, "signature length");
+    ASSERT(SampleEnvelope::Verify(
+               kp.pubkey, mik, 1700000000ULL, 0xdeadbeefULL, dna, sig),
+           "Verify of round-trip should pass");
+}
+
+TEST(envelope_verify_rejects_tampered_signature) {
+    auto kp = p15::make_keypair();
+    auto mik = p15::make_mik(0x02);
+    auto dna = p15::make_dna_bytes(0x77);
+    std::vector<uint8_t> sig;
+    ASSERT(SampleEnvelope::Sign(kp.privkey.data(), kp.privkey.size(),
+                                 mik, 1700000000ULL, 1ULL, dna, sig), "sign");
+    sig[42] ^= 0x01;  // flip one bit
+    ASSERT(!SampleEnvelope::Verify(kp.pubkey, mik, 1700000000ULL, 1ULL, dna, sig),
+           "tampered signature must fail verify");
+}
+
+TEST(envelope_verify_rejects_tampered_dna_data) {
+    auto kp = p15::make_keypair();
+    auto mik = p15::make_mik(0x03);
+    auto dna = p15::make_dna_bytes(0x11);
+    std::vector<uint8_t> sig;
+    ASSERT(SampleEnvelope::Sign(kp.privkey.data(), kp.privkey.size(),
+                                 mik, 1700000000ULL, 2ULL, dna, sig), "sign");
+    dna[7] ^= 0x01;
+    ASSERT(!SampleEnvelope::Verify(kp.pubkey, mik, 1700000000ULL, 2ULL, dna, sig),
+           "tampered dna_data must fail verify");
+}
+
+TEST(envelope_verify_rejects_wrong_mik) {
+    auto kp = p15::make_keypair();
+    auto mik1 = p15::make_mik(0x04);
+    auto mik2 = p15::make_mik(0x05);  // different
+    auto dna = p15::make_dna_bytes(0x22);
+    std::vector<uint8_t> sig;
+    ASSERT(SampleEnvelope::Sign(kp.privkey.data(), kp.privkey.size(),
+                                 mik1, 1700000000ULL, 3ULL, dna, sig), "sign");
+    ASSERT(!SampleEnvelope::Verify(kp.pubkey, mik2, 1700000000ULL, 3ULL, dna, sig),
+           "verify under different mik must fail");
+}
+
+TEST(envelope_tryparse_empty_returns_none) {
+    SampleEnvelope env;
+    auto r = SampleEnvelope::TryParse({}, env);
+    ASSERT(r == SampleEnvelope::ParseResult::NONE, "empty trailer = NONE");
+    ASSERT(env.signature.empty(), "signature empty on NONE");
+}
+
+TEST(envelope_tryparse_unknown_magic_is_silent_ignore) {
+    SampleEnvelope env;
+    // 4 bytes not matching "SMP1"
+    std::vector<uint8_t> t = {'X','X','X','X', 0,0,0,0, 0,0,0,0};
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::UNKNOWN_MAGIC,
+           "unknown magic must be UNKNOWN_MAGIC (forward-compat), not malformed");
+}
+
+TEST(envelope_tryparse_truncated_magic_is_malformed) {
+    SampleEnvelope env;
+    // Fewer than 4 bytes = can't determine magic => malformed
+    std::vector<uint8_t> t = {'S','M'};
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::MALFORMED, "truncated magic = MALFORMED");
+}
+
+TEST(envelope_tryparse_truncated_timestamp) {
+    SampleEnvelope env;
+    // SMP1 magic + 5 bytes of "timestamp" (truncated; need 8)
+    std::vector<uint8_t> t = {'S','M','P','1', 1,2,3,4,5};
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::MALFORMED, "truncated ts = MALFORMED");
+}
+
+TEST(envelope_tryparse_truncated_nonce) {
+    SampleEnvelope env;
+    // SMP1 + 8-byte ts + 3 bytes of nonce (truncated; need 8)
+    std::vector<uint8_t> t(4 + 8 + 3, 0);
+    t[0]='S'; t[1]='M'; t[2]='P'; t[3]='1';
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::MALFORMED, "truncated nonce = MALFORMED");
+}
+
+TEST(envelope_tryparse_truncated_sig_len) {
+    SampleEnvelope env;
+    // SMP1 + ts(8) + nonce(8) + 1 byte of sig_len (need 2)
+    std::vector<uint8_t> t(4 + 8 + 8 + 1, 0);
+    t[0]='S'; t[1]='M'; t[2]='P'; t[3]='1';
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::MALFORMED, "truncated sig_len = MALFORMED");
+}
+
+TEST(envelope_tryparse_siglen_zero_is_malformed) {
+    SampleEnvelope env;
+    std::vector<uint8_t> t(4 + 8 + 8 + 2, 0);
+    t[0]='S'; t[1]='M'; t[2]='P'; t[3]='1';
+    // sig_len = 0 (already zeroed), remaining = 0 — still malformed per spec
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::MALFORMED,
+           "sig_len=0 is meaningless with SMP1 — must be MALFORMED");
+}
+
+TEST(envelope_tryparse_wrong_sig_len) {
+    SampleEnvelope env;
+    // sig_len = 100 (not Dilithium3's 3309) but remaining matches to make sure
+    // the length check fires before the remaining-bytes check.
+    std::vector<uint8_t> t(4 + 8 + 8 + 2 + 100, 0);
+    t[0]='S'; t[1]='M'; t[2]='P'; t[3]='1';
+    t[4 + 8 + 8] = 100;  // sig_len LE low byte
+    t[4 + 8 + 8 + 1] = 0;
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::MALFORMED,
+           "sig_len != MIK_SIGNATURE_SIZE must be MALFORMED");
+}
+
+TEST(envelope_tryparse_sig_len_gt_remaining) {
+    SampleEnvelope env;
+    // sig_len = MIK_SIGNATURE_SIZE (3309) but only 10 bytes remain
+    std::vector<uint8_t> t(4 + 8 + 8 + 2 + 10, 0);
+    t[0]='S'; t[1]='M'; t[2]='P'; t[3]='1';
+    uint16_t sig_len = static_cast<uint16_t>(DFMP::MIK_SIGNATURE_SIZE);
+    t[4 + 8 + 8] = static_cast<uint8_t>(sig_len & 0xFF);
+    t[4 + 8 + 8 + 1] = static_cast<uint8_t>(sig_len >> 8);
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::MALFORMED,
+           "sig_len larger than remaining bytes = MALFORMED");
+}
+
+TEST(envelope_tryparse_trailing_bytes_after_sig) {
+    SampleEnvelope env;
+    // sig_len = MIK_SIGNATURE_SIZE, but trailer carries one extra byte after.
+    std::vector<uint8_t> t(4 + 8 + 8 + 2 + DFMP::MIK_SIGNATURE_SIZE + 1, 0);
+    t[0]='S'; t[1]='M'; t[2]='P'; t[3]='1';
+    uint16_t sig_len = static_cast<uint16_t>(DFMP::MIK_SIGNATURE_SIZE);
+    t[4 + 8 + 8] = static_cast<uint8_t>(sig_len & 0xFF);
+    t[4 + 8 + 8 + 1] = static_cast<uint8_t>(sig_len >> 8);
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::MALFORMED,
+           "extra bytes after declared signature must be MALFORMED (strict mode)");
+}
+
+TEST(envelope_tryparse_duplicate_magic) {
+    SampleEnvelope env;
+    // SMP1 header + a second SMP1 inside the signature region (place at an
+    // offset that collides with what would otherwise be a valid trailer).
+    std::vector<uint8_t> t(4 + 8 + 8 + 2 + DFMP::MIK_SIGNATURE_SIZE, 0);
+    t[0]='S'; t[1]='M'; t[2]='P'; t[3]='1';
+    uint16_t sig_len = static_cast<uint16_t>(DFMP::MIK_SIGNATURE_SIZE);
+    t[4 + 8 + 8] = static_cast<uint8_t>(sig_len & 0xFF);
+    t[4 + 8 + 8 + 1] = static_cast<uint8_t>(sig_len >> 8);
+    // Place a second SMP1 at offset 100 (well inside the signature region)
+    t[100]='S'; t[101]='M'; t[102]='P'; t[103]='1';
+    auto r = SampleEnvelope::TryParse(t, env);
+    ASSERT(r == SampleEnvelope::ParseResult::MALFORMED,
+           "duplicate SMP1 markers in trailer region must be MALFORMED");
+}
+
+TEST(envelope_tryparse_valid_roundtrip_via_towire) {
+    auto kp = p15::make_keypair();
+    auto mik = p15::make_mik(0x06);
+    auto dna = p15::make_dna_bytes(0x55);
+    SampleEnvelope in;
+    in.timestamp_sec = 1700000123ULL;
+    in.nonce = 0xcafebabe12345678ULL;
+    ASSERT(SampleEnvelope::Sign(kp.privkey.data(), kp.privkey.size(),
+                                 mik, in.timestamp_sec, in.nonce, dna, in.signature),
+           "sign roundtrip");
+
+    auto wire = in.ToWireBytes();
+    ASSERT(!wire.empty(), "wire bytes non-empty");
+
+    SampleEnvelope out;
+    auto r = SampleEnvelope::TryParse(wire, out);
+    ASSERT(r == SampleEnvelope::ParseResult::SIGNED,
+           "roundtrip via ToWireBytes -> TryParse must be SIGNED");
+    ASSERT_EQ(out.timestamp_sec, in.timestamp_sec, "ts roundtrip");
+    ASSERT_EQ(out.nonce, in.nonce, "nonce roundtrip");
+    ASSERT_EQ(out.signature.size(), in.signature.size(), "sig size roundtrip");
+    ASSERT(std::memcmp(out.signature.data(), in.signature.data(), in.signature.size()) == 0,
+           "sig bytes roundtrip");
+
+    // And the parsed envelope verifies against the original pubkey.
+    ASSERT(SampleEnvelope::Verify(kp.pubkey, mik, out.timestamp_sec, out.nonce,
+                                   dna, out.signature),
+           "parsed sig verifies");
+}
+
+// ---- Replay cache -------------------------------------------------------
+
+TEST(replay_cache_not_seen_before_record) {
+    DNASampleRateLimiter lim;
+    auto mik = p15::make_mik(0x10);
+    ASSERT(!lim.replay_seen(mik, 100, 1), "unseen (mik,ts,nonce) is not in cache");
+}
+
+TEST(replay_cache_seen_after_record) {
+    DNASampleRateLimiter lim;
+    auto mik = p15::make_mik(0x11);
+    lim.replay_record(mik, 100, 1, 1700000000ULL);
+    ASSERT(lim.replay_seen(mik, 100, 1), "recorded (mik,ts,nonce) must be seen");
+    ASSERT(!lim.replay_seen(mik, 100, 2), "different nonce not seen");
+    ASSERT(!lim.replay_seen(mik, 101, 1), "different ts not seen");
+}
+
+TEST(replay_cache_expires_after_ttl) {
+    DNASampleRateLimiter lim;
+    auto mik = p15::make_mik(0x12);
+    lim.replay_record(mik, 100, 42, 1700000000ULL);
+    ASSERT(lim.replay_seen(mik, 100, 42), "seen at record time");
+    // After record: entry expires at now_sec + REPLAY_TTL_SEC (1700000000 + 600)
+    // A later record at a time past that will prune the expired entry.
+    lim.replay_record(mik, 200, 99, 1700000000ULL + DNASampleRateLimiter::REPLAY_TTL_SEC + 1);
+    ASSERT(!lim.replay_seen(mik, 100, 42), "original entry pruned after TTL");
+    ASSERT(lim.replay_seen(mik, 200, 99), "new entry still present");
+}
+
+// ---- Staged rate-limiter APIs ------------------------------------------
+
+TEST(staged_consume_peer_bucket_caps_at_burst) {
+    DNASampleRateLimiter lim;
+    // Peer 1 starts at full burst = 5 tokens. Staged API caps at burst.
+    for (int i = 0; i < static_cast<int>(DNASampleRateLimiter::PEER_BUCKET_BURST); ++i) {
+        ASSERT(lim.consume_peer_bucket(1, 1000), "burst consume");
+    }
+    ASSERT(!lim.consume_peer_bucket(1, 1000), "6th consume in same second must fail");
+}
+
+TEST(staged_peer_bucket_refills_over_time) {
+    DNASampleRateLimiter lim;
+    // Drain all 5 tokens.
+    for (int i = 0; i < static_cast<int>(DNASampleRateLimiter::PEER_BUCKET_BURST); ++i) {
+        lim.consume_peer_bucket(1, 1000);
+    }
+    // One refill tick is PEER_BUCKET_REFILL_SEC.
+    ASSERT(lim.consume_peer_bucket(1, 1000 + DNASampleRateLimiter::PEER_BUCKET_REFILL_SEC),
+           "one refill after refill-sec should allow one consume");
+}
+
+TEST(staged_check_mik_limits_is_non_mutating) {
+    DNASampleRateLimiter lim;
+    auto mik = p15::make_mik(0x20);
+    // Fresh MIK — both layers pass. Call twice: idempotent / non-mutating.
+    ASSERT(lim.check_mik_limits(1, mik, 1000), "first check passes");
+    ASSERT(lim.check_mik_limits(1, mik, 1000), "second check still passes (non-mutating)");
+}
+
+TEST(staged_commit_mik_limits_persists) {
+    DNASampleRateLimiter lim;
+    auto mik = p15::make_mik(0x21);
+    ASSERT(lim.check_mik_limits(1, mik, 1000), "initial check passes");
+    lim.commit_mik_limits(1, mik, 1000);
+    // Immediately after commit, per-MIK global should deny for MIK_GLOBAL_MIN_SEC.
+    ASSERT(!lim.check_mik_limits(2, mik, 1001),
+           "different peer within MIK global window must fail");
+    ASSERT(!lim.check_mik_limits(1, mik, 1001),
+           "same peer within MIK-per-peer window must fail");
+    // After MIK_GLOBAL_MIN_SEC + 1, a different peer passes the global layer
+    // but still fails MIK-per-peer on peer 1; peer 2 sees fresh state.
+    uint64_t later = 1000 + DNASampleRateLimiter::MIK_GLOBAL_MIN_SEC + 1;
+    ASSERT(lim.check_mik_limits(2, mik, later),
+           "different peer after global min passes");
+}
+
+TEST(staged_allow_still_works_for_phase_1_callers) {
+    // Regression: the atomic allow() / allow_detail() path must still be intact
+    // after the split-API refactor so Phase 1.1 merge-fill callers don't break.
+    DNASampleRateLimiter lim;
+    auto mik = p15::make_mik(0x22);
+    ASSERT(lim.allow(1, mik, 1000), "first allow accepts");
+    ASSERT(!lim.allow(1, mik, 1001), "same peer within window rejects");
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
 int main() {
-    std::cout << "\n" << YELLOW_ << "=== DNA Propagation Phase 1 + 1.1 Tests ===" << RESET_ << "\n" << std::endl;
+    std::cout << "\n" << YELLOW_ << "=== DNA Propagation Phase 1 + 1.1 + 1.5 Tests ===" << RESET_ << "\n" << std::endl;
 
     test_append_sample_unregistered_registers_wrapper();
     test_append_sample_enriches_and_archives_wrapper();
@@ -562,6 +890,37 @@ int main() {
     test_discovery_source_dil_empty_cooldown_tracker_returns_registry_miks_wrapper();
     test_discovery_source_union_dedupes_overlap_wrapper();
     test_dna_registry_db_get_all_miks_returns_stored_miks_wrapper();
+
+    // Phase 1.5 envelope tests
+    test_envelope_sign_verify_roundtrip_wrapper();
+    test_envelope_verify_rejects_tampered_signature_wrapper();
+    test_envelope_verify_rejects_tampered_dna_data_wrapper();
+    test_envelope_verify_rejects_wrong_mik_wrapper();
+
+    test_envelope_tryparse_empty_returns_none_wrapper();
+    test_envelope_tryparse_unknown_magic_is_silent_ignore_wrapper();
+    test_envelope_tryparse_truncated_magic_is_malformed_wrapper();
+    test_envelope_tryparse_truncated_timestamp_wrapper();
+    test_envelope_tryparse_truncated_nonce_wrapper();
+    test_envelope_tryparse_truncated_sig_len_wrapper();
+    test_envelope_tryparse_siglen_zero_is_malformed_wrapper();
+    test_envelope_tryparse_wrong_sig_len_wrapper();
+    test_envelope_tryparse_sig_len_gt_remaining_wrapper();
+    test_envelope_tryparse_trailing_bytes_after_sig_wrapper();
+    test_envelope_tryparse_duplicate_magic_wrapper();
+    test_envelope_tryparse_valid_roundtrip_via_towire_wrapper();
+
+    // Phase 1.5 replay cache tests
+    test_replay_cache_not_seen_before_record_wrapper();
+    test_replay_cache_seen_after_record_wrapper();
+    test_replay_cache_expires_after_ttl_wrapper();
+
+    // Phase 1.5 staged rate-limiter API tests
+    test_staged_consume_peer_bucket_caps_at_burst_wrapper();
+    test_staged_peer_bucket_refills_over_time_wrapper();
+    test_staged_check_mik_limits_is_non_mutating_wrapper();
+    test_staged_commit_mik_limits_persists_wrapper();
+    test_staged_allow_still_works_for_phase_1_callers_wrapper();
 
     std::cout << "\n" << YELLOW_ << "=== Results ===" << RESET_ << std::endl;
     std::cout << GREEN_ << "Passed: " << g_tests_passed << RESET_ << std::endl;

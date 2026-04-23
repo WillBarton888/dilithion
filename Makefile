@@ -190,7 +190,9 @@ DIGITAL_DNA_SOURCES := src/digital_dna/digital_dna.cpp \
                        src/digital_dna/trust_score.cpp \
                        src/digital_dna/dna_verification.cpp \
                        src/digital_dna/verification_manager.cpp \
-                       src/digital_dna/sample_rate_limiter.cpp
+                       src/digital_dna/sample_rate_limiter.cpp \
+                       src/digital_dna/sample_envelope.cpp \
+                       src/digital_dna/mik_pubkey_cache.cpp
 
 # VDF (Verifiable Delay Function) sources - uses chiavdf class group VDF
 VDF_SOURCES := src/vdf/vdf.cpp \
