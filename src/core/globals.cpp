@@ -42,21 +42,27 @@ struct NodeState {
 
 NodeState g_node_state;
 
-// BUG #278 FIX: MIK registration PoW cache — shared between dilithion-node.cpp and server.cpp
-// Defined here so all link targets (dilithion-node, dilv-node, genesis_gen, check-wallet-balance) resolve them
-uint64_t g_regCachedNonce = 0;
-std::atomic<bool> g_regNonceMined{false};
-std::atomic<bool> g_regPowInProgress{false};
-DFMP::Identity g_regNonceIdentity;
+// v4.0.18: MIK registration is now owned by CRegistrationManager. The old
+// g_regCachedNonce / g_regNonceMined / g_regPowInProgress / g_regNonceIdentity
+// / g_cachedAttestations / g_attestationsCollected / g_cachedDnaHash /
+// g_dnaHashCached globals have been removed — they were the race-condition
+// anchor point for Zach's-friend-style registration failures.
+//
+// Both the miner loop (dilithion-node.cpp / dilv-node.cpp) and the RPC
+// server (rpc/server.cpp) now reach the single live CRegistrationManager
+// via the accessor below. The accessor is set once in main() after the
+// manager is constructed; it returns nullptr in genesis_gen and
+// check-wallet-balance (which don't have a manager).
 
-// Phase 2+3: Cached seed attestations (collected before registration PoW, embedded in coinbase)
-Attestation::CAttestationSet g_cachedAttestations;
-std::atomic<bool> g_attestationsCollected{false};
+class CRegistrationManager;  // forward decl — avoids pulling node/registration_manager.h into utility link targets
 
-// Cached DNA hash for registration (DNA → attestation → PoW all use same hash)
-// Shared between dilithion-node.cpp and server.cpp so RPC startmining can bind DNA to PoW.
-std::array<uint8_t, 32> g_cachedDnaHash{};
-std::atomic<bool> g_dnaHashCached{false};
+static CRegistrationManager* s_registrationManagerGlobal = nullptr;
+void SetRegistrationManager(CRegistrationManager* mgr) {
+    s_registrationManagerGlobal = mgr;
+}
+CRegistrationManager* GetRegistrationManager() {
+    return s_registrationManagerGlobal;
+}
 
 // Data directory of the running node. Set in main() so utilities like the MIK
 // registration file persistence can find the right location without threading

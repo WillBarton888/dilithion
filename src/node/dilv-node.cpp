@@ -781,6 +781,7 @@ static std::mutex g_coinbaseMutex;
 // The old s_cachedRegNonce / s_regNonceMined / s_cachedDnaHash / s_cachedAttestations
 // file-scope statics have been removed — they were the race-condition anchor point.
 static std::unique_ptr<CRegistrationManager> s_registrationManager;
+void SetRegistrationManager(CRegistrationManager* mgr);  // defined in globals.cpp
 
 // DilV data directory for MIK registration persistence (set in main before PoW).
 extern std::string g_datadir;
@@ -801,6 +802,8 @@ static void EnsureRegistrationManagerInitialized(CWallet& wallet) {
         Dilithion::g_chainParams->dnaCommitmentActivationHeight,
         Dilithion::g_chainParams->seedAttestationActivationHeight);
     s_registrationManager = std::make_unique<CRegistrationManager>(std::move(env));
+    // Publish to the global accessor so rpc/server.cpp sees the same instance.
+    SetRegistrationManager(s_registrationManager.get());
 }
 
 /**
