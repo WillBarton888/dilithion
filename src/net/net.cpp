@@ -339,7 +339,7 @@ bool CNetMessageProcessor::ProcessMessage(int peer_id, const CNetMessage& messag
         {"dnabwtest",  {20, 1048596}},                 // nonce(8) + size(4) + send_wall_ms(8) + payload(0..1MB)
         {"dnabwres",   {24, 24}},                      // nonce(8) + upload(8) + download(8)
         {"dnaireq",    {20, 20}},                      // mik_identity(20)
-        {"dnaires",    {21, 4117}},                    // mik(20) + found(1) [+ data_len(2) + data(max ~4KB)]
+        {"dnaires",    {21, 8192}},                    // mik(20) + found(1) [+ data_len(2) + data(max 4096)] [+ SMP1 trailer: magic(4)+ts(8)+nonce(8)+sig_len(2)+sig(3309)=3331]
         // Phase 2: DNA Verification & Attestation
         {"dnavchall",  {92, 8192}},                    // Minimum challenge size 92 bytes
         {"dnavresp",   {70, 8192}},                    // Minimum response size 70 bytes
@@ -2666,8 +2666,36 @@ bool CNetMessageProcessor::ProcessDNAIdentResMessage(int peer_id, CDataStream& s
             stream.read(dna_data.data(), data_len);
         }
 
+        // Phase 1.5: parse optional SMP1 trailer. The trailer starts at the
+        // byte immediately after dna_data (or after the `found` byte if
+        // found==0). Trailer parse MUST NOT inspect bytes inside dna_data —
+        // the offset rule prevents dual-interpretation of DNA bytes.
+        std::vector<uint8_t> trailer_bytes;
+        if (stream.size() > 0) {
+            trailer_bytes.resize(stream.size());
+            stream.read(trailer_bytes.data(), trailer_bytes.size());
+        }
+
+        digital_dna::SampleEnvelope envelope;
+        auto parse_result = digital_dna::SampleEnvelope::TryParse(trailer_bytes, envelope);
+
+        // found=0 + SMP1 trailer is spec-violating (a sig without data is
+        // meaningless) — reject with misbehaviour.
+        if (parse_result == digital_dna::SampleEnvelope::ParseResult::SIGNED &&
+            found != 0x01) {
+            peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INVALID_MESSAGE_SIZE);
+            return false;
+        }
+        // MALFORMED SMP1 trailer — attacker or buggy sender. Penalise.
+        if (parse_result == digital_dna::SampleEnvelope::ParseResult::MALFORMED) {
+            peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INVALID_MESSAGE_SIZE);
+            return false;
+        }
+        // UNKNOWN_MAGIC or NONE — envelope stays empty/unsigned, no penalty.
+        // The handler routes unsigned messages through the merge-fill path.
+
         if (on_dna_ident_res) {
-            on_dna_ident_res(peer_id, mik, found == 0x01, dna_data);
+            on_dna_ident_res(peer_id, mik, found == 0x01, dna_data, envelope);
         }
         return true;
     } catch (...) {
@@ -2686,7 +2714,9 @@ CNetMessage CNetMessageProcessor::CreateDNAIdentReqMessage(const std::array<uint
 
 CNetMessage CNetMessageProcessor::CreateDNAIdentResMessage(
     const std::array<uint8_t, 20>& mik, bool found,
-    const std::vector<uint8_t>& dna_data)
+    const std::vector<uint8_t>& dna_data,
+    const digital_dna::SampleEnvelope* envelope,
+    int peer_version)
 {
     CDataStream stream;
     stream.write(mik.data(), 20);
@@ -2696,6 +2726,21 @@ CNetMessage CNetMessageProcessor::CreateDNAIdentResMessage(
         stream.WriteUint16(data_len);
         stream.write(dna_data.data(), data_len);
     }
+
+    // Phase 1.5: append SMP1 trailer iff (a) caller supplied a signed
+    // envelope AND (b) peer version meets the minimum. Sending a trailer to
+    // an older peer would trip the old {21, 4117} payload cap and trigger
+    // misbehaviour scoring on that peer. Silent fallback to unsigned keeps
+    // a single sender call-site safe across a mixed-version network.
+    if (envelope != nullptr &&
+        !envelope->signature.empty() &&
+        peer_version >= NetProtocol::DNA_SMP1_MIN_PROTOCOL_VERSION) {
+        auto trailer = envelope->ToWireBytes();
+        if (!trailer.empty()) {
+            stream.write(trailer.data(), trailer.size());
+        }
+    }
+
     g_network_stats.messages_sent++;
     g_network_stats.bytes_sent += 24 + stream.size();
     return CNetMessage("dnaires", stream.GetData());

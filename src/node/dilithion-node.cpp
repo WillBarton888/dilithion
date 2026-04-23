@@ -326,21 +326,63 @@ static digital_dna::DNASampleRateLimiter g_dna_sample_limiter;
 // Helper: broadcast a DNA sample to all connected peers via dnaires.
 // Extracted from the initial-registration path so both that path and the
 // progressive-enrichment path can keep the network converged.
+//
+// Phase 1.5: if the wallet has a MIK whose identity matches the DNA's MIK,
+// the broadcast is signed with a fresh (timestamp, nonce) envelope. The
+// trailer is only emitted to peers at protocol version >=
+// DNA_SMP1_MIN_PROTOCOL_VERSION — older peers receive the pre-1.5 payload
+// shape to avoid tripping their smaller size gate.
 static void BroadcastDNASample(const digital_dna::DigitalDNA& dna) {
     if (!g_node_context.connman || !g_node_context.message_processor) return;
     if (dna.mik_identity == std::array<uint8_t, 20>{}) return;
     auto dna_data = dna.serialize();
-    auto msg = g_node_context.message_processor->CreateDNAIdentResMessage(
-        dna.mik_identity, true, dna_data);
-    auto nodes = g_node_context.connman->GetNodes();
-    int sent = 0;
-    for (auto* n : nodes) {
-        if (n && n->IsConnected()) {
-            g_node_context.connman->PushMessage(n->id, msg);
-            ++sent;
+
+    // Attempt to sign. Seeds with no wallet-managed MIK fall back to unsigned.
+    digital_dna::SampleEnvelope envelope;
+    bool have_signed = false;
+    if (g_node_context.wallet && g_node_context.wallet->HasMIK()) {
+        const auto* mik_key = g_node_context.wallet->GetMIKKeyPtr();
+        if (mik_key && mik_key->HasPrivateKey()) {
+            // Only sign if the wallet's MIK matches the DNA's MIK.
+            std::array<uint8_t, 20> wallet_mik{};
+            std::memcpy(wallet_mik.data(), mik_key->identity.data, 20);
+            if (wallet_mik == dna.mik_identity) {
+                envelope.timestamp_sec = static_cast<uint64_t>(
+                    std::chrono::duration_cast<std::chrono::seconds>(
+                        std::chrono::system_clock::now().time_since_epoch()).count());
+                std::random_device rd;
+                std::mt19937_64 gen(rd());
+                envelope.nonce = gen();
+                have_signed = digital_dna::SampleEnvelope::Sign(
+                    mik_key->privkey.data(), mik_key->privkey.size(),
+                    dna.mik_identity,
+                    envelope.timestamp_sec, envelope.nonce, dna_data,
+                    envelope.signature);
+            }
         }
     }
-    std::cout << "[DNA] Broadcast identity to " << sent << " peers" << std::endl;
+
+    auto nodes = g_node_context.connman->GetNodes();
+    int sent = 0;
+    int signed_sent = 0;
+    for (auto* n : nodes) {
+        if (!n || !n->IsConnected()) continue;
+        auto msg = g_node_context.message_processor->CreateDNAIdentResMessage(
+            dna.mik_identity, true, dna_data,
+            have_signed ? &envelope : nullptr,
+            n->nVersion);
+        g_node_context.connman->PushMessage(n->id, msg);
+        ++sent;
+        if (have_signed && n->nVersion >= NetProtocol::DNA_SMP1_MIN_PROTOCOL_VERSION) {
+            ++signed_sent;
+        }
+    }
+    std::cout << "[DNA] Broadcast identity to " << sent << " peers";
+    if (have_signed) {
+        std::cout << " (" << signed_sent << " signed, "
+                  << (sent - signed_sent) << " unsigned legacy)";
+    }
+    std::cout << std::endl;
 }
 
 // Phase 1.2: Global state now managed via NodeContext
@@ -2467,6 +2509,12 @@ int main(int argc, char* argv[]) {
         }
         std::cout << "  [OK] DFMP subsystem initialized" << std::endl;
 
+        // Phase 1.5: MIK pubkey cache. Reads through to DFMP::g_identityDb
+        // for missing keys; populated by block-connect callbacks for the
+        // hot path. Must be constructed after InitializeDFMP returns.
+        g_node_context.mik_pubkey_cache =
+            std::make_unique<digital_dna::MikPubkeyCache>(DFMP::g_identityDb);
+
         // P1-4 FIX: Initialize Write-Ahead Log for atomic reorganizations
         if (!g_chainstate.InitializeWAL(config.datadir)) {
             if (g_chainstate.RequiresReindex()) {
@@ -4353,33 +4401,53 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         });
 
-        // DNA identity response handler: store received DNA in registry
+        // DNA identity response handler: store received DNA in registry.
+        //
+        // Phase 1.5 staged 6-stage pipeline:
+        //   1. Structural parse — done in ProcessDNAIdentResMessage (net.cpp).
+        //      DNA deserialization + MIK match also happens here below.
+        //   2. Per-peer token bucket — consume before any crypto work.
+        //   3. Route by plausibility — mapped / signed-unmapped / unsigned-unmapped.
+        //   4. Signature verification (signed paths only).
+        //   5. MIK-scoped checks — timestamp skew, replay cache, MIK rate limits.
+        //   6. Accept — append_sample + commit replay + commit MIK limits.
+        //
+        // Silent drops on failure everywhere except stage 1 (structural),
+        // where misbehaviour is already assigned by the parser in net.cpp.
         message_processor.SetDNAIdentResHandler([](int peer_id,
             const std::array<uint8_t, 20>& mik, bool found,
-            const std::vector<uint8_t>& dna_data)
+            const std::vector<uint8_t>& dna_data,
+            const digital_dna::SampleEnvelope& envelope)
         {
             if (!g_node_context.dna_registry) return;
             if (!found || dna_data.empty()) return;
 
+            // Stage 1 continuation — DNA deserialize + MIK match.
             auto dna = digital_dna::DigitalDNA::deserialize(dna_data);
             if (!dna || !dna->is_valid) return;
             if (dna->mik_identity != mik) return;
 
-            // Check by MIK (not address) to match how discovery decides what to request
+            uint64_t now_sec = static_cast<uint64_t>(
+                std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+
+            // Check by MIK (not address) to match how discovery decides what to request.
             auto existing = g_node_context.dna_registry->get_identity_by_mik(mik);
             if (!existing) {
                 // First time seeing this MIK — accept without rate-limiting, as the
                 // miner's initial-registration broadcast establishes the peer_id→MIK
                 // mapping that subsequent samples rely on for plausibility.
+                //
+                // Signed trailer is intentionally ignored on first-registration:
+                // the pubkey may not be in our identity DB yet (if the chain hasn't
+                // processed the registration block) and we'd otherwise reject
+                // legitimate initial broadcasts. Later samples use the registered
+                // pubkey to verify the signed-full-replacement path.
                 auto result = g_node_context.dna_registry->register_identity(*dna);
                 const bool stored =
                     (result == digital_dna::IDNARegistry::RegisterResult::SUCCESS ||
                      result == digital_dna::IDNARegistry::RegisterResult::SYBIL_FLAGGED);
                 if (stored) {
-                    // Set mapping only on successful registration. Never set on
-                    // merge-fill or silent-drop paths below — doing so would let any
-                    // relay forwarding a benign dnaires become "mapped" for a MIK,
-                    // bypassing the skip-crypto trust gate on later full replacements.
                     std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
                     g_mik_peer_map[mik] = peer_id;
                     char hex[9];
@@ -4388,70 +4456,115 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                               << peer_id << " (registry=" << g_node_context.dna_registry->count()
                               << ")" << std::endl;
                 }
-            } else {
-                // DNA Propagation Phase 1: accept enriched sample for already-registered MIK.
-                //   1. Plausibility — sender must be the currently-mapped peer for this MIK
-                //      (established by the initial registration broadcast).
-                //   2. Rate-limit — three layers (per-peer bucket, per-MIK global, per-MIK-per-peer).
-                //   3. append_sample — archives old canonical to history, writes new as canonical,
-                //      with 100-entry history cap and a dim-loss guard.
-                //   Dropped samples are silent (no misbehaviour score) so mixed-version and
-                //   proxy-relay scenarios don't get anyone banned.
-                bool mapped = false;
-                {
-                    std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
-                    auto it = g_mik_peer_map.find(mik);
-                    mapped = (it != g_mik_peer_map.end() && it->second == peer_id);
-                }
-                uint64_t now_sec = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::system_clock::now().time_since_epoch()).count());
-
-                if (mapped) {
-                    // Full-trust path (Phase 1): mapped peer can overwrite any field.
-                    if (g_dna_sample_limiter.allow(peer_id, mik, now_sec)) {
-                        auto result = g_node_context.dna_registry->append_sample(*dna);
-                        if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
-                            result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED) {
-                            char hex[9];
-                            snprintf(hex, sizeof(hex), "%02x%02x%02x%02x",
-                                     mik[0], mik[1], mik[2], mik[3]);
-                            std::cout << "[DNA] Appended sample for MIK " << hex
-                                      << "... from peer " << peer_id << std::endl;
-                        }
-                        // INVALID_DNA (dim-loss) and DB_ERROR are silent — expected under
-                        // mixed-version propagation and transient storage issues.
-                    }
-                } else {
-                    // Phase 1.1 dim-fill path: unmapped peers can fill missing
-                    // dimensions but cannot overwrite existing values. Protects
-                    // data provenance from relay-peer pollution while unblocking
-                    // propagation for the common case (discovery response from a
-                    // peer that happens to have enriched DNA for this MIK).
-                    //
-                    // The mapping is NOT updated here. Unmapped merge-fill is a
-                    // weak-trust path; promoting its sender to mapped status would
-                    // let any relay gain full-replacement authority on subsequent
-                    // messages. The signed-envelope path (Phase 1.5) provides the
-                    // authenticated way for unmapped peers to push full updates.
-                    int filled = 0;
-                    auto merged = digital_dna::merge_fill_missing_dims(*existing, *dna, &filled);
-                    if (filled == 0) {
-                        // Nothing to add — unmapped peer has no new info. Silent drop.
-                    } else if (g_dna_sample_limiter.allow(peer_id, mik, now_sec)) {
-                        auto result = g_node_context.dna_registry->append_sample(merged);
-                        if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
-                            result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED) {
-                            char hex[9];
-                            snprintf(hex, sizeof(hex), "%02x%02x%02x%02x",
-                                     mik[0], mik[1], mik[2], mik[3]);
-                            std::cout << "[DNA] Filled " << filled << " dim(s) for MIK "
-                                      << hex << "... from peer " << peer_id
-                                      << " (unmapped)" << std::endl;
-                        }
-                    }
-                }
+                return;
             }
+
+            // ----- Existing-MIK path: the staged 6-stage pipeline. -----
+
+            // Stage 2: per-peer token bucket. Caps verification work a single
+            // peer can force on us regardless of MIK spread. Silent drop.
+            if (!g_dna_sample_limiter.consume_peer_bucket(peer_id, now_sec)) {
+                return;
+            }
+
+            // Stage 3: route by plausibility.
+            bool mapped = false;
+            {
+                std::lock_guard<std::mutex> lock(g_mik_peer_mutex);
+                auto it = g_mik_peer_map.find(mik);
+                mapped = (it != g_mik_peer_map.end() && it->second == peer_id);
+            }
+            const bool signed_envelope = !envelope.signature.empty();
+
+            // Fast path: mapped + unsigned → full replacement, skip crypto.
+            // This preserves Phase 1 trust for the miner's own connection.
+            if (mapped && !signed_envelope) {
+                if (!g_dna_sample_limiter.check_mik_limits(peer_id, mik, now_sec)) return;
+                auto result = g_node_context.dna_registry->append_sample(*dna);
+                if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
+                    result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED) {
+                    g_dna_sample_limiter.commit_mik_limits(peer_id, mik, now_sec);
+                    char hex[9];
+                    snprintf(hex, sizeof(hex), "%02x%02x%02x%02x",
+                             mik[0], mik[1], mik[2], mik[3]);
+                    std::cout << "[DNA] Appended sample for MIK " << hex
+                              << "... from peer " << peer_id << std::endl;
+                }
+                return;
+            }
+
+            // Merge-fill path: unmapped + unsigned → Phase 1.1 behaviour.
+            if (!mapped && !signed_envelope) {
+                int filled = 0;
+                auto merged = digital_dna::merge_fill_missing_dims(*existing, *dna, &filled);
+                if (filled == 0) return;  // Nothing to add — silent drop.
+                if (!g_dna_sample_limiter.check_mik_limits(peer_id, mik, now_sec)) return;
+                auto result = g_node_context.dna_registry->append_sample(merged);
+                if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
+                    result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED) {
+                    g_dna_sample_limiter.commit_mik_limits(peer_id, mik, now_sec);
+                    char hex[9];
+                    snprintf(hex, sizeof(hex), "%02x%02x%02x%02x",
+                             mik[0], mik[1], mik[2], mik[3]);
+                    std::cout << "[DNA] Filled " << filled << " dim(s) for MIK "
+                              << hex << "... from peer " << peer_id
+                              << " (unmapped)" << std::endl;
+                }
+                return;
+            }
+
+            // Signed path: stage 4 — pubkey lookup + post-hit sanity check + verify.
+            if (!g_node_context.mik_pubkey_cache) return;
+
+            std::vector<uint8_t> pubkey;
+            if (!g_node_context.mik_pubkey_cache->Lookup(mik, pubkey)) {
+                return;  // Unknown MIK; peer may be ahead of our chain. Silent drop.
+            }
+            // Post-hit sanity check: DB must still know this MIK. If a reorg has
+            // dropped it, evict our stale cache entry and silent-drop.
+            if (!g_node_context.mik_pubkey_cache->DbStillHasMIK(mik)) {
+                g_node_context.mik_pubkey_cache->Evict(mik);
+                return;
+            }
+            if (!digital_dna::SampleEnvelope::Verify(
+                    pubkey, mik, envelope.timestamp_sec, envelope.nonce,
+                    dna_data, envelope.signature)) {
+                return;
+            }
+
+            // Stage 5: MIK-scoped checks — skew, replay, MIK rate limits.
+            // Timestamp skew (±600s relative to our wall clock).
+            constexpr uint64_t SKEW_BOUND_SEC = 600;
+            int64_t skew = static_cast<int64_t>(now_sec) -
+                           static_cast<int64_t>(envelope.timestamp_sec);
+            if (skew < -static_cast<int64_t>(SKEW_BOUND_SEC) ||
+                skew >  static_cast<int64_t>(SKEW_BOUND_SEC)) {
+                return;
+            }
+            if (g_dna_sample_limiter.replay_seen(mik, envelope.timestamp_sec, envelope.nonce)) {
+                return;
+            }
+            if (!g_dna_sample_limiter.check_mik_limits(peer_id, mik, now_sec)) {
+                return;
+            }
+
+            // Stage 6: accept — full replacement via append_sample, then commit.
+            auto result = g_node_context.dna_registry->append_sample(*dna);
+            if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
+                result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED) {
+                g_dna_sample_limiter.commit_mik_limits(peer_id, mik, now_sec);
+                g_dna_sample_limiter.replay_record(
+                    mik, envelope.timestamp_sec, envelope.nonce, now_sec);
+                char hex[9];
+                snprintf(hex, sizeof(hex), "%02x%02x%02x%02x",
+                         mik[0], mik[1], mik[2], mik[3]);
+                std::cout << "[DNA] Signed accept for MIK " << hex
+                          << "... from peer " << peer_id
+                          << (mapped ? " (mapped)" : " (unmapped)")
+                          << std::endl;
+            }
+            // INVALID_DNA (dim-loss) and DB_ERROR are silent — expected under
+            // mixed-version propagation and transient storage issues.
         });
 
         // Phase 2: DNA Verification & Attestation P2P handlers
@@ -6185,6 +6298,34 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             }
                                         }
                                     }
+                                }
+                            }
+                        }
+                    }
+
+                    // Phase 1.5: periodic re-broadcast of our own DNA every 15
+                    // minutes, regardless of enrichment. Paired with the signed
+                    // envelope + version-gated send in BroadcastDNASample, this
+                    // keeps the network converged on our current sample without
+                    // requiring a dimension change to trigger broadcast.
+                    // Seeds without a wallet MIK still benefit — the unsigned
+                    // path still propagates via merge-fill on receivers.
+                    {
+                        static auto last_dna_push = std::chrono::steady_clock::now();
+                        auto now_push = std::chrono::steady_clock::now();
+                        auto push_elapsed = std::chrono::duration_cast<std::chrono::minutes>(
+                            now_push - last_dna_push).count();
+                        if (push_elapsed >= 15 &&
+                            g_node_context.dna_registry &&
+                            g_node_context.connman &&
+                            g_node_context.message_processor) {
+                            auto dna_coll_push = g_node_context.GetDNACollector();
+                            if (dna_coll_push) {
+                                auto dna_push = dna_coll_push->get_dna();
+                                if (dna_push &&
+                                    dna_push->mik_identity != std::array<uint8_t, 20>{}) {
+                                    last_dna_push = now_push;
+                                    BroadcastDNASample(*dna_push);
                                 }
                             }
                         }

@@ -32,6 +32,7 @@
 
 #include <array>
 #include <cstdint>
+#include <optional>
 #include <vector>
 
 namespace digital_dna {
@@ -44,6 +45,22 @@ struct SampleEnvelope {
     /// Prevents cross-protocol reuse against MIK block signatures.
     static constexpr char DOMAIN[] = "DNASMP1";
     static constexpr size_t DOMAIN_LEN = 7;  // strlen("DNASMP1")
+
+    /// Result of TryParse — distinguishes unsigned/no-trailer from malformed.
+    enum class ParseResult {
+        /// No trailer bytes present (pre-Phase-1.5 sender).
+        NONE,
+        /// Valid SMP1 trailer parsed into the struct.
+        SIGNED,
+        /// Unknown magic at trailer offset — silent-ignore (forward-compat
+        /// slot for hypothetical future trailer formats like SMP2). Not a
+        /// misbehaviour.
+        UNKNOWN_MAGIC,
+        /// SMP1 magic matched but bytes malformed (truncated fields, bad
+        /// sig_len, duplicate magic, trailing garbage). Peer should be
+        /// penalised — misbehaviour 10 at the caller.
+        MALFORMED,
+    };
 
     uint64_t timestamp_sec = 0;
     uint64_t nonce = 0;
@@ -58,10 +75,13 @@ struct SampleEnvelope {
         const std::vector<uint8_t>& dna_data);
 
     /// Sign a DNA sample. `mik_privkey` must be a valid Dilithium3 secret key
-    /// (`MIK_PRIVKEY_SIZE` bytes). `signature_out` is resized to the signature
+    /// (`MIK_PRIVKEY_SIZE` bytes). Takes raw pointer + length so callers can
+    /// pass keys from secure-allocator containers (e.g. the wallet's
+    /// SecureAllocator-backed privkey) without copying into an unprotected
+    /// `std::vector<uint8_t>`. `signature_out` is resized to the signature
     /// length on success (`MIK_SIGNATURE_SIZE`), cleared on failure.
     /// Returns true iff the signature was produced.
-    static bool Sign(const std::vector<uint8_t>& mik_privkey,
+    static bool Sign(const uint8_t* mik_privkey, size_t mik_privkey_len,
                      const std::array<uint8_t, 20>& mik,
                      uint64_t timestamp,
                      uint64_t nonce,
@@ -79,6 +99,24 @@ struct SampleEnvelope {
                        uint64_t nonce,
                        const std::vector<uint8_t>& dna_data,
                        const std::vector<uint8_t>& signature);
+
+    /// Parse the optional trailer bytes that appear after `dna_data` in a
+    /// `dnaires` payload. `trailer_bytes` is the tail of the payload starting
+    /// at offset `header + data_len` (empty if no bytes remain after the DNA
+    /// blob). The receiver MUST NOT pass bytes from inside `dna_data` here —
+    /// the offset rule is part of Phase 1.5 security (no dual-parse).
+    ///
+    /// On `SIGNED`, the returned envelope is populated and the signature
+    /// field is exactly MIK_SIGNATURE_SIZE bytes (3309). Caller still needs
+    /// to run `Verify()` to check authenticity.
+    static ParseResult TryParse(const std::vector<uint8_t>& trailer_bytes,
+                                SampleEnvelope& out);
+
+    /// Build the trailer byte string for an already-signed envelope. Used
+    /// by the sender to append after `dna_data` when the peer supports
+    /// Phase 1.5. Returns the raw bytes:
+    ///   magic(4) | ts_le(8) | nonce_le(8) | sig_len_le(2) | signature
+    std::vector<uint8_t> ToWireBytes() const;
 };
 
 } // namespace digital_dna

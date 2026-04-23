@@ -11,8 +11,10 @@
 #include <net/bandwidth_throttle.h>  // Network: Bandwidth throttling
 #include <net/partition_detector.h>  // Network: Partition detection
 #include <net/blockencodings.h>      // BIP 152: Compact blocks
+#include <digital_dna/sample_envelope.h>  // Phase 1.5: SMP1 trailer on dnaires
 #include <primitives/block.h>
 #include <primitives/transaction.h>
+#include <array>
 #include <string>
 #include <vector>
 #include <functional>
@@ -55,10 +57,13 @@ public:
         uint64_t nonce, uint64_t send_wall_ms)>;
     using DNABWResultHandler = std::function<void(int peer_id, uint64_t nonce,
         double upload_mbps, double download_mbps)>;
-    // DNA identity propagation: request/response for full DNA data
+    // DNA identity propagation: request/response for full DNA data.
+    // Phase 1.5: receiver handler also gets the parsed SMP1 trailer (envelope
+    // with populated `signature` if signed; empty signature = unsigned/no-trailer).
     using DNAIdentReqHandler = std::function<void(int peer_id, const std::array<uint8_t, 20>& mik)>;
     using DNAIdentResHandler = std::function<void(int peer_id, const std::array<uint8_t, 20>& mik,
-        bool found, const std::vector<uint8_t>& dna_data)>;
+        bool found, const std::vector<uint8_t>& dna_data,
+        const digital_dna::SampleEnvelope& envelope)>;
     // Phase 2: DNA Verification & Attestation handlers
     using DNAVerifyChallengeHandler = std::function<void(int peer_id, const std::vector<uint8_t>& data)>;
     using DNAVerifyResponseHandler = std::function<void(int peer_id, const std::vector<uint8_t>& data)>;
@@ -95,10 +100,18 @@ public:
                                           uint64_t nonce, bool is_response);
     CNetMessage CreateDNABWTestMessage(uint64_t nonce, uint32_t payload_size);
     CNetMessage CreateDNABWResultMessage(uint64_t nonce, double upload_mbps, double download_mbps);
-    // DNA identity propagation messages
+    // DNA identity propagation messages.
+    // Phase 1.5: `peer_version` selects whether to append an SMP1 trailer when
+    // `envelope` is signed. Pass `envelope=nullptr` for unsigned (pre-1.5)
+    // shape; pass a signed envelope + a peer version >= DNA_SMP1_MIN_PROTOCOL_VERSION
+    // to append the trailer. Mixed: signed envelope + too-old peer version
+    // falls back to unsigned silently so a single sender can broadcast to a
+    // mixed-version network without version-gating at every call site.
     CNetMessage CreateDNAIdentReqMessage(const std::array<uint8_t, 20>& mik);
     CNetMessage CreateDNAIdentResMessage(const std::array<uint8_t, 20>& mik, bool found,
-                                          const std::vector<uint8_t>& dna_data);
+                                          const std::vector<uint8_t>& dna_data,
+                                          const digital_dna::SampleEnvelope* envelope = nullptr,
+                                          int peer_version = 0);
     // Phase 2: DNA Verification messages
     CNetMessage CreateDNAVerifyChallengeMessage(const std::vector<uint8_t>& data);
     CNetMessage CreateDNAVerifyResponseMessage(const std::vector<uint8_t>& data);

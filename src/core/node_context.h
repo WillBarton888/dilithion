@@ -41,6 +41,7 @@ class CPeerMIKTracker;   // Sybil defense: block relay source tracking
 #include <digital_dna/dna_registry_db.h>
 #include <digital_dna/trust_score.h>
 #include <digital_dna/verification_manager.h>
+#include <digital_dna/mik_pubkey_cache.h>  // Phase 1.5: MIK -> Dilithium3 pubkey cache
 
 /**
  * NodeContext - Bitcoin Core-style global state management
@@ -96,6 +97,9 @@ struct NodeContext {
     std::unique_ptr<digital_dna::TrustScoreManager> trust_manager;
     // Phase 2: Verification & attestation
     std::unique_ptr<digital_dna::verification::VerificationManager> verification_manager;
+    // Phase 1.5: signed sample envelope — pubkey cache for signature verification.
+    // Populated by block-connect callbacks, read-through fallback to DFMP::g_identityDb.
+    std::unique_ptr<digital_dna::MikPubkeyCache> mik_pubkey_cache;
     // Phase 4: Trust-weighted network — resolves peer_id to trust score
     // Returns 0.0-100.0 if known, -1.0 if unknown (grace period)
     std::function<double(int)> GetPeerTrustScore;

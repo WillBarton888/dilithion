@@ -69,7 +69,7 @@ std::vector<uint8_t> SampleEnvelope::BuildSignTarget(
 }
 
 bool SampleEnvelope::Sign(
-    const std::vector<uint8_t>& mik_privkey,
+    const uint8_t* mik_privkey, size_t mik_privkey_len,
     const std::array<uint8_t, 20>& mik,
     uint64_t timestamp,
     uint64_t nonce,
@@ -77,7 +77,7 @@ bool SampleEnvelope::Sign(
     std::vector<uint8_t>& signature_out)
 {
     signature_out.clear();
-    if (mik_privkey.size() != DFMP::MIK_PRIVKEY_SIZE) {
+    if (mik_privkey == nullptr || mik_privkey_len != DFMP::MIK_PRIVKEY_SIZE) {
         return false;
     }
 
@@ -91,7 +91,7 @@ bool SampleEnvelope::Sign(
         signature_out.data(), &siglen,
         msg.data(), msg.size(),
         nullptr, 0,
-        mik_privkey.data()
+        mik_privkey
     );
 
     if (result != 0 || siglen != DFMP::MIK_SIGNATURE_SIZE) {
@@ -125,6 +125,110 @@ bool SampleEnvelope::Verify(
         mik_pubkey.data()
     );
     return result == 0;
+}
+
+static inline uint64_t read_le64(const uint8_t* p) {
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) {
+        v |= static_cast<uint64_t>(p[i]) << (8 * i);
+    }
+    return v;
+}
+
+static inline uint16_t read_le16(const uint8_t* p) {
+    return static_cast<uint16_t>(p[0]) |
+           (static_cast<uint16_t>(p[1]) << 8);
+}
+
+SampleEnvelope::ParseResult SampleEnvelope::TryParse(
+    const std::vector<uint8_t>& trailer_bytes,
+    SampleEnvelope& out)
+{
+    out = SampleEnvelope{};  // reset
+
+    // No bytes after dna_data — unsigned payload from a pre-1.5 sender.
+    if (trailer_bytes.empty()) {
+        return ParseResult::NONE;
+    }
+
+    // Fewer bytes than the minimum magic length → definitionally malformed
+    // (can't even tell what the magic is). Penalize.
+    if (trailer_bytes.size() < MAGIC.size()) {
+        return ParseResult::MALFORMED;
+    }
+
+    // Magic match check. Unknown magic = forward-compat silent-ignore.
+    if (!std::equal(MAGIC.begin(), MAGIC.end(), trailer_bytes.begin())) {
+        return ParseResult::UNKNOWN_MAGIC;
+    }
+
+    // SMP1 layout: magic(4) | ts_le(8) | nonce_le(8) | sig_len_le(2) | sig
+    constexpr size_t HEADER_SIZE = 4 + 8 + 8 + 2;  // 22 bytes before signature
+    if (trailer_bytes.size() < HEADER_SIZE) {
+        return ParseResult::MALFORMED;  // truncated timestamp/nonce/sig_len
+    }
+
+    size_t off = MAGIC.size();
+    uint64_t ts = read_le64(trailer_bytes.data() + off); off += 8;
+    uint64_t nonce = read_le64(trailer_bytes.data() + off); off += 8;
+    uint16_t sig_len = read_le16(trailer_bytes.data() + off); off += 2;
+
+    size_t remaining = trailer_bytes.size() - off;
+
+    // sig_len = 0 with non-zero trailing bytes — malformed (strict).
+    // sig_len = 0 with zero trailing bytes — malformed too; an unsigned SMP1
+    // trailer is meaningless (spec always pairs SMP1 with a real signature).
+    if (sig_len == 0) {
+        return ParseResult::MALFORMED;
+    }
+
+    // sig_len must match Dilithium3 signature size exactly. Any other size
+    // is a protocol violation — penalize.
+    if (sig_len != DFMP::MIK_SIGNATURE_SIZE) {
+        return ParseResult::MALFORMED;
+    }
+
+    // Signature must fit exactly — no trailing bytes after signature (strict).
+    if (sig_len != remaining) {
+        return ParseResult::MALFORMED;
+    }
+
+    // Scan for a second SMP1 magic inside the trailer region. Parser defense
+    // against ambiguous dual-interpretation: if a second magic occurs inside
+    // the signature bytes (by coincidence or attacker design), that's fine
+    // cryptographically — signature verification will fail or succeed based
+    // on the bytes — but flag it so we don't later interpret those bytes as
+    // a second trailer. The sig is 3309 bytes and the magic is 4 bytes, so
+    // coincidental matches are rare but not zero. Reject to be strict.
+    for (size_t i = 1; i + MAGIC.size() <= trailer_bytes.size(); ++i) {
+        if (std::equal(MAGIC.begin(), MAGIC.end(), trailer_bytes.begin() + i)) {
+            return ParseResult::MALFORMED;
+        }
+    }
+
+    // All structural checks passed — copy the signature and return SIGNED.
+    out.timestamp_sec = ts;
+    out.nonce = nonce;
+    out.signature.assign(trailer_bytes.begin() + off,
+                         trailer_bytes.begin() + off + sig_len);
+    return ParseResult::SIGNED;
+}
+
+std::vector<uint8_t> SampleEnvelope::ToWireBytes() const {
+    std::vector<uint8_t> out;
+    if (signature.size() != DFMP::MIK_SIGNATURE_SIZE) {
+        // Caller error — return empty so sender falls back to unsigned.
+        return out;
+    }
+    out.reserve(MAGIC.size() + 8 + 8 + 2 + signature.size());
+    out.insert(out.end(), MAGIC.begin(), MAGIC.end());
+    append_le64(out, timestamp_sec);
+    append_le64(out, nonce);
+    uint16_t sig_len = static_cast<uint16_t>(signature.size());
+    out.push_back(static_cast<uint8_t>(sig_len & 0xFF));
+    out.push_back(static_cast<uint8_t>((sig_len >> 8) & 0xFF));
+    out.insert(out.end(), signature.begin(), signature.end());
+    return out;
 }
 
 } // namespace digital_dna
