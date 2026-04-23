@@ -239,7 +239,8 @@ NODE_SOURCES := src/node/block_index.cpp \
                 src/node/block_validation_queue.cpp \
                 src/node/validation_watchdog.cpp \
                 src/node/resource_monitor.cpp \
-                src/node/peer_mik_tracker.cpp
+                src/node/peer_mik_tracker.cpp \
+                src/node/registration_manager.cpp
 
 PRIMITIVES_SOURCES := src/primitives/block.cpp \
                       src/primitives/transaction.cpp
@@ -336,6 +337,7 @@ TX_RELAY_TEST_SOURCE := src/test/tx_relay_tests.cpp
 MINING_INTEGRATION_TEST_SOURCE := src/test/mining_integration_tests.cpp
 DFMP_MIK_TEST_SOURCE := src/test/dfmp_mik_tests.cpp
 MIK_REG_PERSIST_TEST_SOURCE := src/test/mik_registration_persistence_tests.cpp
+REGISTRATION_MANAGER_TEST_SOURCE := src/test/registration_manager_tests.cpp
 DNA_PROPAGATION_TEST_SOURCE := src/test/dna_propagation_tests.cpp
 PASSPHRASE_VALIDATOR_TEST_SOURCE := test_passphrase_validator.cpp
 
@@ -496,6 +498,10 @@ dfmp_mik_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/dfmp_mik_tests.o $(DILITHIUM_OBJ
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
 mik_registration_persistence_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/mik_registration_persistence_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+
+registration_manager_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/registration_manager_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
@@ -779,7 +785,7 @@ clean:
 	@echo "$(COLOR_YELLOW)Cleaning build artifacts...$(COLOR_RESET)"
 	@rm -rf $(BUILD_DIR)
 	@rm -f dilithion-node genesis_gen
-	@rm -f phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests
+	@rm -f phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests registration_manager_tests dna_propagation_tests
 	@rm -f test_dilithion
 	@rm -f $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_GREEN)✓ Clean complete$(COLOR_RESET)"

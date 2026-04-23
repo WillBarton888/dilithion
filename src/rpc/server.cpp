@@ -4,6 +4,7 @@
 #include <rpc/server.h>
 #include <rpc/auth.h>
 #include <node/block_processing.h>  // BanMIK/UnbanMIK/ListBannedMIKs
+#include <node/registration_manager.h>  // v4.0.18: CRegistrationManager snapshot accessor
 #include <net/sock.h>
 #include <net/dns.h>
 #include <core/version.h>
@@ -86,20 +87,14 @@ struct NodeState {
 };
 extern NodeState g_node_state;
 
-// BUG #278 FIX: Access cached MIK registration PoW nonce from dilithion-node.cpp
-// Prevents RPC_StartMining from re-mining PoW when it's already cached or in progress
-extern uint64_t g_regCachedNonce;
-extern std::atomic<bool> g_regNonceMined;
-extern std::atomic<bool> g_regPowInProgress;
-extern DFMP::Identity g_regNonceIdentity;
+// v4.0.18: MIK registration is owned by CRegistrationManager. RPC handlers
+// that previously called g_regNonceMined / g_cachedDnaHash etc. now reach the
+// live manager via this accessor (set in main() by dilithion-node / dilv-node).
+class CRegistrationManager;
+CRegistrationManager* GetRegistrationManager();
 
 // Data directory for persisting registration PoW (defined in globals.cpp).
 extern std::string g_datadir;
-
-// Cached DNA hash for registration — defined in globals.cpp
-// Needed so RPC startmining can bind DNA hash to registration PoW.
-extern std::array<uint8_t, 32> g_cachedDnaHash;
-extern std::atomic<bool> g_dnaHashCached;
 
 #ifdef _WIN32
     #include <winsock2.h>
@@ -4541,62 +4536,51 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
 
         std::cout << "[RPC] MIK not registered - will include full pubkey in coinbase" << std::endl;
 
-        // DFMP v3.0: Registration PoW nonce (required at/above v3 activation height)
-        // BUG #278 FIX: Check cached nonce first (from EnsureMIKRegistered or BuildMiningTemplate)
-        // to avoid re-mining and blocking the RPC handler for 10-15 minutes
+        // DFMP v3.0: Registration PoW nonce (required at/above v3 activation height).
+        // v4.0.18: RPC handler now delegates to the live CRegistrationManager instead
+        // of mining inline. This keeps a single source of truth for registration state
+        // (no double-PoW between miner loop and RPC handler) and inherits the manager's
+        // race-safe DNA/attestation/PoW sequencing.
         int dfmpV3Height = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->dfmpV3ActivationHeight : 0;
         if (static_cast<int>(nHeight) >= dfmpV3Height) {
-            uint64_t regNonce = 0;
-            if (g_regNonceMined.load() && g_regNonceIdentity == mikData.identity) {
-                // Cached from startup path — use immediately
-                regNonce = g_regCachedNonce;
-                std::cout << "[RPC] Using cached registration PoW nonce" << std::endl;
-            } else if (g_regPowInProgress.load()) {
-                // Another thread is mining — wait for it
-                std::cout << "[RPC] Registration PoW in progress, waiting for completion..." << std::endl;
-                int wait_sec = 0;
-                while (g_regPowInProgress.load() && g_node_state.running.load()) {
-                    std::this_thread::sleep_for(std::chrono::seconds(1));
-                    wait_sec++;
-                    if (wait_sec % 30 == 0) {
-                        std::cout << "[RPC] Still waiting for registration PoW... (" << wait_sec << "s)" << std::endl;
-                    }
-                    if (wait_sec > 1200) {
-                        throw std::runtime_error("Registration PoW timeout (20 min)");
-                    }
-                }
-                if (g_regNonceMined.load() && g_regNonceIdentity == mikData.identity) {
-                    regNonce = g_regCachedNonce;
-                    std::cout << "[RPC] Registration PoW completed!" << std::endl;
-                } else {
-                    throw std::runtime_error("Registration PoW failed on other thread");
-                }
-            } else {
-                // Not cached and not in progress — mine it ourselves
-                std::cout << "[RPC] Mining registration PoW (one-time, ~10-15 minutes)..." << std::endl;
-                g_regPowInProgress.store(true);
-                int rpBits = Dilithion::g_chainParams ? Dilithion::g_chainParams->registrationPowBits : DFMP::REGISTRATION_POW_BITS;
-                const std::array<uint8_t, 32>* dnaForPow = g_dnaHashCached.load() ? &g_cachedDnaHash : nullptr;
-                if (DFMP::MineRegistrationPoW(mikData.pubkey, rpBits, regNonce, &g_node_state.running, dnaForPow)) {
-                    g_regCachedNonce = regNonce;
-                    g_regNonceIdentity = mikData.identity;
-                    g_regNonceMined.store(true);
-                    g_regPowInProgress.store(false);
-                    // Persist to mik_registration.dat so a restart doesn't waste the PoW.
-                    if (!g_datadir.empty()) {
-                        std::array<uint8_t, 32> dnaHash{};
-                        if (g_dnaHashCached.load()) dnaHash = g_cachedDnaHash;
-                        int64_t now = static_cast<int64_t>(std::time(nullptr));
-                        DFMP::SaveMIKRegistration(g_datadir, mikData.pubkey, dnaHash, regNonce, now);
-                    }
-                    std::cout << "[RPC] Registration PoW complete!" << std::endl;
-                } else {
-                    g_regPowInProgress.store(false);
-                    throw std::runtime_error("Failed to mine registration PoW nonce");
-                }
+            auto* mgr = GetRegistrationManager();
+            if (!mgr) {
+                throw std::runtime_error("Registration manager not initialized");
             }
-            mikData.registrationNonce = regNonce;
+
+            // Poll the manager until it reaches a state that has a valid nonce
+            // (READY / SUBMITTED / CONFIRMED). The manager's worker thread does
+            // the actual DNA + attestation + PoW work; we just wait.
+            using State = CRegistrationManager::State;
+            int wait_sec = 0;
+            while (g_node_state.running.load()) {
+                auto snap = mgr->GetSnapshot();
+                if (snap->hasRegNonce && snap->mikPubkey == mikData.pubkey) {
+                    mikData.registrationNonce = snap->regNonce;
+                    std::cout << "[RPC] Registration PoW ready (nonce from manager snapshot)" << std::endl;
+                    break;
+                }
+                if (snap->state == State::FAILED_FATAL) {
+                    throw std::runtime_error("Registration failed: " + snap->lastError);
+                }
+                if (snap->state == State::LONG_BACKOFF_USER_ACTIONABLE) {
+                    throw std::runtime_error("Registration blocked: " + snap->lastError);
+                }
+                if (wait_sec > 1800) {
+                    throw std::runtime_error("Registration PoW timeout (30 min)");
+                }
+                if (wait_sec % 30 == 0) {
+                    auto status = mgr->GetStatusForUI();
+                    std::cout << "[RPC] Waiting for registration (" << status.phase
+                              << " — " << status.message << ")" << std::endl;
+                }
+                std::this_thread::sleep_for(std::chrono::seconds(1));
+                wait_sec++;
+            }
+            if (!g_node_state.running.load()) {
+                throw std::runtime_error("Node shutting down during registration");
+            }
         }
     }
 

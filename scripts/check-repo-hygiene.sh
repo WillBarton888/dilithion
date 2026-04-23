@@ -89,10 +89,11 @@ ALLOWED_ROOT_FILES=(
   start-miner-gui.sh
   start-mining.sh
 
-  # Seed-node ops
+  # Seed-node ops (relay-only variants — LDN/SGP/SYD. NYC uses its own
+  # top-level /root/run-*-seed.sh which omits --relay-only for bridge)
   restart-seed-node.sh
-  run-dil-seed.sh
-  run-dilv-seed.sh
+  run-dil-seed-relayonly.sh
+  run-dilv-seed-relayonly.sh
 
   # Runtime data (read by node code)
   datacenter-asns.txt

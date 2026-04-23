@@ -1,8 +1,12 @@
 #!/bin/bash
-# Auto-restart wrapper for DIL seed nodes
-# Same as run-dilv-seed.sh but for dilithion-node (DIL chain)
+# Auto-restart wrapper for DIL relay-only seed nodes (LDN/SGP/SYD).
 #
-# Usage: nohup ./run-dil-seed.sh > /root/dil-seed.log 2>&1 &
+# NYC is different: NYC's DIL node loads the bridge wallet and runs WITHOUT
+# --relay-only. Do NOT use this wrapper on NYC — NYC uses a separate
+# top-level script at /root/run-dil-seed.sh that omits --relay-only.
+# See .claude/skills/deploy/SKILL.md for the per-host wrapper matrix.
+#
+# Usage: nohup ./run-dil-seed-relayonly.sh > /root/dil-seed.log 2>&1 &
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 BINARY="$SCRIPT_DIR/dilithion-node"

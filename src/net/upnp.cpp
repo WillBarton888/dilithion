@@ -28,6 +28,7 @@ inline const char* strupnperror(int) { return ""; }
 
 #include <cstdio>
 #include <cstring>
+#include <chrono>
 
 namespace UPnP {
 
@@ -42,11 +43,33 @@ static uint16_t s_mappedPort = 0;
 bool MapPort(uint16_t port, std::string& externalIP) {
     int error = 0;
 
-    // Discover UPnP devices (2 second timeout)
-    s_devlist = upnpDiscover(2000, nullptr, nullptr, 0, 0, 2, &error);
+    // Discover UPnP devices with retry + elapsed-time logging.
+    //
+    // A single 2-second SSDP M-SEARCH was the #1 cause of intermittent
+    // startup failures: many consumer routers need 3-5+ seconds to respond
+    // under load, so we'd miss them on the first burst and give up. Now we
+    // try twice with longer windows and log how long each attempt took so
+    // future failures are diagnosable (was the router slow, or just absent).
+    const int discovery_timeouts_ms[] = {5000, 8000};
+    for (size_t attempt = 0; attempt < sizeof(discovery_timeouts_ms) / sizeof(discovery_timeouts_ms[0]); ++attempt) {
+        auto t_start = std::chrono::steady_clock::now();
+        s_devlist = upnpDiscover(discovery_timeouts_ms[attempt], nullptr, nullptr, 0, 0, 2, &error);
+        auto elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+            std::chrono::steady_clock::now() - t_start).count();
+
+        if (s_devlist) {
+            LogPrintf(NET, INFO, "[UPnP] Discovery succeeded on attempt %zu (elapsed=%ldms, timeout=%dms)\n",
+                      attempt + 1, static_cast<long>(elapsed_ms), discovery_timeouts_ms[attempt]);
+            break;
+        }
+
+        LogPrintf(NET, WARN, "[UPnP] Discovery attempt %zu returned no devices (elapsed=%ldms, timeout=%dms, error=%d)\n",
+                  attempt + 1, static_cast<long>(elapsed_ms), discovery_timeouts_ms[attempt], error);
+    }
+
     if (!s_devlist) {
-        s_lastError = "No UPnP devices found on network";
-        LogPrintf(NET, WARN, "[UPnP] %s (error=%d)\n", s_lastError.c_str(), error);
+        s_lastError = "No UPnP devices found on network after 2 attempts";
+        LogPrintf(NET, WARN, "[UPnP] %s\n", s_lastError.c_str());
         return false;
     }
 
