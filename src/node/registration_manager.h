@@ -320,6 +320,13 @@ public:
      *  logs a reason line. */
     void ForceRestart(const std::string& why);
 
+    /** Called by the block-submission pipeline when a mined registration
+     *  block was rejected by validation. Drives the manager's bounded
+     *  submit-retry budget and falls back to READY or ATTEST_PENDING
+     *  depending on attestation freshness. When the budget is exhausted,
+     *  transitions to LONG_BACKOFF_USER_ACTIONABLE with a diagnostic hint. */
+    void NotifyBlockRejected(const std::string& reason);
+
     // ------------------------------------------------------------------
     // Test hooks — only used by registration_manager_*_tests.cpp
     // ------------------------------------------------------------------

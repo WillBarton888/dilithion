@@ -5535,15 +5535,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
                 g_node_state.new_block_found = true;
             } else {
-                // Block rejected. Notify the RegistrationManager so it can decide
-                // whether to re-collect attestations (SUBMITTED → ATTEST_PENDING) or
-                // retry submission (SUBMITTED → READY). Bounded retry budget inside
-                // the manager prevents infinite re-collect loops.
+                // Block rejected. Notify the RegistrationManager so it can
+                // decide whether to re-collect attestations or retry the
+                // submission. Bounded retry budget inside the manager
+                // prevents infinite re-collect loops; when exhausted it
+                // escalates to LONG_BACKOFF_USER_ACTIONABLE.
                 if (s_registrationManager) {
                     std::cout << "[VDF] Block rejected - notifying registration manager" << std::endl;
-                    s_registrationManager->TestingInjectEvent(
-                        CRegistrationManager::Event::SUBMIT_TIMEOUT_OR_REJECTED,
-                        "block rejected by validation");
+                    s_registrationManager->NotifyBlockRejected("block rejected by validation");
                 }
             }
         });
@@ -6415,34 +6414,39 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                 std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
-                // Ensure MIK identity is registered before mining
-                if (!EnsureMIKRegistered(wallet, current_height + 1)) {
-                    std::cerr << "[Mining] WARNING: MIK registration failed. Mining may not work correctly." << std::endl;
-                }
+                // Ensure MIK identity is registered before mining. If this
+                // fails (wallet locked, seeds unreachable, etc.), do NOT start
+                // vdf_miner — it would just spin on empty templates. The main
+                // loop's RegistrationManager->Tick() will keep driving the
+                // manager; when it reaches READY/CONFIRMED, Handler 1's
+                // CanMine() gate will start the miner automatically.
+                if (EnsureMIKRegistered(wallet, current_height + 1)) {
+                    std::cout << "  [VDF] VDF mining active" << std::endl;
+                    std::cout << "  [VDF] Iterations: " << vdf_iterations << std::endl;
 
-                // DilV: Always VDF mining
-                std::cout << "  [VDF] VDF mining active" << std::endl;
-                std::cout << "  [VDF] Iterations: " << vdf_iterations << std::endl;
-
-                std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
-                if (pubKeyHash.size() >= 20) {
-                    std::array<uint8_t, 20> addr{};
-                    std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
-                    vdf_miner.SetMinerAddress(addr);
-                }
-
-                // Set MIK identity for cooldown tracking (prevents address rotation bypass)
-                {
-                    DFMP::Identity mikId = wallet.GetMIKIdentity();
-                    if (!mikId.IsNull()) {
-                        std::array<uint8_t, 20> mikArr{};
-                        std::memcpy(mikArr.data(), mikId.data, 20);
-                        vdf_miner.SetMIKIdentity(mikArr);
+                    std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                    if (pubKeyHash.size() >= 20) {
+                        std::array<uint8_t, 20> addr{};
+                        std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                        vdf_miner.SetMinerAddress(addr);
                     }
-                }
 
-                vdf_miner.Start();
-                std::cout << "  [OK] VDF mining started (single-threaded, deterministic)" << std::endl;
+                    // Set MIK identity for cooldown tracking (prevents address rotation bypass)
+                    {
+                        DFMP::Identity mikId = wallet.GetMIKIdentity();
+                        if (!mikId.IsNull()) {
+                            std::array<uint8_t, 20> mikArr{};
+                            std::memcpy(mikArr.data(), mikId.data, 20);
+                            vdf_miner.SetMIKIdentity(mikArr);
+                        }
+                    }
+
+                    vdf_miner.Start();
+                    std::cout << "  [OK] VDF mining started (single-threaded, deterministic)" << std::endl;
+                } else {
+                    std::cerr << "[Mining] MIK registration not ready — VDF mining NOT started." << std::endl;
+                    std::cerr << "[Mining] Main loop will retry via RegistrationManager; see manager status." << std::endl;
+                }
             }
         }
 
@@ -6590,29 +6594,33 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                     std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
-                    // Ensure MIK identity is registered before mining
-                    if (!EnsureMIKRegistered(wallet, current_height + 1)) {
-                        std::cerr << "[Mining] WARNING: MIK registration failed. Mining may not work correctly." << std::endl;
-                    }
-
-                    // DilV: Always VDF mining
-                    std::cout << "  [VDF] Starting VDF mining after IBD" << std::endl;
-                    std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
-                    if (pubKeyHash.size() >= 20) {
-                        std::array<uint8_t, 20> addr{};
-                        std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
-                        vdf_miner.SetMinerAddress(addr);
-                    }
-                    {
-                        DFMP::Identity mikId = wallet.GetMIKIdentity();
-                        if (!mikId.IsNull()) {
-                            std::array<uint8_t, 20> mikArr{};
-                            std::memcpy(mikArr.data(), mikId.data, 20);
-                            vdf_miner.SetMIKIdentity(mikArr);
+                    // Ensure MIK identity is registered before mining. If this
+                    // fails (wallet locked, seeds unreachable, etc.), do NOT start
+                    // vdf_miner — Handler 1's CanMine() gate in the main loop
+                    // will start it once RegistrationManager reaches READY.
+                    if (EnsureMIKRegistered(wallet, current_height + 1)) {
+                        std::cout << "  [VDF] Starting VDF mining after IBD" << std::endl;
+                        std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                        if (pubKeyHash.size() >= 20) {
+                            std::array<uint8_t, 20> addr{};
+                            std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                            vdf_miner.SetMinerAddress(addr);
                         }
+                        {
+                            DFMP::Identity mikId = wallet.GetMIKIdentity();
+                            if (!mikId.IsNull()) {
+                                std::array<uint8_t, 20> mikArr{};
+                                std::memcpy(mikArr.data(), mikId.data, 20);
+                                vdf_miner.SetMIKIdentity(mikArr);
+                            }
+                        }
+                        vdf_miner.Start();
+                        mining_deferred_for_ibd = false;
+                    } else {
+                        std::cerr << "[Mining] MIK registration not ready after IBD — VDF mining deferred." << std::endl;
+                        std::cerr << "[Mining] Main loop will retry via RegistrationManager." << std::endl;
+                        mining_deferred_for_ibd = false;  // stop the deferral log spam; Handler 1 takes over
                     }
-                    vdf_miner.Start();
-                    mining_deferred_for_ibd = false;
                 } else if (ibd_progress_counter % 10 == 0) {
                     // Show progress every 10 seconds
                     int height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;

@@ -405,6 +405,63 @@ TEST(submitted_retry_exhaustion_to_long_backoff) {
     ASSERT(!s->userActionHint.empty(), "userActionHint should be populated");
 }
 
+// ---- 2c. SUBMIT_TIMEOUT_OR_REJECTED works from READY (v4.0.18 / PR #23 post-Cursor fix) ----
+// Production flow skips SUBMITTED (we poll HasMIKRegistered instead of emitting
+// TEMPLATE_BUILT_AND_MINER_STARTED). The event must be accepted from READY so
+// the retry budget is actually reachable.
+
+TEST(submit_rejected_from_ready_increments_retries) {
+    auto env = MakeHappyEnv();
+    CRegistrationManager mgr(env);
+    StepUntilState(mgr, CRegistrationManager::State::READY, 10);
+
+    ASSERT_EQ(mgr.GetSnapshot()->submitRetriesUsed, 0, "initial retries should be 0");
+
+    // Inject a rejection directly in READY — production path.
+    mgr.NotifyBlockRejected("synthetic test rejection");
+
+    auto s = mgr.GetSnapshot();
+    ASSERT_EQ(s->submitRetriesUsed, 1, "retry counter should increment from READY");
+    ASSERT(s->state == CRegistrationManager::State::READY,
+           "should remain in READY when attestations still fresh");
+}
+
+// ---- 2d. Public NotifyBlockRejected() is thread-safe + equivalent to event
+//         inject + publishes snapshot -----------------------------------------
+
+TEST(notify_block_rejected_publishes_snapshot_monotonically) {
+    auto env = MakeHappyEnv();
+    CRegistrationManager mgr(env);
+    StepUntilState(mgr, CRegistrationManager::State::READY, 10);
+
+    uint64_t seqBefore = mgr.GetSnapshot()->sequence;
+    mgr.NotifyBlockRejected("snapshot-test");
+    uint64_t seqAfter = mgr.GetSnapshot()->sequence;
+
+    ASSERT(seqAfter > seqBefore, "snapshot sequence must advance after NotifyBlockRejected");
+}
+
+// ---- 1b. READY -> CONFIRMED via polling HasMIKRegistered -------------------
+// Production path: no external REGISTRATION_SEEN_ONCHAIN event; HandleReady_
+// polls env->HasMIKRegistered() on every Tick. When the MIK appears in the
+// identity DB, manager transitions to CONFIRMED.
+
+TEST(ready_to_confirmed_via_poll) {
+    auto env = MakeHappyEnv();
+    CRegistrationManager mgr(env);
+    StepUntilState(mgr, CRegistrationManager::State::READY, 10);
+
+    // Simulate the registration block landing on-chain.
+    env->registeredIdentities.insert({env->mikIdentity->data,
+                                       env->mikIdentity->data + 20});
+
+    // Next worker iteration from READY polls HasMIKRegistered and transitions.
+    mgr.TestingStepWorkerOnce();
+    ASSERT_STATE(mgr, CONFIRMED);
+    ASSERT(!mgr.GetSnapshot()->registrationRequired,
+           "registrationRequired should be false after CONFIRMED");
+}
+
 // ---- 4-6. Shutdown from pending states (no partial persistence) ----------
 
 TEST(shutdown_from_dna_pending_no_persist) {

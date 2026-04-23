@@ -6571,47 +6571,50 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                 std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
-                // Ensure MIK identity is registered before mining
-                // (one-time ~10-15 min PoW for new miners — blocks main thread)
-                if (!EnsureMIKRegistered(wallet, current_height + 1)) {
-                    std::cerr << "[Mining] WARNING: MIK registration failed. Mining may not work correctly." << std::endl;
-                }
+                // Ensure MIK identity is registered before mining. If this
+                // fails (wallet locked, seeds unreachable, etc.), do NOT start
+                // any miner — Handler 1's CanMine() gate in the main loop
+                // will start it once RegistrationManager reaches READY.
+                if (EnsureMIKRegistered(wallet, current_height + 1)) {
+                    if (shouldUseVDF(current_height + 1)) {
+                        // VDF mining mode
+                        std::cout << "  [VDF] VDF mining active (activation height: " << vdf_activation << ")" << std::endl;
+                        std::cout << "  [VDF] Iterations: " << vdf_iterations << std::endl;
 
-                if (shouldUseVDF(current_height + 1)) {
-                    // VDF mining mode
-                    std::cout << "  [VDF] VDF mining active (activation height: " << vdf_activation << ")" << std::endl;
-                    std::cout << "  [VDF] Iterations: " << vdf_iterations << std::endl;
-
-                    // Set miner address from wallet
-                    std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
-                    if (pubKeyHash.size() >= 20) {
-                        std::array<uint8_t, 20> addr{};
-                        std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
-                        vdf_miner.SetMinerAddress(addr);
-                    }
-
-                    vdf_miner.Start();
-                    std::cout << "  [OK] VDF mining started (single-threaded, deterministic)" << std::endl;
-                } else {
-                    // RandomX mining mode
-                    auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
-                    if (!templateOpt) {
-                        // Retry up to 3 times (safety net — registration should already be done)
-                        for (int attempt = 1; attempt <= 3 && !templateOpt; attempt++) {
-                            std::cerr << "[Mining] Template build failed, retrying (" << attempt << "/3)..." << std::endl;
-                            std::this_thread::sleep_for(std::chrono::seconds(1));
-                            templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                        // Set miner address from wallet
+                        std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                        if (pubKeyHash.size() >= 20) {
+                            std::array<uint8_t, 20> addr{};
+                            std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                            vdf_miner.SetMinerAddress(addr);
                         }
+
+                        vdf_miner.Start();
+                        std::cout << "  [OK] VDF mining started (single-threaded, deterministic)" << std::endl;
+                    } else {
+                        // RandomX mining mode
+                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
                         if (!templateOpt) {
-                            std::cerr << "ERROR: Failed to build mining template after retries" << std::endl;
-                            return 1;
+                            // Retry up to 3 times (safety net — registration should already be done)
+                            for (int attempt = 1; attempt <= 3 && !templateOpt; attempt++) {
+                                std::cerr << "[Mining] Template build failed, retrying (" << attempt << "/3)..." << std::endl;
+                                std::this_thread::sleep_for(std::chrono::seconds(1));
+                                templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                            }
+                            if (!templateOpt) {
+                                std::cerr << "ERROR: Failed to build mining template after retries" << std::endl;
+                                return 1;
+                            }
                         }
+
+                        miner.StartMining(*templateOpt);
+
+                        std::cout << "  [OK] RandomX mining started with " << mining_threads << " threads" << std::endl;
+                        std::cout << "  Expected hash rate: ~" << (mining_threads * 65) << " H/s" << std::endl;
                     }
-
-                    miner.StartMining(*templateOpt);
-
-                    std::cout << "  [OK] RandomX mining started with " << mining_threads << " threads" << std::endl;
-                    std::cout << "  Expected hash rate: ~" << (mining_threads * 65) << " H/s" << std::endl;
+                } else {
+                    std::cerr << "[Mining] MIK registration not ready — mining NOT started." << std::endl;
+                    std::cerr << "[Mining] Main loop will retry via RegistrationManager; see manager status." << std::endl;
                 }
             }
         }
@@ -6791,38 +6794,44 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     unsigned int current_height = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
                     std::cout << "  [OK] Current blockchain height: " << current_height << std::endl;
 
-                    // Ensure MIK identity is registered before mining
-                    if (!EnsureMIKRegistered(wallet, current_height + 1)) {
-                        std::cerr << "[Mining] WARNING: MIK registration failed. Mining may not work correctly." << std::endl;
-                    }
-
-                    if (shouldUseVDF(current_height + 1)) {
-                        std::cout << "  [VDF] Starting VDF mining after IBD" << std::endl;
-                        std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
-                        if (pubKeyHash.size() >= 20) {
-                            std::array<uint8_t, 20> addr{};
-                            std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
-                            vdf_miner.SetMinerAddress(addr);
-                        }
-                        vdf_miner.Start();
-                        mining_deferred_for_ibd = false;
-                    } else {
-                        auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
-                        if (!templateOpt) {
-                            // Retry up to 3 times with 1s delays
-                            for (int attempt = 1; attempt <= 3 && !templateOpt; attempt++) {
-                                std::cerr << "[Mining] Template build failed, retrying (" << attempt << "/3)..." << std::endl;
-                                std::this_thread::sleep_for(std::chrono::seconds(1));
-                                templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                    // Ensure MIK identity is registered before mining. If this
+                    // fails (wallet locked, seeds unreachable, etc.), do NOT
+                    // start any miner — Handler 1's CanMine() gate in the
+                    // main loop will start it once RegistrationManager
+                    // reaches READY.
+                    if (EnsureMIKRegistered(wallet, current_height + 1)) {
+                        if (shouldUseVDF(current_height + 1)) {
+                            std::cout << "  [VDF] Starting VDF mining after IBD" << std::endl;
+                            std::vector<uint8_t> pubKeyHash = wallet.GetPubKeyHash();
+                            if (pubKeyHash.size() >= 20) {
+                                std::array<uint8_t, 20> addr{};
+                                std::copy(pubKeyHash.begin(), pubKeyHash.begin() + 20, addr.begin());
+                                vdf_miner.SetMinerAddress(addr);
                             }
-                        }
-                        if (templateOpt) {
-                            miner.StartMining(*templateOpt);
-                            std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
+                            vdf_miner.Start();
                             mining_deferred_for_ibd = false;
                         } else {
-                            std::cerr << "[ERROR] Failed to build mining template after retries!" << std::endl;
+                            auto templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                            if (!templateOpt) {
+                                // Retry up to 3 times with 1s delays
+                                for (int attempt = 1; attempt <= 3 && !templateOpt; attempt++) {
+                                    std::cerr << "[Mining] Template build failed, retrying (" << attempt << "/3)..." << std::endl;
+                                    std::this_thread::sleep_for(std::chrono::seconds(1));
+                                    templateOpt = BuildMiningTemplate(blockchain, wallet, true, config.mining_address_override);
+                                }
+                            }
+                            if (templateOpt) {
+                                miner.StartMining(*templateOpt);
+                                std::cout << "  [OK] Mining started with " << mining_threads << " threads" << std::endl;
+                                mining_deferred_for_ibd = false;
+                            } else {
+                                std::cerr << "[ERROR] Failed to build mining template after retries!" << std::endl;
+                            }
                         }
+                    } else {
+                        std::cerr << "[Mining] MIK registration not ready after IBD — mining deferred." << std::endl;
+                        std::cerr << "[Mining] Main loop will retry via RegistrationManager." << std::endl;
+                        mining_deferred_for_ibd = false;
                     }
                 } else if (ibd_progress_counter % 10 == 0) {
                     // Show progress every 10 seconds

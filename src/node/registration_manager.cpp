@@ -222,6 +222,13 @@ void CRegistrationManager::ForceRestart(const std::string& why) {
     stateCv_.notify_all();
 }
 
+void CRegistrationManager::NotifyBlockRejected(const std::string& reason) {
+    std::lock_guard<std::mutex> lk(stateMutex_);
+    Transition_(Event::SUBMIT_TIMEOUT_OR_REJECTED, reason);
+    PublishSnapshot_();
+    stateCv_.notify_all();
+}
+
 // ============================================================================
 // Test hooks
 // ============================================================================
@@ -463,12 +470,21 @@ void CRegistrationManager::HandlePowPending_() {
 
 void CRegistrationManager::HandleReady_() {
     // READY is a quiescent state. The VDF miner reads our snapshot and mines
-    // a registration template. When it succeeds and submits a block, external
-    // code will call TestingInjectEvent(TEMPLATE_BUILT_AND_MINER_STARTED) or
-    // we'll detect the on-chain registration via TIP_UPDATED.
-    //
-    // Meanwhile, we check that the attestations are still fresh. If they're
-    // about to expire, proactively refresh.
+    // a registration template, then submits the block. We detect on-chain
+    // registration by polling the identity DB — when our MIK appears there,
+    // we transition to CONFIRMED. This matches the reorg-detection poll that
+    // HandleConfirmed_ does, and avoids needing an external
+    // REGISTRATION_SEEN_ONCHAIN event emission from the block pipeline.
+    if (!session_.mikIdentity.IsNull() &&
+        env_->HasMIKRegistered(session_.mikIdentity)) {
+        lastError_.clear();
+        userActionHint_.clear();
+        EnterState_(State::CONFIRMED);
+        return;
+    }
+
+    // Check that attestations are still fresh. If they're about to expire,
+    // proactively refresh so the next registration block doesn't get rejected.
     if (session_.attestations && !env_->IsAttestationFreshEnough(
             *session_.attestations, env_->NowSeconds())) {
         session_.hasValidAttestations = false;
@@ -538,7 +554,13 @@ void CRegistrationManager::Transition_(Event ev, const std::string& detail) {
             if (state_ == State::READY) EnterState_(State::SUBMITTED);
             break;
         case Event::SUBMIT_TIMEOUT_OR_REJECTED: {
-            if (state_ != State::SUBMITTED) break;
+            // v4.0.18: production flow reaches READY and stays there — we
+            // poll HasMIKRegistered() instead of emitting
+            // TEMPLATE_BUILT_AND_MINER_STARTED + REGISTRATION_SEEN_ONCHAIN.
+            // So this event must also be accepted from READY, otherwise the
+            // submit retry budget is unreachable in practice. SUBMITTED is
+            // still valid for test cases that drive the original flow.
+            if (state_ != State::SUBMITTED && state_ != State::READY) break;
             session_.submitRetries++;
             if (session_.submitRetries >= maxSubmitRetries_) {
                 Transition_(Event::SUBMIT_RETRY_BUDGET_EXHAUSTED);
