@@ -43,8 +43,13 @@ struct SampleEnvelope {
 
     /// 7-byte domain separator inside the signed bytes.
     /// Prevents cross-protocol reuse against MIK block signatures.
-    static constexpr char DOMAIN[] = "DNASMP1";
-    static constexpr size_t DOMAIN_LEN = 7;  // strlen("DNASMP1")
+    /// NOTE: named with the SMP1_ prefix (rather than the shorter DOMAIN)
+    /// because macOS's <math.h> defines `DOMAIN` as a preprocessor macro
+    /// (`#define DOMAIN 1`) which clashes with any identifier named DOMAIN
+    /// when sample_envelope.h is transitively included in a TU that also
+    /// includes <math.h>. Linux/Windows do not have this macro.
+    static constexpr char SMP1_DOMAIN[] = "DNASMP1";
+    static constexpr size_t SMP1_DOMAIN_LEN = 7;  // strlen("DNASMP1")
 
     /// Result of TryParse — distinguishes unsigned/no-trailer from malformed.
     enum class ParseResult {
@@ -67,7 +72,7 @@ struct SampleEnvelope {
     std::vector<uint8_t> signature;  // empty = unsigned
 
     /// Build the exact byte string that gets signed/verified.
-    /// sig_msg = DOMAIN || mik(20) || ts_le(8) || nonce_le(8) || SHA3_256(dna_data)
+    /// sig_msg = SMP1_DOMAIN || mik(20) || ts_le(8) || nonce_le(8) || SHA3_256(dna_data)
     static std::vector<uint8_t> BuildSignTarget(
         const std::array<uint8_t, 20>& mik,
         uint64_t timestamp,
