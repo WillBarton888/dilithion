@@ -335,24 +335,18 @@ static void BroadcastDNASample(const digital_dna::DigitalDNA& dna) {
     digital_dna::SampleEnvelope envelope;
     bool have_signed = false;
     if (g_node_context.wallet && g_node_context.wallet->HasMIK()) {
-        const auto* mik_key = g_node_context.wallet->GetMIKKeyPtr();
-        if (mik_key && mik_key->HasPrivateKey()) {
-            std::array<uint8_t, 20> wallet_mik{};
-            std::memcpy(wallet_mik.data(), mik_key->identity.data, 20);
-            if (wallet_mik == dna.mik_identity) {
-                envelope.timestamp_sec = static_cast<uint64_t>(
-                    std::chrono::duration_cast<std::chrono::seconds>(
-                        std::chrono::system_clock::now().time_since_epoch()).count());
-                std::random_device rd;
-                std::mt19937_64 gen(rd());
-                envelope.nonce = gen();
-                have_signed = digital_dna::SampleEnvelope::Sign(
-                    mik_key->privkey.data(), mik_key->privkey.size(),
-                    dna.mik_identity,
-                    envelope.timestamp_sec, envelope.nonce, dna_data,
-                    envelope.signature);
-            }
-        }
+        // Wallet does the privkey decrypt + sign atomically — privkey never
+        // leaves wallet scope. Mirrors the pattern of SignWithMIK. Works for
+        // both unencrypted wallets and encrypted+unlocked wallets.
+        envelope.timestamp_sec = static_cast<uint64_t>(
+            std::chrono::duration_cast<std::chrono::seconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count());
+        std::random_device rd;
+        std::mt19937_64 gen(rd());
+        envelope.nonce = gen();
+        have_signed = g_node_context.wallet->SignDNAEnvelope(
+            dna.mik_identity, envelope.timestamp_sec, envelope.nonce,
+            dna_data, envelope.signature);
     }
 
     auto nodes = g_node_context.connman->GetNodes();
@@ -4163,19 +4157,47 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (!g_dna_sample_limiter.check_mik_limits(peer_id, mik, now_sec)) return;
 
             // Stage 6: accept + commit replay/limits.
-            auto result = g_node_context.dna_registry->append_sample(*dna);
+            // Authoritative-merge with existing record: signed sample's
+            // populated dims overwrite (MIK is authoritative for what they
+            // assert), dims not asserted preserve the receiver's existing
+            // value (preserves network-enriched data the MIK didn't include
+            // in this broadcast). Without this, the dim-loss guard in
+            // append_sample silently rejects signed samples whenever the
+            // receiver has been enriched beyond what the MIK currently
+            // knows.
+            digital_dna::DigitalDNA to_store = digital_dna::merge_authoritative_dims(*existing, *dna);
+
+            // Log every signed-verify-pass with the registry outcome — gives
+            // operators end-to-end observability of the signed Phase 1.5 path
+            // even when the sample doesn't update the registry.
+            auto result = g_node_context.dna_registry->append_sample(to_store);
+            char hex[9];
+            snprintf(hex, sizeof(hex), "%02x%02x%02x%02x",
+                     mik[0], mik[1], mik[2], mik[3]);
+            const char* outcome = "OTHER";
+            switch (result) {
+                case digital_dna::IDNARegistry::RegisterResult::SUCCESS:        outcome = "SUCCESS"; break;
+                case digital_dna::IDNARegistry::RegisterResult::UPDATED:        outcome = "UPDATED"; break;
+                case digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED:    outcome = "DNA_CHANGED"; break;
+                case digital_dna::IDNARegistry::RegisterResult::INVALID_DNA:    outcome = "INVALID_DNA (dim-loss guard)"; break;
+                case digital_dna::IDNARegistry::RegisterResult::ALREADY_REGISTERED: outcome = "ALREADY_REGISTERED"; break;
+                case digital_dna::IDNARegistry::RegisterResult::SYBIL_FLAGGED:  outcome = "SYBIL_FLAGGED"; break;
+                case digital_dna::IDNARegistry::RegisterResult::SYBIL_REJECTED: outcome = "SYBIL_REJECTED"; break;
+                case digital_dna::IDNARegistry::RegisterResult::DB_ERROR:       outcome = "DB_ERROR"; break;
+            }
+            std::cout << "[DNA] Signed accept for MIK " << hex
+                      << "... from peer " << peer_id
+                      << (mapped ? " (mapped)" : " (unmapped)")
+                      << " result=" << outcome
+                      << std::endl;
+            // Commit replay + MIK limits ONLY when the registry actually
+            // accepted the change. INVALID_DNA / DB_ERROR do not consume the
+            // per-MIK rate-limit budget so honest signed pushes can retry.
             if (result == digital_dna::IDNARegistry::RegisterResult::UPDATED ||
                 result == digital_dna::IDNARegistry::RegisterResult::DNA_CHANGED) {
                 g_dna_sample_limiter.commit_mik_limits(peer_id, mik, now_sec);
                 g_dna_sample_limiter.replay_record(
                     mik, envelope.timestamp_sec, envelope.nonce, now_sec);
-                char hex[9];
-                snprintf(hex, sizeof(hex), "%02x%02x%02x%02x",
-                         mik[0], mik[1], mik[2], mik[3]);
-                std::cout << "[DNA] Signed accept for MIK " << hex
-                          << "... from peer " << peer_id
-                          << (mapped ? " (mapped)" : " (unmapped)")
-                          << std::endl;
             }
         });
 
@@ -4573,6 +4595,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // BUG #56 FIX: Full wallet persistence with Bitcoin Core pattern
         CWallet wallet;
         g_node_state.wallet = &wallet;
+        // Phase 1.5: also wire the wallet into NodeContext so BroadcastDNASample
+        // can find the MIK private key for signing. Without this, signed-DNA
+        // broadcasts are silently skipped and Phase 1.5 has no effect on the wire.
+        g_node_context.wallet = &wallet;
         std::string wallet_path = config.datadir + "/wallet.dat";
         bool wallet_loaded = false;
 

@@ -447,6 +447,56 @@ inline DigitalDNA merge_fill_missing_dims(const DigitalDNA& existing,
     return merged;
 }
 
+/**
+ * Phase 1.5: merge an authenticated (signed) sample with the existing
+ * canonical record, treating the signed sample as the source of truth for
+ * any dimension it asserts.
+ *
+ * Per dim:
+ *   - If incoming has the dim populated → use incoming's value (signed
+ *     assertion from the MIK holder is authoritative).
+ *   - Else → keep existing's value (preserves dims the MIK doesn't assert
+ *     this round, which may have been enriched from other peers).
+ *
+ * The merged result always has at least the dim count of `existing`, so the
+ * dim-loss guard in `append_sample` never trips for signed traffic. This
+ * lets a miner who currently collects only a subset of dims still publish
+ * authoritative updates for the ones they DO collect, without losing the
+ * network's accumulated knowledge of the dims they don't.
+ *
+ * Trust-model note: the MIK can update dims they assert, but cannot delete
+ * dims they don't assert. They could already publish wrong values for dims
+ * they assert (no defense against a dishonest MIK on its own data). The
+ * per-dim provenance refinement (which would, for example, defer to the
+ * receiver's own latency/bandwidth measurements over the MIK's claim) is
+ * deferred to a Phase 2 spec with explicit Cursor design review.
+ */
+inline DigitalDNA merge_authoritative_dims(const DigitalDNA& existing,
+                                           const DigitalDNA& incoming) {
+    // Start from incoming. Core dims (latency, timing, identity, address) are
+    // always present on a valid DigitalDNA, so they take incoming's values
+    // unconditionally — that's the "authoritative for what's asserted" rule.
+    DigitalDNA merged = incoming;
+
+    // Optional dims: if incoming didn't assert, fall back to existing.
+    if (!incoming.memory      && existing.memory)      merged.memory      = existing.memory;
+    if (!incoming.clock_drift && existing.clock_drift) merged.clock_drift = existing.clock_drift;
+    if (!incoming.bandwidth   && existing.bandwidth)   merged.bandwidth   = existing.bandwidth;
+    if (!incoming.thermal     && existing.thermal)     merged.thermal     = existing.thermal;
+    if (!incoming.behavioral  && existing.behavioral)  merged.behavioral  = existing.behavioral;
+
+    // Perspective: same predicate as merge_fill_missing_dims uses.
+    bool incoming_has_perspective = (incoming.perspective.total_unique_peers() > 0
+                                     || !incoming.perspective.snapshots.empty());
+    bool existing_has_perspective = (existing.perspective.total_unique_peers() > 0
+                                     || !existing.perspective.snapshots.empty());
+    if (!incoming_has_perspective && existing_has_perspective) {
+        merged.perspective = existing.perspective;
+    }
+
+    return merged;
+}
+
 } // namespace digital_dna
 
 #endif // DILITHION_DIGITAL_DNA_H
