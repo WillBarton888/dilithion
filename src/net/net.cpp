@@ -2645,7 +2645,7 @@ bool CNetMessageProcessor::ProcessDNAIdentReqMessage(int peer_id, CDataStream& s
 
 bool CNetMessageProcessor::ProcessDNAIdentResMessage(int peer_id, CDataStream& stream) {
     try {
-        if (stream.size() < 21) {
+        if (stream.remaining() < 21) {
             peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::TRUNCATED_MESSAGE);
             return false;
         }
@@ -2656,9 +2656,9 @@ bool CNetMessageProcessor::ProcessDNAIdentResMessage(int peer_id, CDataStream& s
         uint8_t found = stream.ReadUint8();
 
         std::vector<uint8_t> dna_data;
-        if (found == 0x01 && stream.size() >= 2) {
+        if (found == 0x01 && stream.remaining() >= 2) {
             uint16_t data_len = stream.ReadUint16();
-            if (data_len > 4096 || stream.size() < data_len) {
+            if (data_len > 4096 || stream.remaining() < data_len) {
                 peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INVALID_MESSAGE_SIZE);
                 return false;
             }
@@ -2669,11 +2669,14 @@ bool CNetMessageProcessor::ProcessDNAIdentResMessage(int peer_id, CDataStream& s
         // Phase 1.5: parse optional SMP1 trailer. The trailer starts at the
         // byte immediately after dna_data (or after the `found` byte if
         // found==0). Trailer parse MUST NOT inspect bytes inside dna_data —
-        // the offset rule prevents dual-interpretation of DNA bytes.
+        // the offset rule prevents dual-interpretation of DNA bytes. Use
+        // `remaining()` not `size()`: `size()` is the buffer total, which
+        // includes already-read bytes; `remaining()` is the unread tail.
         std::vector<uint8_t> trailer_bytes;
-        if (stream.size() > 0) {
-            trailer_bytes.resize(stream.size());
-            stream.read(trailer_bytes.data(), trailer_bytes.size());
+        size_t tail = stream.remaining();
+        if (tail > 0) {
+            trailer_bytes.resize(tail);
+            stream.read(trailer_bytes.data(), tail);
         }
 
         digital_dna::SampleEnvelope envelope;
@@ -2683,11 +2686,17 @@ bool CNetMessageProcessor::ProcessDNAIdentResMessage(int peer_id, CDataStream& s
         // meaningless) — reject with misbehaviour.
         if (parse_result == digital_dna::SampleEnvelope::ParseResult::SIGNED &&
             found != 0x01) {
+            std::cout << "[DNA] Malformed SMP1 trailer from peer " << peer_id
+                      << " (signed trailer with found=0)" << std::endl;
             peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }
         // MALFORMED SMP1 trailer — attacker or buggy sender. Penalise.
+        // The "[DNA] Malformed SMP1 trailer" log line is the rollout-gate
+        // observable referenced in .claude/contracts/dna_phase_1_5.md
+        // (NYC 24h gate: zero of these expected).
         if (parse_result == digital_dna::SampleEnvelope::ParseResult::MALFORMED) {
+            std::cout << "[DNA] Malformed SMP1 trailer from peer " << peer_id << std::endl;
             peer_manager.Misbehaving(peer_id, 10, MisbehaviorType::INVALID_MESSAGE_SIZE);
             return false;
         }

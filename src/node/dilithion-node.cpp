@@ -5149,6 +5149,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             if (!DFMP::g_identityDb->HasMIKPubKey(identity)) {
                                 DFMP::g_identityDb->SetMIKPubKey(identity, mikData.pubkey);
                             }
+                            // Phase 1.5: warm the in-memory pubkey cache from the
+                            // canonical block-connect path so signed-DNA verifies don't
+                            // pay a LevelDB read on first use. Cache is internally
+                            // idempotent on duplicate inserts.
+                            if (g_node_context.mik_pubkey_cache) {
+                                std::array<uint8_t, 20> mikArr{};
+                                std::memcpy(mikArr.data(), identity.data, 20);
+                                g_node_context.mik_pubkey_cache->Insert(mikArr, mikData.pubkey);
+                            }
                         }
 
                         // Update heat tracker
