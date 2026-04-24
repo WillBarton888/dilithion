@@ -40,12 +40,12 @@ std::vector<uint8_t> SampleEnvelope::BuildSignTarget(
 {
     // Total: 7 (domain) + 20 (mik) + 8 (ts) + 8 (nonce) + 32 (SHA3-256) = 75 bytes
     std::vector<uint8_t> msg;
-    msg.reserve(DOMAIN_LEN + mik.size() + 8 + 8 + 32);
+    msg.reserve(SMP1_DOMAIN_LEN + mik.size() + 8 + 8 + 32);
 
     // Domain separator (raw ASCII, no terminator)
     msg.insert(msg.end(),
-               reinterpret_cast<const uint8_t*>(DOMAIN),
-               reinterpret_cast<const uint8_t*>(DOMAIN) + DOMAIN_LEN);
+               reinterpret_cast<const uint8_t*>(SMP1_DOMAIN),
+               reinterpret_cast<const uint8_t*>(SMP1_DOMAIN) + SMP1_DOMAIN_LEN);
 
     // MIK
     msg.insert(msg.end(), mik.begin(), mik.end());
