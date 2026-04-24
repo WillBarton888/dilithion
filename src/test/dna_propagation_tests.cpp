@@ -28,6 +28,10 @@
 #include <digital_dna/sample_envelope.h>
 #include <digital_dna/sample_rate_limiter.h>
 #include <dfmp/mik.h>  // MIK_PRIVKEY_SIZE, MIK_PUBKEY_SIZE, MIK_SIGNATURE_SIZE
+#include <net/net.h>     // CNetMessageProcessor + CNetMessage
+#include <net/peers.h>   // CPeerManager
+#include <net/protocol.h> // PROTOCOL_VERSION constants
+#include <net/serialize.h> // CDataStream
 
 #include <array>
 #include <chrono>
@@ -861,6 +865,226 @@ TEST(staged_allow_still_works_for_phase_1_callers) {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 1.5 — wire-format tests (CreateDNAIdentResMessage version gate +
+//             ProcessDNAIdentResMessage trailer parser)
+// ---------------------------------------------------------------------------
+
+namespace p15wire {
+
+// Helper: scan a payload for the SMP1 magic anywhere after the first
+// (header + data_len) bytes. Used to assert that the version gate either
+// did or did not append the trailer.
+static bool ContainsSMP1MagicAfter(const std::vector<uint8_t>& payload, size_t offset) {
+    if (payload.size() < offset + 4) return false;
+    for (size_t i = offset; i + 4 <= payload.size(); ++i) {
+        if (payload[i] == 'S' && payload[i+1] == 'M' &&
+            payload[i+2] == 'P' && payload[i+3] == '1') {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Build a fake but well-formed envelope (signature is zeros — content
+// doesn't matter for the version-gate test, only its size + presence).
+static digital_dna::SampleEnvelope MakeFakeEnvelope() {
+    digital_dna::SampleEnvelope env;
+    env.timestamp_sec = 1700000000ULL;
+    env.nonce = 0x1234567890abcdefULL;
+    env.signature.assign(DFMP::MIK_SIGNATURE_SIZE, 0xAB);
+    return env;
+}
+
+// Build a minimal dnaires payload (mik + found + len + dna_data) without trailer.
+// dna_data_len bytes of fill 0xCD. Used as a baseline body for the parser tests.
+static std::vector<uint8_t> BuildDnairesBody(const std::array<uint8_t, 20>& mik,
+                                              size_t dna_data_len)
+{
+    std::vector<uint8_t> body;
+    body.insert(body.end(), mik.begin(), mik.end());      // mik(20)
+    body.push_back(0x01);                                  // found = 1
+    body.push_back(static_cast<uint8_t>(dna_data_len & 0xFF));        // len LE lo
+    body.push_back(static_cast<uint8_t>((dna_data_len >> 8) & 0xFF)); // len LE hi
+    for (size_t i = 0; i < dna_data_len; ++i) body.push_back(0xCD);   // dna_data fill
+    return body;
+}
+
+} // namespace p15wire
+
+TEST(create_dnaires_version_gate_emits_no_trailer_for_old_peer) {
+    CPeerManager pm;  // empty datadir is fine for in-memory test
+    CNetMessageProcessor processor(pm);
+
+    auto mik = p15::make_mik(0xA1);
+    auto env = p15wire::MakeFakeEnvelope();
+    std::vector<uint8_t> dna_data(256, 0xCD);
+
+    // Old peer (one less than the SMP1 minimum) — must NOT receive a trailer.
+    int old_version = NetProtocol::DNA_SMP1_MIN_PROTOCOL_VERSION - 1;
+    auto msg_old = processor.CreateDNAIdentResMessage(mik, true, dna_data, &env, old_version);
+
+    // Expected legacy size: 20 (mik) + 1 (found) + 2 (len) + 256 (dna_data) = 279
+    const size_t legacy_size = 20 + 1 + 2 + dna_data.size();
+    ASSERT_EQ(msg_old.payload.size(), legacy_size,
+              "legacy payload size for old peer");
+    ASSERT(!p15wire::ContainsSMP1MagicAfter(msg_old.payload, 0),
+           "old-peer payload must not contain SMP1 magic anywhere");
+}
+
+TEST(create_dnaires_version_gate_emits_trailer_for_new_peer) {
+    CPeerManager pm;
+    CNetMessageProcessor processor(pm);
+
+    auto mik = p15::make_mik(0xA2);
+    auto env = p15wire::MakeFakeEnvelope();
+    std::vector<uint8_t> dna_data(256, 0xCD);
+
+    // New peer at exactly the SMP1 minimum — MUST receive the trailer.
+    int new_version = NetProtocol::DNA_SMP1_MIN_PROTOCOL_VERSION;
+    auto msg_new = processor.CreateDNAIdentResMessage(mik, true, dna_data, &env, new_version);
+
+    const size_t body_size = 20 + 1 + 2 + dna_data.size();
+    ASSERT(msg_new.payload.size() > body_size,
+           "new-peer payload must be larger than legacy (trailer present)");
+    ASSERT(p15wire::ContainsSMP1MagicAfter(msg_new.payload, body_size),
+           "SMP1 magic must appear at trailer offset = header + data_len");
+}
+
+TEST(create_dnaires_no_envelope_never_emits_trailer) {
+    // Sanity: even at a new peer version, omitting the envelope (nullptr)
+    // must produce the legacy unsigned shape — guards the seed-without-MIK case.
+    CPeerManager pm;
+    CNetMessageProcessor processor(pm);
+
+    auto mik = p15::make_mik(0xA3);
+    std::vector<uint8_t> dna_data(128, 0x77);
+
+    auto msg = processor.CreateDNAIdentResMessage(
+        mik, true, dna_data, nullptr,
+        NetProtocol::DNA_SMP1_MIN_PROTOCOL_VERSION);
+
+    const size_t expected = 20 + 1 + 2 + dna_data.size();
+    ASSERT_EQ(msg.payload.size(), expected,
+              "no-envelope path produces legacy payload regardless of peer version");
+}
+
+// ---- ProcessDNAIdentResMessage parser harness ---------------------------
+
+// Captured-state shim — the handler writes here for assertion.
+namespace p15wire {
+struct CapturedRes {
+    bool invoked = false;
+    std::array<uint8_t, 20> mik{};
+    bool found = false;
+    std::vector<uint8_t> dna_data;
+    digital_dna::SampleEnvelope envelope;
+    void clear() { invoked = false; mik = {}; found = false; dna_data.clear(); envelope = {}; }
+};
+static CapturedRes g_captured;
+
+static void Capture(int /*peer_id*/, const std::array<uint8_t, 20>& m, bool f,
+                    const std::vector<uint8_t>& d,
+                    const digital_dna::SampleEnvelope& env) {
+    g_captured.invoked = true;
+    g_captured.mik = m;
+    g_captured.found = f;
+    g_captured.dna_data = d;
+    g_captured.envelope = env;
+}
+} // namespace p15wire
+
+TEST(process_dnaires_unsigned_no_trailer_invokes_handler_no_penalty) {
+    CPeerManager pm;
+    CNetMessageProcessor processor(pm);
+    processor.SetDNAIdentResHandler(p15wire::Capture);
+    p15wire::g_captured.clear();
+
+    auto mik = p15::make_mik(0xB1);
+    auto body = p15wire::BuildDnairesBody(mik, 64);
+    CNetMessage msg("dnaires", body);
+
+    bool ok = processor.ProcessMessage(/*peer_id=*/42, msg);
+    ASSERT(ok, "process must succeed");
+    ASSERT(p15wire::g_captured.invoked, "handler invoked");
+    ASSERT(p15wire::g_captured.envelope.signature.empty(),
+           "no trailer => empty signature on envelope");
+    ASSERT_EQ(p15wire::g_captured.dna_data.size(), (size_t)64, "dna_data round-trips");
+}
+
+TEST(process_dnaires_unknown_magic_silent_ignore_no_penalty) {
+    CPeerManager pm;
+    CNetMessageProcessor processor(pm);
+    processor.SetDNAIdentResHandler(p15wire::Capture);
+    p15wire::g_captured.clear();
+
+    auto mik = p15::make_mik(0xB2);
+    auto body = p15wire::BuildDnairesBody(mik, 32);
+    // Append an unknown 4-byte magic + zero filler at the trailer offset.
+    body.insert(body.end(), {'X', 'X', 'X', 'X', 0, 0, 0, 0, 0, 0, 0, 0});
+    CNetMessage msg("dnaires", body);
+
+    // Forward-compat rule: unknown magic at trailer offset must NOT misbehave.
+    bool ok = processor.ProcessMessage(/*peer_id=*/43, msg);
+    ASSERT(ok, "unknown magic must succeed without penalty");
+    ASSERT(p15wire::g_captured.invoked, "handler invoked even with unknown trailer");
+    ASSERT(p15wire::g_captured.envelope.signature.empty(),
+           "unknown trailer => envelope stays unsigned");
+}
+
+TEST(process_dnaires_signed_roundtrip_populates_envelope) {
+    CPeerManager pm;
+    CNetMessageProcessor processor(pm);
+    processor.SetDNAIdentResHandler(p15wire::Capture);
+    p15wire::g_captured.clear();
+
+    auto mik = p15::make_mik(0xB3);
+    auto kp = p15::make_keypair();
+    std::vector<uint8_t> dna(96, 0xCD);
+
+    digital_dna::SampleEnvelope env;
+    env.timestamp_sec = 1700000123ULL;
+    env.nonce = 0xDEADBEEFCAFE0001ULL;
+    ASSERT(digital_dna::SampleEnvelope::Sign(
+               kp.privkey.data(), kp.privkey.size(), mik,
+               env.timestamp_sec, env.nonce, dna, env.signature),
+           "sign sample for parser test");
+
+    // Build body: mik + found + len + dna + SMP1 trailer.
+    auto body = p15wire::BuildDnairesBody(mik, dna.size());
+    // Replace dna_data fill with the actual dna bytes used for signing.
+    std::copy(dna.begin(), dna.end(), body.begin() + 20 + 1 + 2);
+    auto trailer = env.ToWireBytes();
+    body.insert(body.end(), trailer.begin(), trailer.end());
+
+    CNetMessage msg("dnaires", body);
+    bool ok = processor.ProcessMessage(/*peer_id=*/44, msg);
+    ASSERT(ok, "signed dnaires must parse");
+    ASSERT(p15wire::g_captured.invoked, "handler invoked");
+    ASSERT_EQ(p15wire::g_captured.envelope.timestamp_sec, env.timestamp_sec, "ts roundtrip");
+    ASSERT_EQ(p15wire::g_captured.envelope.nonce, env.nonce, "nonce roundtrip");
+    ASSERT_EQ(p15wire::g_captured.envelope.signature.size(),
+              (size_t)DFMP::MIK_SIGNATURE_SIZE, "sig length roundtrip");
+}
+
+TEST(process_dnaires_malformed_smp1_misbehaviour_no_handler_invocation) {
+    CPeerManager pm;
+    CNetMessageProcessor processor(pm);
+    processor.SetDNAIdentResHandler(p15wire::Capture);
+    p15wire::g_captured.clear();
+
+    auto mik = p15::make_mik(0xB4);
+    auto body = p15wire::BuildDnairesBody(mik, 16);
+    // Append SMP1 magic but truncate before the timestamp ends — MALFORMED.
+    body.insert(body.end(), {'S', 'M', 'P', '1', 0x01, 0x02, 0x03});  // only 3 of 8 ts bytes
+    CNetMessage msg("dnaires", body);
+
+    bool ok = processor.ProcessMessage(/*peer_id=*/45, msg);
+    ASSERT(!ok, "malformed SMP1 must reject");
+    ASSERT(!p15wire::g_captured.invoked,
+           "handler must NOT be invoked when parser rejects");
+}
+
+// ---------------------------------------------------------------------------
 // main
 // ---------------------------------------------------------------------------
 
@@ -921,6 +1145,15 @@ int main() {
     test_staged_check_mik_limits_is_non_mutating_wrapper();
     test_staged_commit_mik_limits_persists_wrapper();
     test_staged_allow_still_works_for_phase_1_callers_wrapper();
+
+    // Phase 1.5 follow-up: wire-format and parser harness tests
+    test_create_dnaires_version_gate_emits_no_trailer_for_old_peer_wrapper();
+    test_create_dnaires_version_gate_emits_trailer_for_new_peer_wrapper();
+    test_create_dnaires_no_envelope_never_emits_trailer_wrapper();
+    test_process_dnaires_unsigned_no_trailer_invokes_handler_no_penalty_wrapper();
+    test_process_dnaires_unknown_magic_silent_ignore_no_penalty_wrapper();
+    test_process_dnaires_signed_roundtrip_populates_envelope_wrapper();
+    test_process_dnaires_malformed_smp1_misbehaviour_no_handler_invocation_wrapper();
 
     std::cout << "\n" << YELLOW_ << "=== Results ===" << RESET_ << std::endl;
     std::cout << GREEN_ << "Passed: " << g_tests_passed << RESET_ << std::endl;
