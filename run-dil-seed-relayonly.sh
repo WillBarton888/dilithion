@@ -1,4 +1,11 @@
 #!/bin/bash
+# Raise fd limit from the default 1024 so the node can absorb connection
+# surges without hitting EMFILE. A 2026-04-21 SYN flood on port 8444 hit
+# the 1024 limit on NYC and stalled a user tx for 37 min because miners
+# couldn't connect to fetch it. 65536 matches the hard ulimit on the
+# droplets and the LimitNOFILE in the (currently unused) systemd units.
+ulimit -n 65536
+
 # Auto-restart wrapper for DIL relay-only seed nodes (LDN/SGP/SYD).
 #
 # NYC is different: NYC's DIL node loads the bridge wallet and runs WITHOUT
