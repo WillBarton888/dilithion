@@ -7,6 +7,7 @@
 #include <wallet/wal_recovery.h>  // PERSIST-008 FIX
 #include <crypto/sha3.h>
 #include <crypto/hmac_sha3.h>  // FIX-011: For file integrity HMAC
+#include <digital_dna/sample_envelope.h>  // Phase 1.5: SignDNAEnvelope
 #include <rpc/auth.h>  // FIX-011/FIX-012: For SecureCompare
 #include <util/base58.h>
 #include <node/utxo_set.h>
@@ -5236,6 +5237,41 @@ bool CWallet::SignWithMIK(const uint256& prevHash, int height, uint32_t timestam
 
         return m_mik->Sign(prevHash, height, timestamp, signature);
     }
+}
+
+bool CWallet::SignDNAEnvelope(const std::array<uint8_t, 20>& mik,
+                              uint64_t timestamp_sec,
+                              uint64_t nonce,
+                              const std::vector<uint8_t>& dna_data,
+                              std::vector<uint8_t>& signature_out) {
+    std::lock_guard<std::mutex> lock(cs_wallet);
+    signature_out.clear();
+
+    if (!fHasMIK) return false;
+
+    // Verify the requested MIK matches our wallet's MIK identity. Reject
+    // attempts to sign for a different MIK (would always fail crypto verify
+    // anyway, but reject early to avoid leaking the privkey to a no-op).
+    if (std::memcmp(mik.data(), m_mikIdentity.data, 20) != 0) return false;
+
+    // Encrypted wallet: decrypt privkey, sign, wipe on scope exit.
+    if (masterKey.IsValid()) {
+        if (!fWalletUnlocked) return false;  // locked — cannot decrypt
+
+        std::vector<uint8_t, SecureAllocator<uint8_t>> privkey;
+        if (!DecryptMIKPrivKey(privkey)) return false;
+        bool ok = digital_dna::SampleEnvelope::Sign(
+            privkey.data(), privkey.size(),
+            mik, timestamp_sec, nonce, dna_data, signature_out);
+        // privkey wiped by SecureAllocator destructor here.
+        return ok;
+    }
+
+    // Unencrypted wallet: privkey already in m_mik->privkey.
+    if (!m_mik || !m_mik->HasPrivateKey()) return false;
+    return digital_dna::SampleEnvelope::Sign(
+        m_mik->privkey.data(), m_mik->privkey.size(),
+        mik, timestamp_sec, nonce, dna_data, signature_out);
 }
 
 bool CWallet::IsMIKRegistered() const {

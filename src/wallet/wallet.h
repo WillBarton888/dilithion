@@ -998,8 +998,35 @@ public:
      * Get raw pointer to MIK key (for DNA verification signing)
      *
      * @return Pointer to CMiningIdentityKey, or nullptr if no MIK
+     *
+     * NOTE: returns nullptr for ENCRYPTED wallets even when fHasMIK is true,
+     * because the underlying CMiningIdentityKey is not constructed at load
+     * time — only the public identity hash is. For signing, prefer
+     * GetMIKPrivKey() below, which handles encrypted+unlocked wallets via
+     * decrypt-on-demand (mirrors the SignWithMIK pattern).
      */
     const DFMP::CMiningIdentityKey* GetMIKKeyPtr() const { return m_mik.get(); }
+
+    /**
+     * Sign a DNA sample envelope (Phase 1.5) with the wallet's MIK private
+     * key. Mirrors the SignWithMIK pattern: privkey is decrypted briefly
+     * into a SecureAllocator-backed temporary, used for one signing op,
+     * and wiped on scope exit. The privkey never leaves wallet scope.
+     *
+     * Handles both unencrypted and encrypted+unlocked wallets.
+     *
+     * @param mik           The MIK identity being signed for (must match wallet's MIK)
+     * @param timestamp_sec Wall-clock timestamp embedded in the sign target
+     * @param nonce         Random per-sample nonce for replay defense
+     * @param dna_data      The exact dna_data wire bytes being committed to
+     * @param[out] signature_out  Dilithium3 signature (MIK_SIGNATURE_SIZE bytes on success)
+     * @return true on success, false if: no MIK / wallet locked / mik mismatch / Dilithium failure
+     */
+    bool SignDNAEnvelope(const std::array<uint8_t, 20>& mik,
+                         uint64_t timestamp_sec,
+                         uint64_t nonce,
+                         const std::vector<uint8_t>& dna_data,
+                         std::vector<uint8_t>& signature_out);
 
     // ============================================================================
     // Persistence
