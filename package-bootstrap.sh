@@ -6,19 +6,27 @@
 #  Bootstrap lets new users skip IBD (Initial Block Download).
 #
 #  Usage:
-#    ./package-bootstrap.sh              # mainnet (default)
-#    ./package-bootstrap.sh mainnet      # mainnet
-#    ./package-bootstrap.sh testnet      # testnet
+#    ./package-bootstrap.sh              # DIL mainnet (default)
+#    ./package-bootstrap.sh dil          # DIL mainnet (preferred)
+#    ./package-bootstrap.sh mainnet      # DIL mainnet (backward-compat alias)
+#    ./package-bootstrap.sh testnet      # DIL testnet
 #    ./package-bootstrap.sh dilv         # DilV chain
+#
+#  Output naming (both chains are mainnet; we identify by chain name):
+#    bootstrap-dil-<height>.tar.gz   (DIL chain)
+#    bootstrap-dilv-<height>.tar.gz  (DilV chain)
+#  Pre-v4.0.18 releases used `bootstrap-mainnet-<height>.tar.gz` for DIL;
+#  inconsistent with `bootstrap-dilv-*` since both chains are mainnet.
+#  Renamed to `dil` for symmetry starting v4.0.18.
 ################################################################
 
-NETWORK="${1:-mainnet}"
+NETWORK="${1:-dil}"
 
 case "$NETWORK" in
-    mainnet|main)
+    mainnet|main|dil)
         DATA_DIR="${HOME}/.dilithion"
         RPC_PORT=8332
-        NETWORK_LABEL="mainnet"
+        NETWORK_LABEL="dil"
         ;;
     testnet|test)
         DATA_DIR="${HOME}/.dilithion-testnet"
@@ -31,7 +39,7 @@ case "$NETWORK" in
         NETWORK_LABEL="dilv"
         ;;
     *)
-        echo "Usage: $0 [mainnet|testnet|dilv]"
+        echo "Usage: $0 [dil|mainnet|testnet|dilv]"
         exit 1
         ;;
 esac
