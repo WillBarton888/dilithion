@@ -1482,6 +1482,26 @@ bool CIbdCoordinator::FetchBlocks() {
             if (first_null_hash_height == -1) first_null_hash_height = h;
 
             if (getdata.empty() && m_node_context.headers_manager) {
+                // v4.0.22 throttle: only fire active recovery once per
+                // ACTIVE_RECOVERY_THROTTLE_SECONDS to avoid tight loop when
+                // chain header gap persists across many ticks. Without
+                // throttle, FetchBlocks would call SwitchHeadersSyncPeer on
+                // every tick (~1s), exhausting the peer pool via bad-peer
+                // tracking before headers actually arrive to fill the gap.
+                auto now = std::chrono::steady_clock::now();
+                auto elapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                    now - m_last_active_recovery_time).count();
+                if (elapsed < ACTIVE_RECOVERY_THROTTLE_SECONDS) {
+                    if (g_verbose.load(std::memory_order_relaxed)) {
+                        std::cout << "[IBD] Header chain incomplete at height " << h
+                                  << " -- recovery throttled (last fired " << elapsed
+                                  << "s ago, threshold "
+                                  << ACTIVE_RECOVERY_THROTTLE_SECONDS << "s)." << std::endl;
+                    }
+                    break;
+                }
+                m_last_active_recovery_time = now;
+
                 std::cout << "[IBD] Header chain incomplete at height " << h
                           << " -- triggering active header recovery." << std::endl;
 

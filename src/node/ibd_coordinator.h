@@ -213,6 +213,13 @@ private:
     int m_headers_sync_peer_consecutive_stalls{0};                  // Consecutive stalls for current peer
     static constexpr int MAX_HEADERS_CONSECUTIVE_STALLS = 3;        // Ban peer after N consecutive stalls
 
+    // v4.0.22: Throttle for active header recovery on chain-coherence breaks.
+    // Without throttle, FetchBlocks fires recovery on every tick (~1s) when
+    // chain has a header gap, exhausting peer pool via bad-peer tracking.
+    // 30s throttle gives header sync time to fill the gap before retrying.
+    std::chrono::steady_clock::time_point m_last_active_recovery_time{};
+    static constexpr int ACTIVE_RECOVERY_THROTTLE_SECONDS = 30;
+
     // Blocks sync peer tracking (single peer for block download, different from headers peer)
     int m_blocks_sync_peer{-1};                                     // NodeId of block sync peer (-1 = none)
     int m_blocks_sync_peer_consecutive_timeouts{0};                 // Consecutive 60s timeout cycles without delivery
