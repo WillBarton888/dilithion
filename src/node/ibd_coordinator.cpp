@@ -1518,20 +1518,32 @@ bool CIbdCoordinator::FetchBlocks() {
                 // v4.0.22 Patch F: pass penalize=false to SwitchHeadersSyncPeer
                 // here -- coherence-recovery rotation is NOT a real timeout
                 // stall, so the peer shouldn't be marked bad on every call.
-                // Without this, repeat coherence breaks rotate through all
-                // peers and exhaust the pool (bug observed on SGP).
+                //
+                // v4.0.22 Patch G: pass force=true to SyncHeadersFromPeer.
+                // Without force, the dedup check (peer_height <= m_headers_requested_height)
+                // silently swallows the request. Cursor confirmed this on
+                // 2026-04-25 incident: LDN had ~700 coherence-incomplete
+                // events with ZERO corresponding [SYNCED] Requesting headers
+                // events because dedup blocked every recovery attempt.
+                // Coherence recovery genuinely needs to re-request -- the
+                // missing ancestry won't fill itself. Also reset requested
+                // height before SwitchHeadersSyncPeer so the new peer's
+                // first request isn't deduped either.
+                bool sent = false;
                 if (m_headers_sync_peer != -1 && m_node_context.peer_manager) {
                     auto p = m_node_context.peer_manager->GetPeer(m_headers_sync_peer);
                     int peer_height = p ? (p->best_known_height > 0 ? p->best_known_height
                                                                     : p->start_height) : 0;
                     if (peer_height > 0) {
-                        m_node_context.headers_manager->SyncHeadersFromPeer(m_headers_sync_peer,
-                                                                            peer_height);
-                        m_headers_in_flight = true;
-                    } else {
-                        SwitchHeadersSyncPeer(false);  // coherence recovery, not a stall
+                        sent = m_node_context.headers_manager->SyncHeadersFromPeer(
+                            m_headers_sync_peer, peer_height, /*force=*/true);
+                        if (sent) m_headers_in_flight = true;
                     }
-                } else {
+                }
+                // If current peer didn't deliver (no height info or sync rejected),
+                // reset dedup state and rotate to a different peer.
+                if (!sent) {
+                    m_node_context.headers_manager->SetRequestedHeight(0);
                     SwitchHeadersSyncPeer(false);  // coherence recovery, not a stall
                 }
             } else if (g_verbose.load(std::memory_order_relaxed)) {
@@ -2913,12 +2925,20 @@ void CIbdCoordinator::SwitchHeadersSyncPeer(bool penalize) {
         // a stale m_last_request_hash that the new peer may not recognize.
         m_node_context.headers_manager->ClearPendingSync();
 
+        // v4.0.22 Patch G: also reset the dedup tracker (m_headers_requested_height).
+        // ClearPendingSync only resets the locator hashes, not the dedup tracker.
+        // Without this, the new peer's first SyncHeadersFromPeer call can be
+        // silently swallowed if peer_height <= the previously-requested height.
+        m_node_context.headers_manager->SetRequestedHeight(0);
+
         // SSOT: Request headers via single entry point
         // BUG FIX: Use best_known_height for dynamic peer height
+        // v4.0.22 Patch G: pass force=true so the post-switch request is
+        // guaranteed to send GETHEADERS (paranoid given the dedup history).
         auto new_peer = m_node_context.peer_manager ? m_node_context.peer_manager->GetPeer(m_headers_sync_peer) : nullptr;
         int peer_height = new_peer ? (new_peer->best_known_height > 0 ? new_peer->best_known_height : new_peer->start_height)
                                    : m_node_context.headers_manager->GetPeerStartHeight(m_headers_sync_peer);
-        if (m_node_context.headers_manager->SyncHeadersFromPeer(m_headers_sync_peer, peer_height)) {
+        if (m_node_context.headers_manager->SyncHeadersFromPeer(m_headers_sync_peer, peer_height, /*force=*/true)) {
             m_headers_in_flight = true;
         }
     }
