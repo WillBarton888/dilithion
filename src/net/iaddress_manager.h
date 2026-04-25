@@ -81,13 +81,21 @@ public:
     virtual size_t Size() const = 0;
 
     // ============================================================
-    // Dilithion-specific extension (advisory, NOT consensus)
+    // Note (2026-04-26): MIK hint extension REMOVED per KISS principle
     // ============================================================
-    // When a peer announces a MIK identity hash, AddrMan can record it for
-    // diagnostics + advisory tie-breaking on outbound selection. Purely
-    // optional; Bitcoin Core's AddrMan ignores this entirely.
-    virtual void SetPeerMIKHint(const NetProtocol::CAddress& addr,
-                                const std::vector<uint8_t>& mik_identity) = 0;
+    // The original Phase 0 stub had a `SetPeerMIKHint(addr, mik_identity)`
+    // method for advisory tie-breaking on outbound selection. Removed before
+    // any implementation work because:
+    //   1. Advisory only — never affected correctness
+    //   2. No evidence of need (speculative requirement)
+    //   3. Added 40+ LOC across header, impl, file format, tests
+    //   4. Adds a hard-to-test code path
+    //
+    // If MIK-aware peer selection is needed later, the natural place is
+    // Phase 6 (PeerManager), with proper justification — NOT here.
+    //
+    // This is an interface-version bump per the freeze contract in the
+    // architecture plan §4 — controlled, documented, applies KISS cleanly.
 };
 
 }  // namespace dilithion::net
