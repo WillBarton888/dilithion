@@ -2630,6 +2630,40 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     }
                 }
 
+                // v4.0.19 Fix B: Startup undo-presence integrity check.
+                // Catches the missing-undo-data corruption mode (incident 2026-04-25)
+                // BEFORE the node starts trying to reorg and loops forever. If any
+                // recent block lacks its undo entry, write auto_rebuild marker and exit.
+                // Probes only the most recent k blocks because (a) corruption typically
+                // affects the tip region, (b) cost scales with k, (c) deep history
+                // is protected by checkpoints. 100 blocks ~ 75 minutes of DilV history.
+                {
+                    constexpr int kStartupUndoIntegrityProbeDepth = 100;
+                    uint256 missingHash;
+                    int missingHeight = 0;
+                    if (!g_chainstate.VerifyRecentUndoIntegrity(kStartupUndoIntegrityProbeDepth,
+                                                                missingHash, missingHeight)) {
+                        std::cerr << "\n==========================================================" << std::endl;
+                        std::cerr << "[CRITICAL] Startup integrity check failed: undo data missing"
+                                  << " for block at height " << missingHeight
+                                  << " hash=" << missingHash.GetHex() << std::endl;
+                        std::cerr << "This node cannot perform reorgs without manual recovery."
+                                  << " Writing auto_rebuild marker — node will wipe and resync"
+                                  << " on next launch." << std::endl;
+                        std::cerr << "==========================================================" << std::endl;
+
+                        const std::string reason =
+                            "Startup integrity: undo missing at height " + std::to_string(missingHeight)
+                            + " hash=" + missingHash.GetHex();
+                        Dilithion::WriteAutoRebuildMarker(config.datadir, reason);
+
+                        delete Dilithion::g_chainParams;
+                        return 2;  // Distinguishable exit code; wrapper restarts and wipes
+                    }
+                    std::cout << "  [OK] Startup undo integrity check passed (probed last "
+                              << kStartupUndoIntegrityProbeDepth << " blocks)" << std::endl;
+                }
+
                 std::cout << "  [OK] Loaded chain state: " << chainHashes.size() + 1 << " blocks (height "
                           << pindexTip->nHeight << ")" << std::endl;
             } else {
@@ -4346,14 +4380,23 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         if (g_node_context.cooldown_tracker != nullptr) {
             CBlockIndex* pindexTip = g_chainstate.GetTip();
             if (pindexTip != nullptr && pindexTip->nHeight > 0) {
-                const int windowSize = cooldown_tracker.GetActiveWindow();
-                int startHeight = std::max(vdf_activation, pindexTip->nHeight - windowSize + 1);
+                // v4.0.21 — Patch C: walk from VDF activation (effectively
+                // genesis on DilV) so m_lifetimeBlockCount is deterministic and
+                // covers the full chain history. Active-window state still ends
+                // up correct because OnBlockConnected auto-evicts entries
+                // outside the active window. The lifetime count needs every
+                // block's MIK observed at least once, so a full-chain walk
+                // is required for determinism across nodes with different
+                // restart histories. Cost: O(chain_length) block reads at
+                // startup (~tens of seconds for 44k blocks). Acceptable.
+                int startHeight = std::max(vdf_activation, 1);
 
                 // Only attempt population if we're past VDF activation
                 if (pindexTip->nHeight >= vdf_activation) {
-                    std::cout << "Populating VDF cooldown tracker from existing chain..." << std::endl;
+                    std::cout << "Populating VDF cooldown tracker from existing chain "
+                              << "(full-history scan for v4.0.21 lifetime determinism)..." << std::endl;
 
-                    // Walk back from tip to startHeight
+                    // Walk back from tip to startHeight (typically VDF activation height = 0 on DilV)
                     std::vector<CBlockIndex*> recentBlocks;
                     CBlockIndex* pindex = pindexTip;
                     while (pindex != nullptr && pindex->nHeight >= startHeight) {
