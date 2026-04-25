@@ -382,6 +382,7 @@ private:
 
     // Missing network methods
     std::string RPC_AddNode(const std::string& params);
+    std::string RPC_DisconnectNode(const std::string& params);  // v4.0.22 manual peer disconnect
 
     // Ban management methods
     std::string RPC_SetBan(const std::string& params);
