@@ -1460,9 +1460,35 @@ bool CIbdCoordinator::FetchBlocks() {
         }
 
         if (hash.IsNull()) {
+            // v4.0.22 -- header chain incomplete at this height.
+            //
+            // After the BUG #282 follow-up fix in headers_manager
+            // (GetBestChainHashAtHeight), null means "no coherent ancestor
+            // header for this height on the best-header chain." We MUST NOT
+            // skip this height and request higher heights -- that would
+            // assemble a mixed-fork GETDATA batch (incident 2026-04-25).
+            //
+            // Stop building the batch here AND actively trigger header
+            // recovery so we don't rely on passive header-sync ticks to
+            // eventually fill the gap. Cursor review of v4.0.22 (2026-04-25)
+            // explicitly recommended active recovery: the current sync peer
+            // hasn't given us a coherent ancestor for this height, so switch
+            // peers and re-issue getheaders. Throttled by SwitchHeadersSyncPeer
+            // itself (consecutive-stalls tracking, bad-peer list).
             null_hash_count++;
             if (first_null_hash_height == -1) first_null_hash_height = h;
-            continue;
+            std::cout << "[IBD] Header chain incomplete at height " << h
+                      << " -- triggering active header recovery (peer switch)."
+                      << std::endl;
+
+            // Active recovery: drop the current header-sync peer and select
+            // a different one to re-request the gap. SwitchHeadersSyncPeer
+            // increments consecutive-stall count for current peer and marks
+            // it as bad after MAX_HEADERS_CONSECUTIVE_STALLS, so repeat
+            // failures naturally rotate through peers until we find one
+            // that has the missing parent header.
+            SwitchHeadersSyncPeer();
+            break;  // CHANGED v4.0.22 from `continue` -- preserves chain coherence
         }
 
         // Check if already connected or marked as failed

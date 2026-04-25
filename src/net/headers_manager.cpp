@@ -1920,39 +1920,29 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
 
         auto it = mapHeaders.find(current);
         if (it == mapHeaders.end()) {
-            // Chain walk broken - parent hash not in mapHeaders.
-            // This happens during forks when the best header's ancestry has gaps.
-            // BUG #282 FIX: Fall back to mapHeightIndex to find the target height
-            // directly, instead of returning null and causing a tight request loop.
+            // v4.0.22 — Chain walk broken (parent hash not in mapHeaders).
+            //
+            // BUG #282 originally added a mapHeightIndex fallback here to "fix"
+            // tight request loops. That fallback violates chain coherence: it
+            // returns the highest-work header AT THIS HEIGHT, which may belong
+            // to a DIFFERENT branch than the heights adjacent to it. The IBD
+            // scheduler then assembles mixed-fork GETDATA batches, blocks from
+            // different forks get applied to the same UTXO set, and we hit
+            // "Input references non-existent UTXO" errors mid-IBD (fresh nodes)
+            // or unable-to-reorg deadlock (existing nodes — incident 2026-04-25).
+            //
+            // Correct behaviour: return null. Caller (ibd_coordinator) MUST treat
+            // null as "header chain incomplete here" and stop building the batch
+            // at this height — never substitute a same-height header from a
+            // different branch.
             static int chainBreakLogCount = 0;
             if (chainBreakLogCount < 10) {
                 chainBreakLogCount++;
                 std::cerr << "[GetBestChainHashAtHeight] CHAIN BREAK at height " << currentHeight
-                          << " - falling back to height index for target " << height << std::endl;
+                          << " (target " << height << ") -- returning null. "
+                          << "Caller should pause IBD here and trigger header recovery." << std::endl;
             }
-
-            // Try to find the target height via mapHeightIndex
-            auto targetIt = mapHeightIndex.find(height);
-            if (targetIt != mapHeightIndex.end() && !targetIt->second.empty()) {
-                // Find the header with the most chainwork at this height
-                uint256 bestHash;
-                uint256 bestWork;
-                for (const auto& h : targetIt->second) {
-                    auto hdrIt = mapHeaders.find(h);
-                    if (hdrIt != mapHeaders.end()) {
-                        if (bestHash.IsNull() || ChainWorkGreaterThan(hdrIt->second.chainWork, bestWork)) {
-                            bestWork = hdrIt->second.chainWork;
-                            // Return RandomX hash for peer communication
-                            bestHash = hdrIt->second.randomXHash.IsNull() ? h : hdrIt->second.randomXHash;
-                        }
-                    }
-                }
-                if (!bestHash.IsNull()) {
-                    m_bestChainCache[height] = bestHash;
-                    return bestHash;
-                }
-            }
-            break;
+            return uint256();
         }
 
         // BUG FIX: Return RandomX hash, not SHA256 hash
@@ -1985,26 +1975,13 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
     // Fully populated cache from best header to genesis
     m_bestChainCacheDirty = false;
 
-    // BUG #282 FIX: Height not found via chain walk - try mapHeightIndex as last resort
-    auto fallbackIt = mapHeightIndex.find(height);
-    if (fallbackIt != mapHeightIndex.end() && !fallbackIt->second.empty()) {
-        uint256 bestHash;
-        uint256 bestWork;
-        for (const auto& h : fallbackIt->second) {
-            auto hdrIt = mapHeaders.find(h);
-            if (hdrIt != mapHeaders.end()) {
-                if (bestHash.IsNull() || ChainWorkGreaterThan(hdrIt->second.chainWork, bestWork)) {
-                    bestWork = hdrIt->second.chainWork;
-                    bestHash = hdrIt->second.randomXHash.IsNull() ? h : hdrIt->second.randomXHash;
-                }
-            }
-        }
-        if (!bestHash.IsNull()) {
-            m_bestChainCache[height] = bestHash;
-            return bestHash;
-        }
-    }
-
+    // v4.0.22 — Height not found on the best-header-chain ancestry path.
+    // BUG #282's mapHeightIndex fallback is removed for the same reason as
+    // the in-walk fallback above (chain coherence). If the best-header chain
+    // doesn't have a header at this height on its actual ancestry, the
+    // caller MUST NOT request some other branch's header at this height --
+    // doing so would assemble a mixed-fork GETDATA batch (incident
+    // 2026-04-25). Return null so the caller pauses block fetching here.
     return uint256();
 }
 
