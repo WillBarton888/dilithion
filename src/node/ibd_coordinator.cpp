@@ -1468,26 +1468,52 @@ bool CIbdCoordinator::FetchBlocks() {
             // skip this height and request higher heights -- that would
             // assemble a mixed-fork GETDATA batch (incident 2026-04-25).
             //
-            // Stop building the batch here AND actively trigger header
-            // recovery so we don't rely on passive header-sync ticks to
-            // eventually fill the gap. Cursor review of v4.0.22 (2026-04-25)
-            // explicitly recommended active recovery: the current sync peer
-            // hasn't given us a coherent ancestor for this height, so switch
-            // peers and re-issue getheaders. Throttled by SwitchHeadersSyncPeer
-            // itself (consecutive-stalls tracking, bad-peer list).
+            // Stop building the batch here. If we haven't accumulated any
+            // requests yet (getdata empty), actively trigger header recovery
+            // to avoid relying on passive header-sync ticks. If we already
+            // have a partial batch, send what we have and let the next tick
+            // re-evaluate -- the partial batch may include real progress.
+            //
+            // Per Cursor review (2026-04-25): conditional trigger on empty
+            // batch + state machine reset + try-current-peer-first before
+            // switching. State resets ensure the next Tick re-engages header
+            // sync logic instead of staying in BLOCKS_SYNC.
             null_hash_count++;
             if (first_null_hash_height == -1) first_null_hash_height = h;
-            std::cout << "[IBD] Header chain incomplete at height " << h
-                      << " -- triggering active header recovery (peer switch)."
-                      << std::endl;
 
-            // Active recovery: drop the current header-sync peer and select
-            // a different one to re-request the gap. SwitchHeadersSyncPeer
-            // increments consecutive-stall count for current peer and marks
-            // it as bad after MAX_HEADERS_CONSECUTIVE_STALLS, so repeat
-            // failures naturally rotate through peers until we find one
-            // that has the missing parent header.
-            SwitchHeadersSyncPeer();
+            if (getdata.empty() && m_node_context.headers_manager) {
+                std::cout << "[IBD] Header chain incomplete at height " << h
+                          << " -- triggering active header recovery." << std::endl;
+
+                // Reset state machine flags so next Tick re-engages header sync,
+                // doesn't skip via "initial request done", and treats us as if
+                // we need fresh header progress.
+                m_state = IBDState::HEADERS_SYNC;
+                m_last_header_height = 0;
+                m_headers_in_flight = false;
+                m_initial_request_done = false;
+
+                // Try current peer first (might just be slow / out-of-order delivery).
+                // Only switch if current peer's reported height isn't usable.
+                if (m_headers_sync_peer != -1 && m_node_context.peer_manager) {
+                    auto p = m_node_context.peer_manager->GetPeer(m_headers_sync_peer);
+                    int peer_height = p ? (p->best_known_height > 0 ? p->best_known_height
+                                                                    : p->start_height) : 0;
+                    if (peer_height > 0) {
+                        m_node_context.headers_manager->SyncHeadersFromPeer(m_headers_sync_peer,
+                                                                            peer_height);
+                        m_headers_in_flight = true;
+                    } else {
+                        SwitchHeadersSyncPeer();
+                    }
+                } else {
+                    SwitchHeadersSyncPeer();
+                }
+            } else if (g_verbose.load(std::memory_order_relaxed)) {
+                std::cout << "[IBD] Header chain incomplete at height " << h
+                          << " -- partial batch built, sending and re-evaluating next tick."
+                          << std::endl;
+            }
             break;  // CHANGED v4.0.22 from `continue` -- preserves chain coherence
         }
 
