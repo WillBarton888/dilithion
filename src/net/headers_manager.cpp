@@ -170,35 +170,43 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // But we MUST still store headers so the chain walk in
         // GetBestChainHashAtHeight() works during IBD block fetching.
         if (expectedHeight <= highestCheckpoint) {
-            if (heightHasHeaders) {
-                // We have our canonical header at this height - use it as pprev
-                uint256 existingHash = *heightIt->second.begin();
-                auto existingIt = mapHeaders.find(existingHash);
-                if (existingIt != mapHeaders.end()) {
-                    pprev = &existingIt->second;
-                    prevHash = existingHash;
-                    heightStart = existingIt->second.height;
-                    continue;  // Skip without computing hash
-                }
-            }
-            // BUG FIX: Previously set pprev=nullptr and continued, silently
-            // dropping the header. On a fresh sync this meant NO headers below
-            // the checkpoint were stored, breaking GetBestChainHashAtHeight()
-            // for ALL heights (chain walk can't traverse the gap).
-            // Fix: compute hash and store the header, just skip PoW validation.
+            // Patch H (v4.0.22) -- Compute incoming hash and check for true
+            // duplicate. PRIOR BUG: if mapHeightIndex already had ANY header
+            // at this height, the incoming header was silently dropped via
+            // *heightIt->second.begin() picking the first-arrived sibling.
+            // That left competing siblings unstored, so when a node received
+            // the canonical sibling AFTER committing to a wrong-fork sibling
+            // (LDN/SGP at 44468 during the 2026-04-25 incident), the canonical
+            // header was never seen by chain selection. UpdateBestHeader could
+            // not reorg because the alternative chain did not exist in
+            // mapHeaders. Fix: store every distinct sibling and let cumulative
+            // chain work decide via UpdateBestHeader. Checkpoint at the next
+            // height (or above) still enforces which sibling is canonical via
+            // the parent-hash link from the checkpoint header.
             uint256 storageHash = header.GetHash();
-            if (mapHeaders.find(storageHash) != mapHeaders.end()) {
-                // Already stored (duplicate) - advance pprev and continue
-                pprev = &mapHeaders[storageHash];
+
+            // True duplicate: same hash already stored - advance pprev and skip.
+            auto existingIt = mapHeaders.find(storageHash);
+            if (existingIt != mapHeaders.end()) {
+                pprev = &existingIt->second;
                 prevHash = storageHash;
+                heightStart = existingIt->second.height;
                 continue;
             }
+
+            // New header at this height (either empty slot or competing sibling).
+            // Skip the expensive RandomX PoW check (below checkpoint, trust
+            // anchor handles validity) but DO store and register the header so
+            // cumulative chain-work comparison can pick the canonical chain
+            // over a stuck wrong-fork sibling.
             int height = pprev ? (pprev->height + 1) : expectedHeight;
             uint256 chainWork = CalculateChainWork(header, pprev);
             HeaderWithChainWork headerData(header, height);
             headerData.chainWork = chainWork;
             mapHeaders[storageHash] = headerData;
             AddToHeightIndex(storageHash, height);
+            UpdateChainTips(storageHash);   // Patch H -- register competing tip
+            UpdateBestHeader(storageHash);  // Patch H -- re-evaluate active chain
             pprev = &mapHeaders[storageHash];
             prevHash = storageHash;
             if (heightStart < 0) heightStart = height;
@@ -2475,22 +2483,43 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 auto heightIt = mapHeightIndex.find(expectedHeight);
                 bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-                // CHECKPOINT OPTIMIZATION: Skip existing headers below checkpoint
-                if (expectedHeight <= checkpointHeight && heightHasHeaders) {
-                    uint256 existingHash = *heightIt->second.begin();
-                    auto existingIt = mapHeaders.find(existingHash);
+                // Patch H (v4.0.22) -- Same silent-drop bug as ProcessHeaders
+                // FAST PATH 1. PRIOR BUG: when below checkpoint and we already
+                // had ANY header at this height, code picked
+                // *heightIt->second.begin() (first-arrived sibling) and dropped
+                // the incoming header without comparing hashes. Competing
+                // siblings were never stored, so chain selection could not
+                // reorg from a wrong-fork sibling to the canonical sibling.
+                // Fix: use the actual incoming hash for true-duplicate check;
+                // store competing siblings so UpdateBestHeader can compare
+                // cumulative chain work and pick the canonical chain.
+                uint256 storageHash = allHashes[batchStart + i];
+
+                if (expectedHeight <= checkpointHeight) {
+                    auto existingIt = mapHeaders.find(storageHash);
                     if (existingIt != mapHeaders.end()) {
-                        // DEBUG: Log checkpoint optimization with work info
-                        // BUG FIX: Update best header for existing checkpoint headers too
-                        UpdateBestHeader(existingHash);
+                        // True duplicate (same hash) -- advance pprev and skip.
+                        UpdateBestHeader(storageHash);
                         pprev = &existingIt->second;
-                        prevHash = existingHash;
+                        prevHash = storageHash;
                         continue;
                     }
+                    // New header at this height (empty slot or competing sibling).
+                    // Store with cumulative chain work but skip PoW validation
+                    // (below checkpoint, trust anchor handles validity).
+                    int height = pprev ? (pprev->height + 1) : expectedHeight;
+                    uint256 chainWork = CalculateChainWork(header, pprev);
+                    HeaderWithChainWork headerData(header, height);
+                    headerData.chainWork = chainWork;
+                    mapHeaders[storageHash] = headerData;
+                    AddToHeightIndex(storageHash, height);
+                    UpdateChainTips(storageHash);   // register competing tip
+                    UpdateBestHeader(storageHash);  // re-evaluate active chain
+                    pprev = &mapHeaders[storageHash];
+                    prevHash = storageHash;
+                    totalProcessed++;
+                    continue;  // Skip PoW validation but header is now stored
                 }
-
-                // Get pre-computed hash (computed in parallel in STEP 1)
-                uint256 storageHash = allHashes[batchStart + i];
 
                 // Skip TRUE duplicates (same hash already exists)
                 if (mapHeaders.find(storageHash) != mapHeaders.end()) {
