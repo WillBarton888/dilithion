@@ -418,7 +418,7 @@ ChainParams ChainParams::DilV() {
     // Genesis block itself is exempt (code at chain.cpp:889-890 skips height 0)
     // MIK required from block 1 onward
     params.dfmpActivationHeight = 0;
-    params.dfmpAssumeValidHeight = 44600;  // v4.0.22: 2026-04-25 incident -- skip strict consensus checks (cooldown, MIK, DNA, attestation) for historical chain that contains blocks valid by older non-deterministic rules but invalid by v4.0.18+ strict rules. Above 44600, Patches A/C make rules deterministic and strict enforcement applies.
+    params.dfmpAssumeValidHeight = 44469;  // v4.0.22: 2026-04-25 incident -- skip strict consensus checks (cooldown, MIK, DNA, attestation) for historical chain through the convergence checkpoint at 44469. Above 44469, Patches A/C activate (44470) and strict deterministic rules apply. Bypass exactly matches checkpoint height -- no vulnerability window.
 
     // All DFMP versions active from genesis — use modern rules from day one
     params.dfmpV3ActivationHeight = 0;
@@ -452,14 +452,17 @@ ChainParams ChainParams::DilV() {
     params.dfmpCooldownConsensusHeight = 0;    // Consensus-enforced cooldown from genesis
     params.stallExemptionV2Height = 0;         // Tightened stall exemption from genesis
     params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive blocks from same miner from genesis
-    // v4.0.21 — Patch A: retire 1-hour stall exemption in CheckConsecutiveMiner +
-    // CheckVDFReplacementPreflight. Activation = 44600 (forward-only, ~150 blocks
-    // above current network tip ~44400 to give miners ~110 minutes to upgrade).
-    // Existing chain history below 44600 retains the prior rule.
-    params.consecutiveMinerStallExemptionRetiredHeight = 44600;
-    // v4.0.21 — Patch C: tighten solo-miner exemption with deterministic lifetime
-    // gate. Same activation height as Patch A.
-    params.soloExemptionLifetimeGateHeight = 44600;
+    // v4.0.22 — Patches A+C activate immediately above the convergence
+    // checkpoint (44469). Original v4.0.21 set these at 44600 to give a
+    // grace window above the tip-at-time-of-release. With the v4.0.22
+    // checkpoint at 44469 forcing convergence on the canonical chain, no
+    // grace window is needed: there is NO existing chain past 44469 to
+    // preserve, so strict deterministic rules apply from the very next
+    // block. This eliminates the 44470-44599 window where non-deterministic
+    // pre-44600 rules could re-trigger fork chaos. New miners must comply
+    // with strict cooldown rules immediately to extend the chain.
+    params.consecutiveMinerStallExemptionRetiredHeight = 44470;
+    params.soloExemptionLifetimeGateHeight = 44470;
     params.vdfCooldownShortWindow = 0;         // Disabled at genesis — avoids short-window MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window cooldown + time-based expiry from genesis
 
