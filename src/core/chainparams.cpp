@@ -418,7 +418,7 @@ ChainParams ChainParams::DilV() {
     // Genesis block itself is exempt (code at chain.cpp:889-890 skips height 0)
     // MIK required from block 1 onward
     params.dfmpActivationHeight = 0;
-    params.dfmpAssumeValidHeight = 36500;  // v4.0.17: match new checkpoint at 36500 — skip cooldown/ban validation for checkpointed blocks during IBD
+    params.dfmpAssumeValidHeight = 44600;  // v4.0.22: 2026-04-25 incident -- skip strict consensus checks (cooldown, MIK, DNA, attestation) for historical chain that contains blocks valid by older non-deterministic rules but invalid by v4.0.18+ strict rules. Above 44600, Patches A/C make rules deterministic and strict enforcement applies.
 
     // All DFMP versions active from genesis — use modern rules from day one
     params.dfmpV3ActivationHeight = 0;
