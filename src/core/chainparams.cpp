@@ -534,6 +534,19 @@ ChainParams ChainParams::DilV() {
     params.checkpoints.emplace_back(15000, uint256S("45f5877adcc1ec2dab453412d6a5cb3fd9383fc97a184aa4ec855db55212f5d6"));
     params.checkpoints.emplace_back(18700, uint256S("1fbcf55c40c735596b68772af0072b98342a098bd5c1ff0b3bb26423720e9295"));
     params.checkpoints.emplace_back(36500, uint256S("3a6c72ee0ac27508fe82b76ed561dc93bc52ee5a26825cbf3f693bbc7070fd63"));
+    // v4.0.22 (2026-04-25 incident): convergence anchor.
+    // NYC and SYD verified to share this hash at 44469 (the post-incident
+    // canonical chain by network majority consensus). Most peers at heights
+    // 44438-44467 cluster on this chain. Outlier peers reporting heights
+    // 44560/44649+ are isolated minority forks that do not deserve to be
+    // followed (1-2 miners diverging on their own branch). This checkpoint
+    // forces all v4.0.22+ nodes to refuse any chain that doesn't include
+    // this exact (height, hash) -> network converges on the canonical chain
+    // SGP and LDN currently on minority forks will reorg back to canonical
+    // on next sync. Above this checkpoint, Patches A/C strict cooldown
+    // applies (deterministic) and the assume-valid bypass below 44600
+    // covers any historical block validation issues.
+    params.checkpoints.emplace_back(44469, uint256S("1992955eddf38c7a7b1c717b4ed076b01e13de5f1a4914850ffe9f5654f9831e"));
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
