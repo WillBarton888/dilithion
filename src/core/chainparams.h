@@ -210,6 +210,15 @@ public:
     // 999999999 = disabled
     int soloExemptionLifetimeGateHeight;
 
+    // v4.0.22 -- Height at which the time-based cooldown expiry in
+    // CCooldownTracker is RETIRED. Above this height, only block-based
+    // cooldown applies (a miner must wait N blocks regardless of elapsed
+    // time). Was added to fix the same-miner concentration observed during
+    // 2026-04-25 incident: time-based expiry (cooldown_blocks * targetBlockTime
+    // = ~360s for cooldown=8) let one miner win 3 consecutive blocks because
+    // each block was just over the threshold. 999999999 = never retired.
+    int timeBasedCooldownExpiryRetiredHeight;
+
     // VDF cooldown short window (blocks) for dual-window cooldown.
     // After stabilizationForkHeight, effective cooldown = min(longCooldown, shortCooldown).
     // Short window tracks recent participation; long window prevents gaming.

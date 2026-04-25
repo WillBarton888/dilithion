@@ -4348,8 +4348,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
         int target_block_time = Dilithion::g_chainParams ?
             Dilithion::g_chainParams->blockTime : 45;
+        // v4.0.22 Patch E: time-based cooldown expiry retirement height
+        int time_based_expiry_retired = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->timeBasedCooldownExpiryRetiredHeight : 999999999;
         CCooldownTracker cooldown_tracker(vdf_cooldown_window, vdf_cooldown_short,
-                                          stabilization_height, target_block_time);
+                                          stabilization_height, target_block_time,
+                                          time_based_expiry_retired);
         g_node_context.cooldown_tracker = &cooldown_tracker;
 
         // Sybil defense Phase 1: Block relay source tracker

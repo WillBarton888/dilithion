@@ -124,6 +124,7 @@ ChainParams ChainParams::Mainnet() {
     params.consecutiveMinerCheckHeight = 999999999; // Disabled (VDF not active on mainnet)
     params.consecutiveMinerStallExemptionRetiredHeight = 999999999;  // v4.0.21 Patch A: disabled on DIL (no VDF)
     params.soloExemptionLifetimeGateHeight = 999999999;              // v4.0.21 Patch C: disabled on DIL (no VDF)
+    params.timeBasedCooldownExpiryRetiredHeight = 999999999;         // v4.0.22 Patch E: disabled on DIL (no VDF)
     params.vdfCooldownShortWindow = 0;               // Disabled (VDF not active on mainnet)
     params.stabilizationForkHeight = 999999999;      // Disabled (VDF not active on mainnet)
     params.mikWindowCapWindow = 0;                   // Disabled (VDF not active on mainnet)
@@ -314,6 +315,7 @@ ChainParams ChainParams::Testnet() {
     params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive from genesis
     params.consecutiveMinerStallExemptionRetiredHeight = 0;  // v4.0.21 Patch A: testnet retires stall exemption from genesis
     params.soloExemptionLifetimeGateHeight = 0;              // v4.0.21 Patch C: testnet activates lifetime gate from genesis
+    params.timeBasedCooldownExpiryRetiredHeight = 0;         // v4.0.22 Patch E: testnet retires time-based expiry from genesis
     params.vdfCooldownShortWindow = 0;         // Disabled — avoids MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window + time expiry from genesis
     params.mikWindowCapWindow = 480;           // 480 blocks = ~6h at 45s/block (MVP)
@@ -463,6 +465,12 @@ ChainParams ChainParams::DilV() {
     // with strict cooldown rules immediately to extend the chain.
     params.consecutiveMinerStallExemptionRetiredHeight = 44470;
     params.soloExemptionLifetimeGateHeight = 44470;
+    // v4.0.22 Patch E: retire time-based cooldown expiry above 44470. Same
+    // activation as Patches A/C. Without this, time-based expiry
+    // (cooldown_blocks * 45s = ~360s for cooldown=8) lets a miner mine
+    // consecutive blocks if each is just over the threshold (observed:
+    // MIK 5c482e51 mined 44483, 44484, 44485 with ~370s gaps each).
+    params.timeBasedCooldownExpiryRetiredHeight = 44470;
     params.vdfCooldownShortWindow = 0;         // Disabled at genesis — avoids short-window MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window cooldown + time-based expiry from genesis
 
