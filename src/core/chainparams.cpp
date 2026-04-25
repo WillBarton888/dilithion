@@ -454,23 +454,23 @@ ChainParams ChainParams::DilV() {
     params.dfmpCooldownConsensusHeight = 0;    // Consensus-enforced cooldown from genesis
     params.stallExemptionV2Height = 0;         // Tightened stall exemption from genesis
     params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive blocks from same miner from genesis
-    // v4.0.22 — Patches A+C activate immediately above the convergence
-    // checkpoint (44469). Original v4.0.21 set these at 44600 to give a
-    // grace window above the tip-at-time-of-release. With the v4.0.22
-    // checkpoint at 44469 forcing convergence on the canonical chain, no
-    // grace window is needed: there is NO existing chain past 44469 to
-    // preserve, so strict deterministic rules apply from the very next
-    // block. This eliminates the 44470-44599 window where non-deterministic
-    // pre-44600 rules could re-trigger fork chaos. New miners must comply
-    // with strict cooldown rules immediately to extend the chain.
-    params.consecutiveMinerStallExemptionRetiredHeight = 44470;
-    params.soloExemptionLifetimeGateHeight = 44470;
-    // v4.0.22 Patch E: retire time-based cooldown expiry above 44470. Same
-    // activation as Patches A/C. Without this, time-based expiry
-    // (cooldown_blocks * 45s = ~360s for cooldown=8) lets a miner mine
-    // consecutive blocks if each is just over the threshold (observed:
-    // MIK 5c482e51 mined 44483, 44484, 44485 with ~370s gaps each).
-    params.timeBasedCooldownExpiryRetiredHeight = 44470;
+    // v4.0.22 -- Patches A/C/E pushed to height 50000 (was 44470) on
+    // 2026-04-25 after the 44470 activation produced an unrecoverable
+    // consensus split: v4.0.16 miners continued producing blocks under
+    // the OLD cooldown rules (no stall-exemption retirement, no solo
+    // gate, time-based expiry still active), and v4.0.22 seeds with the
+    // new rules at 44470 rejected those blocks. The miner network kept
+    // extending the v4.0.16 chain past 44760+, while the seed canonical
+    // chain (NYC/SYD) stalled at ~44494. Pushing all three activations
+    // to 50000 lets seeds accept the v4.0.16 chain through the existing
+    // miner population, gives time to coordinate a miner upgrade before
+    // the new rules engage, and avoids forcing the choice between
+    // "minority canonical chain" and "longer rule-violating chain"
+    // tonight. The cooldown rule changes are still planned -- just
+    // moved to a coordinated upgrade window above the live tip.
+    params.consecutiveMinerStallExemptionRetiredHeight = 50000;
+    params.soloExemptionLifetimeGateHeight = 50000;
+    params.timeBasedCooldownExpiryRetiredHeight = 50000;
     params.vdfCooldownShortWindow = 0;         // Disabled at genesis — avoids short-window MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window cooldown + time-based expiry from genesis
 
@@ -545,19 +545,21 @@ ChainParams ChainParams::DilV() {
     params.checkpoints.emplace_back(15000, uint256S("45f5877adcc1ec2dab453412d6a5cb3fd9383fc97a184aa4ec855db55212f5d6"));
     params.checkpoints.emplace_back(18700, uint256S("1fbcf55c40c735596b68772af0072b98342a098bd5c1ff0b3bb26423720e9295"));
     params.checkpoints.emplace_back(36500, uint256S("3a6c72ee0ac27508fe82b76ed561dc93bc52ee5a26825cbf3f693bbc7070fd63"));
-    // v4.0.22 (2026-04-25 incident): convergence anchor.
-    // NYC and SYD verified to share this hash at 44469 (the post-incident
-    // canonical chain by network majority consensus). Most peers at heights
-    // 44438-44467 cluster on this chain. Outlier peers reporting heights
-    // 44560/44649+ are isolated minority forks that do not deserve to be
-    // followed (1-2 miners diverging on their own branch). This checkpoint
-    // forces all v4.0.22+ nodes to refuse any chain that doesn't include
-    // this exact (height, hash) -> network converges on the canonical chain
-    // SGP and LDN currently on minority forks will reorg back to canonical
-    // on next sync. Above this checkpoint, Patches A/C strict cooldown
-    // applies (deterministic) and the assume-valid bypass below 44600
-    // covers any historical block validation issues.
-    params.checkpoints.emplace_back(44469, uint256S("1992955eddf38c7a7b1c717b4ed076b01e13de5f1a4914850ffe9f5654f9831e"));
+    // v4.0.22 (2026-04-25): the 44469 convergence checkpoint was REMOVED.
+    // Originally added to anchor the seed-chosen canonical chain after the
+    // 2026-04-25 incident, but in combination with the Patches A/C/E
+    // cooldown rule changes activating at 44470 it created an unrecoverable
+    // consensus split: v4.0.16 miners kept extending their pre-checkpoint
+    // chain (rejected by the 44469 checkpoint at chainstate level) while
+    // the seed canonical chain was rejected from accumulating blocks (any
+    // miner-produced block past 44470 hit cooldown violation). With both
+    // the cooldown rules pushed to 50000 AND this checkpoint removed,
+    // chain-work-based selection (with Patch H storing competing siblings)
+    // can pick whichever chain the network actually extends -- restoring
+    // automatic convergence with the live miner population. The next solid
+    // checkpoint at 44000 remains as the last pre-incident anchor; any
+    // future post-incident anchor must be added only after rule changes
+    // are coordinated with miners.
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
