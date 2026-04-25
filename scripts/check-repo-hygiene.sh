@@ -189,7 +189,7 @@ is_legacy() {
 # Check 1 — root-level whitelist
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo "[1/6] Checking root-level whitelist …"
+echo "[1/7] Checking root-level whitelist …"
 
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
@@ -209,7 +209,7 @@ done < <(git ls-tree HEAD | awk -F'\t' '{ split($1, cols, " "); if (cols[2]=="bl
 # Check 2 — binary/build outputs at root
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo "[2/6] Checking for binary/build outputs at root …"
+echo "[2/7] Checking for binary/build outputs at root …"
 
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
@@ -225,7 +225,7 @@ done < <(git ls-tree HEAD | awk -F'\t' '{ split($1, cols, " "); if (cols[2]=="bl
 # Check 3 — coverage output at root
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo "[3/6] Checking for LCOV coverage reports at root …"
+echo "[3/7] Checking for LCOV coverage reports at root …"
 
 # LCOV often creates directories at root named after src/ subdirs.
 # Any of these at root with .html inside = coverage, not source.
@@ -247,7 +247,7 @@ done
 # Check 4 — dated / session-artifact filenames
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo "[4/6] Checking for dated session-artifact filenames …"
+echo "[4/7] Checking for dated session-artifact filenames …"
 
 # Pattern: filename contains YYYY-MM-DD somewhere
 while IFS= read -r path; do
@@ -273,7 +273,7 @@ done < <(git ls-tree HEAD | awk -F'\t' '{ split($1, cols, " "); if (cols[2]=="bl
 # Check 5 — Windows path-escape / unicode bugs
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo "[5/6] Checking for Windows path-escape / unicode-garbage paths …"
+echo "[5/7] Checking for Windows path-escape / unicode-garbage paths …"
 
 while IFS= read -r path; do
   [[ -z "$path" ]] && continue
@@ -289,7 +289,7 @@ done < <(git ls-files)
 # Check 6 — private content
 # ─────────────────────────────────────────────────────────────
 echo ""
-echo "[6/6] Checking for private / AI-assistant content …"
+echo "[6/7] Checking for private / AI-assistant content …"
 
 if git ls-tree -r HEAD -- .claude 2>/dev/null | grep -q .; then
   block "Private .claude/ directory is tracked — remove with 'git rm --cached -r .claude/'"
@@ -300,6 +300,24 @@ fi
 if git ls-tree HEAD -- PLAN.md 2>/dev/null | grep -q .; then
   warn "PLAN.md at root — usually a session artifact, consider moving to docs/planning/"
 fi
+
+# ─────────────────────────────────────────────────────────────
+# Check 7 — line endings: index must match .gitattributes
+# ─────────────────────────────────────────────────────────────
+echo ""
+echo "[7/7] Checking index line endings against .gitattributes …"
+
+# `git ls-files --eol` prints:  i/<eol>  w/<eol>  attr/text [eol=...]  <path>
+# A blocking violation is when the INDEX has CRLF for a file that
+# .gitattributes mandates as LF. The working-tree column is irrelevant
+# to CI — git normalizes at commit time, so a Windows dev with CRLF on
+# disk is fine as long as their commits land as LF in the index.
+#
+# Fix locally with:  git add --renormalize <path> && git commit
+while IFS= read -r path; do
+  [[ -z "$path" ]] && continue
+  block "Index has CRLF but .gitattributes mandates LF: $path"
+done < <(git ls-files --eol | grep '^i/crlf' | grep -F 'eol=lf' | sed 's/.*\t//')
 
 # ─────────────────────────────────────────────────────────────
 # Summary
