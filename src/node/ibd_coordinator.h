@@ -175,7 +175,11 @@ private:
     // Headers sync peer management (Bitcoin Core style)
     void SelectHeadersSyncPeer();           // Pick a sync peer if none selected
     bool CheckHeadersSyncProgress();        // Check if sync peer is making progress
-    void SwitchHeadersSyncPeer();           // Switch to a different peer
+    // v4.0.22 Patch F: penalize=true (default, used by stall-timeout path)
+    // increments consecutive-stalls counter; penalize=false (used by
+    // coherence-recovery path) skips the counter so peer rotation due to
+    // chain coherence breaks doesn't exhaust the bad-peer pool.
+    void SwitchHeadersSyncPeer(bool penalize = true);
 
     // IBD HANG FIX #6: Hang cause tracking
     enum class HangCause {

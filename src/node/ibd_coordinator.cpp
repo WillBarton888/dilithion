@@ -1515,6 +1515,11 @@ bool CIbdCoordinator::FetchBlocks() {
 
                 // Try current peer first (might just be slow / out-of-order delivery).
                 // Only switch if current peer's reported height isn't usable.
+                // v4.0.22 Patch F: pass penalize=false to SwitchHeadersSyncPeer
+                // here -- coherence-recovery rotation is NOT a real timeout
+                // stall, so the peer shouldn't be marked bad on every call.
+                // Without this, repeat coherence breaks rotate through all
+                // peers and exhaust the pool (bug observed on SGP).
                 if (m_headers_sync_peer != -1 && m_node_context.peer_manager) {
                     auto p = m_node_context.peer_manager->GetPeer(m_headers_sync_peer);
                     int peer_height = p ? (p->best_known_height > 0 ? p->best_known_height
@@ -1524,10 +1529,10 @@ bool CIbdCoordinator::FetchBlocks() {
                                                                             peer_height);
                         m_headers_in_flight = true;
                     } else {
-                        SwitchHeadersSyncPeer();
+                        SwitchHeadersSyncPeer(false);  // coherence recovery, not a stall
                     }
                 } else {
-                    SwitchHeadersSyncPeer();
+                    SwitchHeadersSyncPeer(false);  // coherence recovery, not a stall
                 }
             } else if (g_verbose.load(std::memory_order_relaxed)) {
                 std::cout << "[IBD] Header chain incomplete at height " << h
@@ -2737,6 +2742,31 @@ void CIbdCoordinator::SelectHeadersSyncPeer() {
         }
     }
 
+    // v4.0.22 Patch F: pool-exhausted safety valve. If no eligible peer
+    // remains because m_headers_bad_peers excludes all of them, clear the
+    // bad-peer set once and retry selection. Without this, a bug or aggressive
+    // marking can permanently exclude every peer, leaving no sync peer and
+    // halting header progress (observed on SGP during 2026-04-25 incident).
+    if (best_peer == -1 && !peers.empty() && !m_headers_bad_peers.empty()) {
+        std::cout << "[IBD] Headers sync peer pool exhausted ("
+                  << m_headers_bad_peers.size() << " peers marked bad, "
+                  << peers.size() << " connected) -- clearing bad-peer set to allow recovery."
+                  << std::endl;
+        m_headers_bad_peers.clear();
+        m_headers_sync_peer_consecutive_stalls = 0;
+
+        // Retry selection now that all peers are eligible again
+        for (const auto& peer : peers) {
+            if (!peer) continue;
+            int peer_height = peer->best_known_height;
+            if (peer_height == 0) peer_height = peer->start_height;
+            if (peer_height > best_height) {
+                best_height = peer_height;
+                best_peer = peer->id;
+            }
+        }
+    }
+
     if (best_peer != -1) {
         m_headers_sync_peer = best_peer;
         m_headers_sync_peer_consecutive_stalls = 0;  // Reset stall counter for new peer
@@ -2838,11 +2868,21 @@ bool CIbdCoordinator::CheckHeadersSyncProgress() {
     return true;  // Not stalled yet
 }
 
-void CIbdCoordinator::SwitchHeadersSyncPeer() {
+void CIbdCoordinator::SwitchHeadersSyncPeer(bool penalize) {
     int old_peer = m_headers_sync_peer;
 
-    // BAD PEER TRACKING: Track consecutive stalls for this peer
-    if (old_peer != -1) {
+    // BAD PEER TRACKING: Track consecutive stalls for this peer.
+    // v4.0.22 Patch F: only penalize on TIMEOUT-confirmed stalls, NOT on
+    // coherence-recovery rotations. The active recovery in FetchBlocks may
+    // call SwitchHeadersSyncPeer when chain coherence breaks (peer might
+    // be on a different fork, not stalled). Penalizing those rotations
+    // exhausts the peer pool quickly, leaving no peers to sync from --
+    // observed on SGP during 2026-04-25 incident: chain coherence break
+    // at 44469 (checkpoint) caused recovery to switch peers every 30s,
+    // marking ~all peers bad within minutes -> sync stopped entirely.
+    // Real timeout-stall calls (CheckHeadersSyncProgress -> false) still
+    // pass penalize=true and increment the stall counter.
+    if (penalize && old_peer != -1) {
         m_headers_sync_peer_consecutive_stalls++;
         if (m_headers_sync_peer_consecutive_stalls >= MAX_HEADERS_CONSECUTIVE_STALLS) {
             if (g_verbose.load(std::memory_order_relaxed))
