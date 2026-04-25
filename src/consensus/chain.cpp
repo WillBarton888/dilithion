@@ -295,6 +295,25 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         if (g_verbose.load(std::memory_order_relaxed))
             std::cout << "[Chain] VDF DISTRIBUTION REPLACEMENT -- 1-block reorg" << std::endl;
 
+        // v4.0.21 — Patch B: Capture the old tip's block data BEFORE disconnect so
+        // we can roll back if ConnectTip(pindexNew) fails.
+        //
+        // Pre-fix bug (incident 2026-04-25): if ConnectTip below failed, undo data
+        // for oldTip was already deleted by DisconnectTip → UndoBlock → batch.Delete(undoKey).
+        // The function then returned false, leaving "block-is-tip-but-undo-missing".
+        // Any subsequent reorg attempt would deterministically fail trying to disconnect
+        // that block, looping forever. Fix B: re-apply old tip on failure.
+        CBlockIndex* pindexOldTip = pindexTip;
+        CBlock oldTipBlock;
+        bool oldTipBlockLoaded = false;
+        if (pdb != nullptr && pindexOldTip != nullptr) {
+            oldTipBlockLoaded = pdb->ReadBlock(pindexOldTip->GetBlockHash(), oldTipBlock);
+            if (!oldTipBlockLoaded) {
+                std::cerr << "[Chain] WARN: Could not pre-load old tip block for Case 2.5 rollback safety; "
+                          << "proceeding without rollback capability for height " << pindexOldTip->nHeight << std::endl;
+            }
+        }
+
         // Disconnect current tip
         if (!DisconnectTip(pindexTip)) {
             std::cerr << "[Chain] ERROR: Failed to disconnect tip for VDF replacement" << std::endl;
@@ -304,9 +323,26 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         // Connect new block (shares same parent as old tip)
         if (!ConnectTip(pindexNew, block)) {
             std::cerr << "[Chain] CRITICAL: Failed to connect VDF replacement block" << std::endl;
-            std::cerr << "[Chain] Chain is in intermediate state (tip disconnected)." << std::endl;
-            // NOTE: This is the same failure mode as any reorg ConnectTip failure
-            // in Case 3. The chain is in an inconsistent state and will need a restart.
+
+            // v4.0.21 — Patch B: roll back to old tip to restore undo data.
+            if (oldTipBlockLoaded && pindexOldTip != nullptr) {
+                std::cerr << "[Chain] Case 2.5 rollback: re-applying old tip "
+                          << pindexOldTip->GetBlockHash().GetHex().substr(0, 16)
+                          << " at height " << pindexOldTip->nHeight << std::endl;
+                if (!ConnectTip(pindexOldTip, oldTipBlock)) {
+                    std::cerr << "[CRITICAL] Case 2.5 rollback FAILED — chain state inconsistent at height "
+                              << pindexOldTip->nHeight << ". Triggering auto_rebuild." << std::endl;
+                    m_chain_needs_rebuild.store(true);
+                    return false;
+                }
+                pindexTip = pindexOldTip;
+                m_cachedHeight.store(pindexOldTip->nHeight, std::memory_order_release);
+                std::cerr << "[Chain] Case 2.5 rollback succeeded; old tip restored." << std::endl;
+            } else {
+                std::cerr << "[CRITICAL] Case 2.5 ConnectTip failed and old tip block was unreadable. "
+                          << "Cannot roll back. Triggering auto_rebuild." << std::endl;
+                m_chain_needs_rebuild.store(true);
+            }
             return false;
         }
 
@@ -1321,16 +1357,24 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
         // Step 2: Undo UTXO set changes (CS-004)
         // BUG #159 FIX: Allow skipping UTXO undo during IBD fork recovery when undo data is missing
         // BUG #271 FIX: Pass block index hash to UndoBlock for consistent undo data lookup
+        // v4.0.19: Track persistent UndoBlock failures so a stuck node can self-recover
+        // via auto_rebuild instead of looping forever (incident 2026-04-25).
         if (pUTXOSet != nullptr && block_loaded) {
             if (!pUTXOSet->UndoBlock(block, pindex->GetBlockHash())) {
                 if (!force_skip_utxo) {
                     std::cerr << "[Chain] ERROR: Failed to undo block from UTXO set at height "
                               << pindex->nHeight << std::endl;
+                    RecordUndoFailure(pindex->GetBlockHash(), pindex->nHeight);
                     return false;
                 } else {
                     std::cout << "[Chain] WARNING: Failed to undo UTXO at height "
                               << pindex->nHeight << " (force_skip_utxo=true, continuing anyway)" << std::endl;
+                    // Don't track in force_skip_utxo path — caller has explicitly opted into
+                    // continuing past undo failure (IBD fork recovery).
                 }
+            } else {
+                // UndoBlock succeeded — clear any prior failure tracking.
+                ResetUndoFailureCounter();
             }
         } else if (force_skip_utxo) {
             std::cout << "[Chain] Skipping UTXO undo for height " << pindex->nHeight
@@ -1715,4 +1759,107 @@ void CChainState::RegisterBlockConnectCallback(BlockConnectCallback callback) {
 void CChainState::RegisterBlockDisconnectCallback(BlockDisconnectCallback callback) {
     std::lock_guard<std::recursive_mutex> lock(cs_main);
     m_blockDisconnectCallbacks.push_back(callback);
+}
+
+// ============================================================================
+// v4.0.19: Persistent UndoBlock failure tracking
+// ============================================================================
+// Mirrors the BUG #277 UTXO-failure pattern but for the disconnect path. When
+// DisconnectTip's UndoBlock returns false repeatedly on the SAME block hash,
+// the chain is stuck — the node cannot reorg forward without manual recovery.
+// At kPersistentUndoFailureThreshold, sets m_chain_needs_rebuild so the IBD
+// coordinator can write the auto_rebuild marker and trigger graceful shutdown.
+
+void CChainState::RecordUndoFailure(const uint256& blockHash, int height) {
+    int failures;
+    {
+        std::lock_guard<std::mutex> lock(m_undo_failure_mutex);
+        if (blockHash == m_last_undo_failure_hash) {
+            failures = ++m_consecutive_undo_failures;
+        } else {
+            // Different block hash — reset to 1 (this is the first failure on this hash).
+            // Persistent failures only count when on the SAME block; a sequence of failures
+            // on different blocks is a different failure mode.
+            m_last_undo_failure_hash = blockHash;
+            m_consecutive_undo_failures.store(1);
+            failures = 1;
+        }
+    }
+
+    std::cerr << "[Chain] UndoBlock failure #" << failures << " at height " << height
+              << " hash=" << blockHash.GetHex().substr(0, 16) << "..."
+              << " (threshold=" << kPersistentUndoFailureThreshold << ")" << std::endl;
+
+    if (failures >= kPersistentUndoFailureThreshold) {
+        std::cerr << "[CRITICAL] DisconnectTip: persistent UndoBlock failure"
+                  << " hash=" << blockHash.GetHex()
+                  << " height=" << height
+                  << " consecutive=" << failures
+                  << ". Triggering auto_rebuild." << std::endl;
+        m_chain_needs_rebuild.store(true);
+    }
+}
+
+void CChainState::ResetUndoFailureCounter() {
+    std::lock_guard<std::mutex> lock(m_undo_failure_mutex);
+    m_consecutive_undo_failures.store(0);
+    m_last_undo_failure_hash = uint256();  // default-constructed = zeroed (no SetNull on this type)
+}
+
+void CChainState::ClearChainRebuildFlag() {
+    m_chain_needs_rebuild.store(false);
+    ResetUndoFailureCounter();
+}
+
+uint256 CChainState::GetLastUndoFailureHash() const {
+    std::lock_guard<std::mutex> lock(m_undo_failure_mutex);
+    return m_last_undo_failure_hash;
+}
+
+// ============================================================================
+// v4.0.19: VerifyRecentUndoIntegrity — Fix B startup-time integrity check
+// ============================================================================
+// Walks back from the current tip up to probeDepth blocks, confirming each
+// block has a corresponding undo_<hash> entry in the UTXO LevelDB. Used at
+// startup to detect the missing-undo-data state BEFORE reorg attempts begin.
+// On detection, the caller writes auto_rebuild and exits, instead of letting
+// the node loop forever like NYC + LDN did 2026-04-25.
+
+bool CChainState::VerifyRecentUndoIntegrity(int probeDepth,
+                                            uint256& outMissingHash,
+                                            int& outMissingHeight) const {
+    if (pUTXOSet == nullptr) {
+        // No UTXO set wired — nothing to verify against. Treat as pass.
+        return true;
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    if (pindexTip == nullptr || probeDepth <= 0) {
+        return true;  // Empty chain or zero depth — nothing to check.
+    }
+
+    CBlockIndex* pwalker = pindexTip;
+    int probed = 0;
+    while (pwalker != nullptr && probed < probeDepth) {
+        // Stop walking at genesis — we don't need to reorg past it, so verifying
+        // its undo entry adds no operational value. (ApplyBlock does write an
+        // undo_<hash> record for every connected block including genesis when
+        // the genesis path runs through it; we just don't need to assert that
+        // here. Per Cursor review 2026-04-25.)
+        if (pwalker->pprev == nullptr) {
+            break;
+        }
+
+        const uint256 hash = pwalker->GetBlockHash();
+        if (!pUTXOSet->HasUndoData(hash)) {
+            outMissingHash = hash;
+            outMissingHeight = pwalker->nHeight;
+            return false;
+        }
+
+        pwalker = pwalker->pprev;
+        ++probed;
+    }
+    return true;
 }

@@ -142,6 +142,22 @@ bool CBlockFetcher::RequestBlockFromPeer(NodeId peer_id, int height, const uint2
         return false;
     }
 
+    // v4.0.21 — Patch D: enforce scheduler-level per-peer cap.
+    // CBlockTracker::AddBlock has its own MAX_PER_PEER (128) ceiling, but the
+    // IBD coordinator gates new requests on MAX_BLOCKS_IN_TRANSIT_PER_PEER (32)
+    // and reports HangCause::PEERS_AT_CAPACITY when the live in-flight count
+    // is >= that limit. Parent-fetch and other direct callers of this function
+    // bypassed the 32-cap and could push in-flight to 33-128. Once that
+    // happened, the coordinator's capacity gate stayed closed until timeout
+    // requeue (120s) drained the surplus — the operator-visible "sync peer
+    // stuck at capacity" symptom from the 2026-04-25 incident.
+    // Reject early so the scheduler stays consistent with the in-flight count
+    // it later reads back via GetPeerBlocksInFlight().
+    int in_flight = g_node_context.block_tracker->GetPeerInFlightCount(peer_id);
+    if (in_flight >= MAX_BLOCKS_IN_TRANSIT_PER_PEER) {
+        return false;
+    }
+
     // AddBlock handles capacity checks and duplicate detection
     return g_node_context.block_tracker->AddBlock(height, hash, peer_id);
 }
