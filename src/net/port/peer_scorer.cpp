@@ -1,83 +1,135 @@
 // Copyright (c) 2026 The Dilithion Core developers
 // Distributed under the MIT software license
 //
-// Phase 2 — CPeerScorer implementation (PR2.1 SCAFFOLD).
+// Phase 2 — CPeerScorer implementation.
 //
-// This commit lands the CPeerScorer translation unit with stub bodies on
-// every method. The class compiles, the binary links, but every method
-// asserts on call. PR2.2 fills in the real implementation.
+// Implements the FROZEN IPeerScorer interface (src/net/ipeer_scorer.h).
+// Algorithm is Bitcoin Core's legacy v25.x numeric-scoring shape: per-peer
+// cumulative weight, ban-on-threshold-cross. Current upstream Bitcoin Core
+// migrated to a binary "should discourage" flag (net_processing.cpp:1939);
+// Dilithion retains numeric scoring for finer-grained policy + operator
+// visibility. Documented in detail at the top of ipeer_scorer.h.
 //
-// Stubbing rather than committing the full implementation in one go
-// matches the Phase 1 PR1.1 → PR1.2 → PR1.3 cadence: scaffold first
-// (small, easy review), implement next (algorithm-heavy review), cut
-// over last (call-site adaptation review). Each PR independently
-// reviewable by Cursor + user.
+// Phase 2 plan §10 decisions encoded here:
+//   * Q1=C — score store is an in-memory map; no persistence path
+//   * Q2=A — Misbehaving returns bool (threshold crossed); the FORWARDER in
+//            CPeerManager calls CBanManager::Ban. CPeerScorer has no
+//            CBanManager dependency.
 
 #include <net/port/peer_scorer.h>
+#include <net/port/misbehavior_policy.h>
 
+#include <algorithm>
 #include <cassert>
 
 namespace dilithion::net::port {
 
-CPeerScorer::CPeerScorer() = default;
+// ============================================================================
+// Construction / destruction
+// ============================================================================
 
+CPeerScorer::CPeerScorer() = default;
 CPeerScorer::~CPeerScorer() = default;
 
-bool CPeerScorer::Misbehaving(::dilithion::net::NodeId /*peer*/,
-                              ::dilithion::net::MisbehaviorType /*type*/,
-                              const std::string& /*reason*/)
+// ============================================================================
+// Public IPeerScorer API
+// ============================================================================
+
+bool CPeerScorer::Misbehaving(::dilithion::net::NodeId peer,
+                              ::dilithion::net::MisbehaviorType type,
+                              const std::string& reason)
 {
-    assert(false && "CPeerScorer::Misbehaving(enum) — implementation in PR2.2");
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const int weight = DefaultWeight(type);
+    return AddScoreLocked(peer, weight, reason);
 }
 
-bool CPeerScorer::Misbehaving(::dilithion::net::NodeId /*peer*/,
-                              int /*weight*/,
-                              const std::string& /*reason*/)
+bool CPeerScorer::Misbehaving(::dilithion::net::NodeId peer,
+                              int weight,
+                              const std::string& reason)
 {
-    assert(false && "CPeerScorer::Misbehaving(weight) — implementation in PR2.2");
-    return false;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return AddScoreLocked(peer, weight, reason);
 }
 
-int CPeerScorer::GetScore(::dilithion::net::NodeId /*peer*/) const
+int CPeerScorer::GetScore(::dilithion::net::NodeId peer) const
 {
-    assert(false && "CPeerScorer::GetScore — implementation in PR2.2");
-    return 0;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    auto it = m_scores.find(peer);
+    return (it == m_scores.end()) ? 0 : it->second;
 }
 
-void CPeerScorer::ResetScore(::dilithion::net::NodeId /*peer*/)
+void CPeerScorer::ResetScore(::dilithion::net::NodeId peer)
 {
-    assert(false && "CPeerScorer::ResetScore — implementation in PR2.2");
+    std::lock_guard<std::mutex> lock(m_mutex);
+    // Erase rather than zero — the slot is re-claimable. This is the
+    // expected callpath from CPeerManager::RemovePeer when a peer
+    // disconnects; bounded score-map size depends on this erasure.
+    m_scores.erase(peer);
 }
 
-void CPeerScorer::SetBanThreshold(int /*threshold*/)
+void CPeerScorer::SetBanThreshold(int threshold)
 {
-    assert(false && "CPeerScorer::SetBanThreshold — implementation in PR2.2");
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_ban_threshold = threshold;
 }
 
 int CPeerScorer::GetBanThreshold() const
 {
-    assert(false && "CPeerScorer::GetBanThreshold — implementation in PR2.2");
-    return 0;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_ban_threshold;
 }
 
+// ============================================================================
+// Helpers
+// ============================================================================
+
+// Decay every tracked score by 1, floored at 0. Mirrors the existing
+// CPeerManager::DecayMisbehaviorScores behaviour at peers.cpp:486-490
+// (which is itself a deliberate divergence from upstream — Bitcoin Core
+// does not decay; we do, called every 30s).
+//
+// Zero-score entries are NOT erased here. ResetScore is the explicit
+// cleanup path; entries naturally shrink when peers disconnect via
+// CPeerManager::RemovePeer → CPeerScorer::ResetScore. Auto-erasing on zero
+// would race against in-flight Misbehaving calls for the same NodeId.
 void CPeerScorer::DecayAll()
 {
-    assert(false && "CPeerScorer::DecayAll — implementation in PR2.2");
+    std::lock_guard<std::mutex> lock(m_mutex);
+    for (auto& [peer, score] : m_scores) {
+        score = std::max(0, score - 1);
+    }
 }
 
 size_t CPeerScorer::GetScoreMapSizeForTest() const
 {
-    assert(false && "CPeerScorer::GetScoreMapSizeForTest — implementation in PR2.2");
-    return 0;
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_scores.size();
 }
 
-bool CPeerScorer::AddScoreLocked(::dilithion::net::NodeId /*peer*/,
-                                 int /*weight*/,
+// ============================================================================
+// Private — caller holds m_mutex
+// ============================================================================
+
+bool CPeerScorer::AddScoreLocked(::dilithion::net::NodeId peer,
+                                 int weight,
                                  const std::string& /*reason*/)
 {
-    assert(false && "CPeerScorer::AddScoreLocked — implementation in PR2.2");
-    return false;
+    // Zero or negative weight is a no-op per upstream pattern (callers can
+    // pass 0 to "report misbehavior without a quantifiable penalty").
+    if (weight <= 0) return false;
+
+    // Sanity assertion (debug-only): catch unbounded growth from a
+    // forgotten ResetScore in CPeerManager::RemovePeer. Bound is 10x the
+    // expected MAX_TOTAL_CONNECTIONS=125.
+    assert(m_scores.size() <= 10000 && "CPeerScorer score map leak — "
+           "ResetScore likely missing from a disconnect path");
+
+    int& score = m_scores[peer];  // creates entry if missing (default 0)
+    score += weight;
+
+    // Clamp at ban threshold for the bool return — exact-or-over.
+    return score >= m_ban_threshold;
 }
 
 }  // namespace dilithion::net::port

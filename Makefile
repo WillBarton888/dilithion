@@ -419,7 +419,7 @@ dilv-genesis-vdf: $(CORE_OBJECTS) $(OBJ_DIR)/tools/dilv_genesis_vdf.o $(DILITHIU
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests peer_scorer_tests
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
@@ -527,6 +527,11 @@ addrman_v2_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/addrman_v2_tests.o $(DILITHIUM
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ addrman_v2_tests built successfully$(COLOR_RESET)"
+
+peer_scorer_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_scorer_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_scorer_tests built successfully$(COLOR_RESET)"
 
 dna_serialization_test: $(CORE_OBJECTS) $(OBJ_DIR)/digital_dna/dna_serialization_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
