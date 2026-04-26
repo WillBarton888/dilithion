@@ -178,65 +178,32 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         auto heightIt = mapHeightIndex.find(expectedHeight);
         bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-        // FAST PATH 1: Below checkpoint - skip PoW validation but still store.
-        // Checkpoints are hardcoded guarantees of the canonical chain.
-        // No competing header below a checkpoint can ever produce a valid reorg,
-        // so there's no reason to compute expensive RandomX PoW hashes.
-        // But we MUST still store headers so the chain walk in
-        // GetBestChainHashAtHeight() works during IBD block fetching.
+        // PR5.6 (2026-04-26): Patch H FAST PATH 1 (v4.0.22 below-checkpoint
+        // competing-sibling storage) DELETED.
         //
-        // Phase 3 disposition (Q3 plan recommended PR3.4 deletion): Patch H
-        // STAYS until Phase 5 retires the legacy `ProcessHeaders` path. The
-        // upstream-pattern HeadersSyncStateV2 (Phase 3) bypasses this code
-        // entirely (its `pow_validated_headers` get pushed into mapHeaders
-        // through ProcessHeadersWithDoSProtection's success path), but
-        // ProcessHeaders is still reachable for non-DoS-protected callers.
-        // Deleting Patch H now would re-introduce the silent-drop bug for
-        // any flow that lands here. Phase 5's chain-selection rewrite is the
-        // natural retirement point.
-        if (expectedHeight <= highestCheckpoint) {
-            // Patch H (v4.0.22) -- Compute incoming hash and check for true
-            // duplicate. PRIOR BUG: if mapHeightIndex already had ANY header
-            // at this height, the incoming header was silently dropped via
-            // *heightIt->second.begin() picking the first-arrived sibling.
-            // That left competing siblings unstored, so when a node received
-            // the canonical sibling AFTER committing to a wrong-fork sibling
-            // (LDN/SGP at 44468 during the 2026-04-25 incident), the canonical
-            // header was never seen by chain selection. UpdateBestHeader could
-            // not reorg because the alternative chain did not exist in
-            // mapHeaders. Fix: store every distinct sibling and let cumulative
-            // chain work decide via UpdateBestHeader. Checkpoint at the next
-            // height (or above) still enforces which sibling is canonical via
-            // the parent-hash link from the checkpoint header.
-            uint256 storageHash = header.GetHash();
-
-            // True duplicate: same hash already stored - advance pprev and skip.
-            auto existingIt = mapHeaders.find(storageHash);
-            if (existingIt != mapHeaders.end()) {
-                pprev = &existingIt->second;
-                prevHash = storageHash;
-                heightStart = existingIt->second.height;
-                continue;
-            }
-
-            // New header at this height (either empty slot or competing sibling).
-            // Skip the expensive RandomX PoW check (below checkpoint, trust
-            // anchor handles validity) but DO store and register the header so
-            // cumulative chain-work comparison can pick the canonical chain
-            // over a stuck wrong-fork sibling.
-            int height = pprev ? (pprev->height + 1) : expectedHeight;
-            uint256 chainWork = CalculateChainWork(header, pprev);
-            HeaderWithChainWork headerData(header, height);
-            headerData.chainWork = chainWork;
-            mapHeaders[storageHash] = headerData;
-            AddToHeightIndex(storageHash, height);
-            UpdateChainTips(storageHash);   // Patch H -- register competing tip
-            UpdateBestHeader(storageHash);  // Patch H -- re-evaluate active chain
-            pprev = &mapHeaders[storageHash];
-            prevHash = storageHash;
-            if (heightStart < 0) heightStart = height;
-            continue;  // Skip PoW validation but header is now stored
-        }
+        // Patch H was the 2026-04-25 incident-response hotfix: when a node
+        // received a competing sibling below a checkpoint AFTER committing
+        // to a different sibling, Patch H ensured both got stored so chain-
+        // work selection could pick the canonical one. Without Patch H pre-
+        // fix, the second-arrived sibling was silently dropped (incident
+        // root cause for LDN/SGP testnet at height 44468).
+        //
+        // Phase 5 retirement: structural coverage is now preserved by the
+        // SLOW PATH below (which stores every header it processes including
+        // competing siblings). Below-checkpoint headers now incur RandomX/VDF
+        // validation cost — slower IBD by some milliseconds-per-header but
+        // structural property holds. Validated by competing_sibling_below_
+        // checkpoint_tests (PR5.3 commit 5120895; 4/4 green).
+        //
+        // Pre-conditions met (per plan §8 PR5.6):
+        //   1. PR5.5 — DEFERRED to Phase 6 (HeadersManager rewrite). Patch H
+        //      deletion is independent because SLOW PATH naturally handles
+        //      sibling storage.
+        //   2. DILITHION_USE_NEW_CHAIN_SELECTOR default ON (PR5.4 commit
+        //      f303de1) — ✓
+        //   3. Reachability proof: SLOW PATH (line 255+) stores every
+        //      header at mapHeaders[storageHash] = headerData — competing
+        //      siblings preserved by construction.
 
         // FAST PATH 2: Below common ancestor height, headers are identical on both chains
         // Skip hash computation - use our existing headers instead
