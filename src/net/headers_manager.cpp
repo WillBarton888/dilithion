@@ -2103,22 +2103,42 @@ void CHeadersManager::UpdateChainTips(const uint256& hashNew)
     // but well below pathological growth. When the cap is exceeded,
     // evict the LOWEST-work tip — these are the least useful for any
     // future reorg consideration.
+    //
+    // Validation pass 2026-04-26: tiebreaker concern — when multiple
+    // tips share the same chainWork, an attacker who grinds nonces can
+    // control which uint256 hash sorts lowest in std::set iteration.
+    // Mitigation: NEVER evict any tip whose chainWork equals the best
+    // chainWork — protect honest tips against same-work attackers.
     static constexpr size_t MAX_CHAIN_TIPS = 256;
     if (setChainTips.size() > MAX_CHAIN_TIPS) {
+        // First pass: compute best chainWork (we MUST NOT evict any
+        // tip at this work level).
+        uint256 bestWork;
+        for (const auto& tipHash : setChainTips) {
+            auto tipIt = mapHeaders.find(tipHash);
+            if (tipIt == mapHeaders.end()) continue;
+            if (bestWork.IsNull() || ChainWorkGreaterThan(tipIt->second.chainWork, bestWork)) {
+                bestWork = tipIt->second.chainWork;
+            }
+        }
+
+        // Second pass: collect orphans (purge ALL of them, not just first)
+        // and find lowest-strictly-below-best work.
+        std::vector<uint256> orphans;
         uint256 worstHash;
         uint256 worstWork;
         bool worstSet = false;
         for (const auto& tipHash : setChainTips) {
-            // Never evict the new tip we just added; we just inserted it
-            // for a reason and immediate eviction would be silly.
             if (std::memcmp(tipHash.data, hashNew.data, 32) == 0) continue;
             auto tipIt = mapHeaders.find(tipHash);
             if (tipIt == mapHeaders.end()) {
-                // Orphaned setChainTips entry (no mapHeaders match) —
-                // safe to evict; cleans up stale state.
-                worstHash = tipHash;
-                worstSet = true;
-                break;
+                orphans.push_back(tipHash);
+                continue;
+            }
+            // Skip tips whose work equals best — attacker-influenceable
+            // tiebreaker would otherwise let them target honest tips.
+            if (!ChainWorkGreaterThan(bestWork, tipIt->second.chainWork)) {
+                continue;
             }
             if (!worstSet || ChainWorkGreaterThan(worstWork, tipIt->second.chainWork)) {
                 worstHash = tipHash;
@@ -2126,9 +2146,19 @@ void CHeadersManager::UpdateChainTips(const uint256& hashNew)
                 worstSet = true;
             }
         }
-        if (worstSet) {
+
+        // Sweep orphans first (free cleanup, lowest-priority entries).
+        for (const auto& o : orphans) {
+            setChainTips.erase(o);
+        }
+        // If still over cap and we found a strictly-below-best target, evict it.
+        if (setChainTips.size() > MAX_CHAIN_TIPS && worstSet) {
             setChainTips.erase(worstHash);
         }
+        // Edge case: if EVERY non-just-inserted tip is at best chainWork
+        // (extreme stress under nonce-grinding attack), no eviction
+        // happens — set grows above cap until honest activity introduces
+        // a new best. Prefer this over evicting honest tips.
     }
 }
 

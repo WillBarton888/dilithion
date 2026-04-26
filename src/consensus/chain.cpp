@@ -18,6 +18,8 @@
 #include <util/logging.h>
 #include <iostream>
 #include <algorithm>
+#include <cstring>      // std::strcmp (env-var check)
+#include <mutex>        // std::once_flag (chain selector path startup log)
 #include <set>
 #include <thread>
 #include <chrono>
@@ -280,7 +282,19 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         // stricter failure mode than pre-PR5.4 (operator-consent recovery
         // via wrapper-restart) but produces the same end-state on success.
         const char* envVar = std::getenv("DILITHION_USE_NEW_CHAIN_SELECTOR");
-        const bool useNewPath = (envVar && std::string(envVar) == "1");
+        const bool useNewPath = (envVar && std::strcmp(envVar, "1") == 0);
+
+        // Startup log on FIRST ActivateBestChain call — operator audit
+        // visibility (red-team validation 2026-04-26 recommended item).
+        // Static once-per-process so we don't spam every block.
+        static std::once_flag pathLoggedFlag;
+        std::call_once(pathLoggedFlag, [useNewPath]() {
+            std::cerr << "[Chain] selection path: "
+                      << (useNewPath ? "NEW (env-var=1 OPT-IN)"
+                                     : "LEGACY (Cases 1/2/2.5/3, default)")
+                      << std::endl;
+        });
+
         if (useNewPath) {
             // Make sure pindexNew is in the candidate set if eligible. The
             // new path picks the heaviest leaf via FindMostWorkChainImpl.
