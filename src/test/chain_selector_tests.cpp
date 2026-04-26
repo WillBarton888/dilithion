@@ -539,6 +539,119 @@ void test_mark_block_as_valid_clears_failed_child()
     std::cout << " OK\n";
 }
 
+void test_invalidate_block_impl_propagates_and_drops_candidates()
+{
+    std::cout << "  test_invalidate_block_impl_propagates_and_drops_candidates..."
+              << std::flush;
+
+    // A -> B -> D (B has work_seed=10, D has work_seed=20, all valid)
+    //       \-> E (work_seed=15)
+    // After RecomputeCandidates: D, E in candidate set; FindMostWork picks D.
+    // After InvalidateBlockImpl(B): B + D + E all invalid; candidates empty;
+    // FindMostWork returns nullptr (no valid leaves); A is unaffected.
+    CChainState chainstate;
+    auto pA = MakePreValidationLeaf(0x90, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    chainstate.SetTip(chainstate.GetBlockIndex(hA));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0x91, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pD = MakePreValidationLeaf(0x92, B, 2,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 20, 3);
+    uint256 hD = pD->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hD, std::move(pD)));
+    CBlockIndex* D = chainstate.GetBlockIndex(hD);
+
+    auto pE = MakePreValidationLeaf(0x93, B, 2,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 15, 4);
+    uint256 hE = pE->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hE, std::move(pE)));
+    CBlockIndex* E = chainstate.GetBlockIndex(hE);
+
+    chainstate.RecomputeCandidates();
+    assert(chainstate.FindMostWorkChainImpl() == D);  // sanity: D is the heaviest
+
+    bool invalidated = chainstate.InvalidateBlockImpl(hB);
+    assert(invalidated);
+
+    // B and descendants are now invalid.
+    assert(B->IsInvalid());
+    assert(D->IsInvalid());
+    assert(E->IsInvalid());
+    // A is NOT affected.
+    assert(!A->IsInvalid());
+
+    // After Invalidate, no valid leaves remain (only A, but A has children).
+    // FindMostWorkChainImpl returns nullptr — nothing to activate.
+    assert(chainstate.FindMostWorkChainImpl() == nullptr);
+
+    // Negative case: invalidating an unknown hash returns false.
+    uint256 unknown;
+    std::memset(unknown.data, 0, 32);
+    unknown.data[0] = 0xFF;
+    assert(!chainstate.InvalidateBlockImpl(unknown));
+
+    std::cout << " OK\n";
+}
+
+void test_reconsider_block_impl_restores_candidates()
+{
+    std::cout << "  test_reconsider_block_impl_restores_candidates..."
+              << std::flush;
+
+    // A -> B -> D (all valid)
+    // Invalidate(B) -> Reconsider(B). After Reconsider, D should be a
+    // candidate again and FindMostWork picks D.
+    CChainState chainstate;
+    auto pA = MakePreValidationLeaf(0xA0, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    chainstate.SetTip(chainstate.GetBlockIndex(hA));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0xA1, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pD = MakePreValidationLeaf(0xA2, B, 2,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 20, 3);
+    uint256 hD = pD->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hD, std::move(pD)));
+    CBlockIndex* D = chainstate.GetBlockIndex(hD);
+
+    chainstate.RecomputeCandidates();
+    assert(chainstate.FindMostWorkChainImpl() == D);
+
+    assert(chainstate.InvalidateBlockImpl(hB));
+    assert(B->IsInvalid());
+    assert(D->IsInvalid());
+    assert(chainstate.FindMostWorkChainImpl() == nullptr);
+
+    assert(chainstate.ReconsiderBlockImpl(hB));
+    assert(!B->IsInvalid());
+    assert(!D->IsInvalid());
+    // D should be a candidate again — RecomputeCandidates ran inside Reconsider.
+    assert(chainstate.FindMostWorkChainImpl() == D);
+
+    // Negative: reconsidering an unknown hash returns false.
+    uint256 unknown;
+    std::memset(unknown.data, 0, 32);
+    unknown.data[0] = 0xEE;
+    assert(!chainstate.ReconsiderBlockImpl(unknown));
+
+    std::cout << " OK\n";
+}
+
 void test_find_most_work_chain_returns_heaviest_valid_leaf()
 {
     std::cout << "  test_find_most_work_chain_returns_heaviest_valid_leaf..."
@@ -607,7 +720,12 @@ int main()
         test_mark_block_as_valid_clears_failed_child();
         test_find_most_work_chain_returns_heaviest_valid_leaf();
 
-        std::cout << "\n=== All chain_selector_tests passed (14 tests: 4 + 5 + 5) ==="
+        std::cout << "\n--- PR5.3 Day 3 PM: Invalidate / Reconsider operator overrides ---"
+                  << std::endl;
+        test_invalidate_block_impl_propagates_and_drops_candidates();
+        test_reconsider_block_impl_restores_candidates();
+
+        std::cout << "\n=== All chain_selector_tests passed (16 tests: 4 + 5 + 5 + 2) ==="
                   << std::endl;
         return 0;
     } catch (const std::exception& e) {

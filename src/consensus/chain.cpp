@@ -2044,26 +2044,187 @@ CBlockIndex* CChainState::FindMostWorkChainImpl()
     return nullptr;
 }
 
-// ----- Day 3 PM (still scaffold): ActivateBestChainStep, InvalidateBlockImpl,
-// ReconsiderBlockImpl. These integrate WAL + DisconnectTip + ConnectTip and
-// are landed in the next Day 3 PM commit.
+// ============================================================================
+// Phase 5 Day 3 PM: ActivateBestChainStep + InvalidateBlockImpl +
+// ReconsiderBlockImpl.
+// ============================================================================
+//
+// ActivateBestChainStep mirrors upstream Bitcoin Core's atomic reorg pattern:
+//   1. Find common ancestor (FindFork)
+//   2. WAL: BeginReorg, EnterDisconnectPhase
+//   3. Disconnect-loop: walk pindexTip back to fork, DisconnectTip each
+//   4. WAL: EnterConnectPhase
+//   5. Connect-loop: walk fork forward to pindexMostWork, ConnectTip each
+//   6. WAL: CompleteReorg on success / AbortReorg on any failure
+//
+// Failure handling:
+//   * DisconnectTip failure → AbortReorg, return false (hard failure)
+//   * ConnectTip failure   → MarkBlockAsFailed(p), set fInvalidFound=true,
+//                            AbortReorg, return TRUE (caller retries with
+//                            FindMostWorkChain — the failed leaf has been
+//                            removed from candidates by MarkBlockAsFailed)
+//   * Block-load failure   → AbortReorg, return false (hard failure)
+//
+// WAL call-site mapping (per plan §5.3 — re-verified Day 3 PM 2026-04-26):
+//   * BeginReorg                   — line ~ActivateBestChainStep entry
+//   * EnterDisconnectPhase         — before disconnect loop
+//   * UpdateDisconnectProgress     — after each successful DisconnectTip
+//   * EnterConnectPhase            — between disconnect and connect phases
+//   * UpdateConnectProgress        — after each successful ConnectTip
+//   * CompleteReorg                — only on full success
+//   * AbortReorg                   — every failure return path
 
-bool CChainState::ActivateBestChainStep(CBlockIndex* /*pindexMostWork*/,
-                                        std::shared_ptr<const CBlock> /*pblock_optional*/,
-                                        bool& /*fInvalidFound*/)
+bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
+                                        std::shared_ptr<const CBlock> pblock_optional,
+                                        bool& fInvalidFound)
 {
-    assert(false && "CChainState::ActivateBestChainStep — real impl in PR5.3 Day 3 PM");
-    return false;
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+    fInvalidFound = false;
+
+    if (!pindexMostWork) return false;
+    if (pindexMostWork == pindexTip) return true;  // already there — no-op success
+
+    // 1) Common ancestor.
+    CBlockIndex* pindexFork = pindexTip ? FindFork(pindexTip, pindexMostWork) : nullptr;
+    // For genesis activation, pindexTip is null — pindexFork stays null and
+    // disconnect list is empty; connect list walks pindexMostWork all the way back.
+
+    // 2) Build disconnect list (pindexTip ... pindexFork-exclusive).
+    std::vector<CBlockIndex*> disconnect;
+    for (CBlockIndex* p = pindexTip; p && p != pindexFork; p = p->pprev) {
+        disconnect.push_back(p);
+    }
+
+    // 3) Build connect list (pindexFork-exclusive ... pindexMostWork), then
+    //    reverse so we connect from oldest to newest.
+    std::vector<CBlockIndex*> connect;
+    for (CBlockIndex* p = pindexMostWork; p && p != pindexFork; p = p->pprev) {
+        connect.push_back(p);
+    }
+    std::reverse(connect.begin(), connect.end());
+
+    // 4) WAL: BeginReorg with the full plan.
+    if (m_reorgWAL) {
+        std::vector<uint256> disconnectHashes;
+        disconnectHashes.reserve(disconnect.size());
+        for (CBlockIndex* p : disconnect) disconnectHashes.push_back(p->GetBlockHash());
+
+        std::vector<uint256> connectHashes;
+        connectHashes.reserve(connect.size());
+        for (CBlockIndex* p : connect) connectHashes.push_back(p->GetBlockHash());
+
+        const uint256 forkHash = pindexFork ? pindexFork->GetBlockHash() : uint256();
+        const uint256 oldTipHash = pindexTip ? pindexTip->GetBlockHash() : uint256();
+        const uint256 newTipHash = pindexMostWork->GetBlockHash();
+
+        if (!m_reorgWAL->BeginReorg(forkHash, oldTipHash, newTipHash,
+                                    disconnectHashes, connectHashes)) {
+            return false;
+        }
+        m_reorgWAL->EnterDisconnectPhase();
+    }
+
+    // 5) Disconnect loop.
+    uint32_t disconnectedCount = 0;
+    for (CBlockIndex* p : disconnect) {
+        if (!DisconnectTip(p, /*force_skip_utxo=*/false)) {
+            std::cerr << "[Chain] ActivateBestChainStep: DisconnectTip failed at height "
+                      << p->nHeight << std::endl;
+            if (m_reorgWAL) m_reorgWAL->AbortReorg();
+            return false;
+        }
+        ++disconnectedCount;
+        if (m_reorgWAL) m_reorgWAL->UpdateDisconnectProgress(disconnectedCount);
+    }
+
+    // 6) WAL: enter connect phase.
+    if (m_reorgWAL) m_reorgWAL->EnterConnectPhase();
+
+    // 7) Connect loop.
+    uint32_t connectedCount = 0;
+    for (CBlockIndex* p : connect) {
+        // Choose the block source: caller's optional shared_ptr if it
+        // matches by hash; otherwise read from disk via pdb.
+        CBlock localBlock;
+        const CBlock* pblock = nullptr;
+        if (pblock_optional && pblock_optional->GetHash() == p->GetBlockHash()) {
+            pblock = pblock_optional.get();
+        } else {
+            if (!pdb || !pdb->ReadBlock(p->GetBlockHash(), localBlock)) {
+                std::cerr << "[Chain] ActivateBestChainStep: ReadBlock failed for "
+                          << p->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
+                if (m_reorgWAL) m_reorgWAL->AbortReorg();
+                return false;
+            }
+            pblock = &localBlock;
+        }
+
+        if (!ConnectTip(p, *pblock)) {
+            // Validation failure on a SPECIFIC block: mark it failed and
+            // signal the caller to retry with FindMostWorkChain. The set
+            // membership maintenance happens inside MarkBlockAsFailed.
+            std::cerr << "[Chain] ActivateBestChainStep: ConnectTip failed at height "
+                      << p->nHeight << " — marking block failed" << std::endl;
+            MarkBlockAsFailed(p);
+            fInvalidFound = true;
+            if (m_reorgWAL) m_reorgWAL->AbortReorg();
+            // Return TRUE: the step itself completed (cleanly aborted); caller
+            // re-enters FindMostWorkChain to pick the next-best leaf.
+            return true;
+        }
+        ++connectedCount;
+        if (m_reorgWAL) m_reorgWAL->UpdateConnectProgress(connectedCount);
+    }
+
+    // 8) Full reorg success.
+    if (m_reorgWAL) m_reorgWAL->CompleteReorg();
+    return true;
 }
 
-bool CChainState::InvalidateBlockImpl(const uint256& /*hash*/)
+bool CChainState::InvalidateBlockImpl(const uint256& hash)
 {
-    assert(false && "CChainState::InvalidateBlockImpl — real impl in PR5.3 Day 3 PM");
-    return false;
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    CBlockIndex* pindex = nullptr;
+    {
+        auto it = mapBlockIndex.find(hash);
+        if (it == mapBlockIndex.end()) return false;
+        pindex = it->second.get();
+    }
+    if (!pindex) return false;
+
+    // Mark target + descendants. MarkBlockAsFailed already removes the
+    // failed entries from m_setBlockIndexCandidates.
+    MarkBlockAsFailed(pindex);
+
+    // Re-add eligible siblings/ancestors as candidates if they are leaves
+    // (e.g., a previously-non-leaf entry whose only child just got marked
+    // failed becomes a candidate).
+    RecomputeCandidates();
+
+    // NOTE: re-selection (calling ActivateBestChain) is the caller's job —
+    // the RPC handler triggers it after this returns. Keeps Invalidate
+    // mechanically separable from the reorg loop.
+    return true;
 }
 
-bool CChainState::ReconsiderBlockImpl(const uint256& /*hash*/)
+bool CChainState::ReconsiderBlockImpl(const uint256& hash)
 {
-    assert(false && "CChainState::ReconsiderBlockImpl — real impl in PR5.3 Day 3 PM");
-    return false;
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    CBlockIndex* pindex = nullptr;
+    {
+        auto it = mapBlockIndex.find(hash);
+        if (it == mapBlockIndex.end()) return false;
+        pindex = it->second.get();
+    }
+    if (!pindex) return false;
+
+    // MarkBlockAsValid clears failure flags and calls RecomputeCandidates
+    // internally — newly-eligible leaves are re-added to the candidate set.
+    MarkBlockAsValid(pindex);
+
+    // NOTE: re-selection (calling ActivateBestChain) is the caller's job —
+    // see InvalidateBlockImpl.
+    return true;
 }
