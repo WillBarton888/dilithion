@@ -260,11 +260,15 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         // Phase 5: read env-var per call. Red-team flagged this as a
         // possible perf/thread-safety concern, but block-receive rate is
         // ~one per 4 minutes (DIL block spacing) — getenv overhead is
-        // negligible. setenv() is only used by tests (single-threaded);
-        // production operators set the env-var at process startup.
-        // PR5.4 retires this dispatch by flipping the default to ON.
+        // negligible.
+        //
+        // PR5.4 (2026-04-26): default flipped — unset OR any value other than
+        // "0" routes to the new path. Operators wanting the legacy path
+        // (Cases 1/2/2.5/3 without Patch B) must explicitly set =0. The
+        // legacy path is preserved through Phase 7 burn-in window per plan
+        // §12 Q5b.
         const char* envVar = std::getenv("DILITHION_USE_NEW_CHAIN_SELECTOR");
-        const bool useNewPath = (envVar && std::string(envVar) == "1");
+        const bool useNewPath = !(envVar && std::string(envVar) == "0");
         if (useNewPath) {
             // Make sure pindexNew is in the candidate set if eligible. The
             // new path picks the heaviest leaf via FindMostWorkChainImpl.
@@ -412,24 +416,21 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         if (g_verbose.load(std::memory_order_relaxed))
             std::cout << "[Chain] VDF DISTRIBUTION REPLACEMENT -- 1-block reorg" << std::endl;
 
-        // v4.0.21 — Patch B: Capture the old tip's block data BEFORE disconnect so
-        // we can roll back if ConnectTip(pindexNew) fails.
+        // PR5.4 (2026-04-26): Patch B (v4.0.21 rollback safety net) DELETED.
         //
-        // Pre-fix bug (incident 2026-04-25): if ConnectTip below failed, undo data
-        // for oldTip was already deleted by DisconnectTip → UndoBlock → batch.Delete(undoKey).
-        // The function then returned false, leaving "block-is-tip-but-undo-missing".
-        // Any subsequent reorg attempt would deterministically fail trying to disconnect
-        // that block, looping forever. Fix B: re-apply old tip on failure.
-        CBlockIndex* pindexOldTip = pindexTip;
-        CBlock oldTipBlock;
-        bool oldTipBlockLoaded = false;
-        if (pdb != nullptr && pindexOldTip != nullptr) {
-            oldTipBlockLoaded = pdb->ReadBlock(pindexOldTip->GetBlockHash(), oldTipBlock);
-            if (!oldTipBlockLoaded) {
-                std::cerr << "[Chain] WARN: Could not pre-load old tip block for Case 2.5 rollback safety; "
-                          << "proceeding without rollback capability for height " << pindexOldTip->nHeight << std::endl;
-            }
-        }
+        // Phase 5 byte-equivalence proof (commit ff1947c) demonstrated that the
+        // new chain-selector path's symmetric-reapply failure handling produces
+        // byte-identical on-disk state to legacy Case 2.5 + Patch B. The new
+        // path is now the default (env-var unset → useNewPath=true); legacy
+        // path remains under env-var=0 for operator rollback during burn-in.
+        //
+        // On Case 2.5 ConnectTip failure WITHOUT Patch B: m_chain_needs_rebuild
+        // is set and the caller (IBDCoordinator) writes the auto_rebuild marker.
+        // The wrapper script wipes the datadir and re-syncs. This is the
+        // architecturally-clean failure mode (operator-consent path preserved
+        // per plan §5.5) — Patch B's in-place rollback was a 2026-04-25
+        // incident-response hotfix; the new path's structure makes it
+        // unnecessary.
 
         // Disconnect current tip
         if (!DisconnectTip(pindexTip)) {
@@ -439,27 +440,10 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
 
         // Connect new block (shares same parent as old tip)
         if (!ConnectTip(pindexNew, block)) {
-            std::cerr << "[Chain] CRITICAL: Failed to connect VDF replacement block" << std::endl;
-
-            // v4.0.21 — Patch B: roll back to old tip to restore undo data.
-            if (oldTipBlockLoaded && pindexOldTip != nullptr) {
-                std::cerr << "[Chain] Case 2.5 rollback: re-applying old tip "
-                          << pindexOldTip->GetBlockHash().GetHex().substr(0, 16)
-                          << " at height " << pindexOldTip->nHeight << std::endl;
-                if (!ConnectTip(pindexOldTip, oldTipBlock)) {
-                    std::cerr << "[CRITICAL] Case 2.5 rollback FAILED — chain state inconsistent at height "
-                              << pindexOldTip->nHeight << ". Triggering auto_rebuild." << std::endl;
-                    m_chain_needs_rebuild.store(true);
-                    return false;
-                }
-                pindexTip = pindexOldTip;
-                m_cachedHeight.store(pindexOldTip->nHeight, std::memory_order_release);
-                std::cerr << "[Chain] Case 2.5 rollback succeeded; old tip restored." << std::endl;
-            } else {
-                std::cerr << "[CRITICAL] Case 2.5 ConnectTip failed and old tip block was unreadable. "
-                          << "Cannot roll back. Triggering auto_rebuild." << std::endl;
-                m_chain_needs_rebuild.store(true);
-            }
+            std::cerr << "[CRITICAL] Case 2.5 ConnectTip failed. "
+                      << "Triggering auto_rebuild (no in-place rollback — Patch B retired in PR5.4)."
+                      << std::endl;
+            m_chain_needs_rebuild.store(true);
             return false;
         }
 
