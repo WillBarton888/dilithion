@@ -593,17 +593,37 @@ bool CAddrMan_v2::Add(const NetProtocol::CAddress& addr,
     return AddInternal(addr, ToNetAddr(source), /*time_penalty_secs=*/0);
 }
 
-void CAddrMan_v2::RecordAttempt(const NetProtocol::CAddress& /*addr*/,
-                                ConnectionOutcome /*outcome*/)
+void CAddrMan_v2::RecordAttempt(const NetProtocol::CAddress& addr,
+                                ConnectionOutcome outcome)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    // TODO Day 2 PM: dispatch to:
-    //   Success           -> ConnectedInternal + GoodInternal(test_before_evict)
-    //   HandshakeFailed   -> AttemptInternal(count_failure=true)
-    //   Timeout           -> AttemptInternal(count_failure=true)
-    //   PeerMisbehaved    -> AttemptInternal(count_failure=true)
-    //   LocalDisconnect   -> AttemptInternal(count_failure=false)
-    // Stubbed for Day 1 PM checkpoint compilation.
+
+    const CService svc = ToService(addr);
+    const int64_t now = NowSecs();
+
+    // Outcome → AddrMan-internal state updates. Mirrors the upstream split
+    // between Connected_/Good_/Attempt_ at addrman.cpp:626-711, 868-885.
+    switch (outcome) {
+        case ConnectionOutcome::Success:
+            // Successful peer-useful exchange — update wire-format time AND
+            // promote into tried (with test-before-evict on collision).
+            ConnectedInternal(svc, now);
+            GoodInternal(svc, /*test_before_evict=*/true, now);
+            break;
+
+        case ConnectionOutcome::HandshakeFailed:
+        case ConnectionOutcome::Timeout:
+        case ConnectionOutcome::PeerMisbehaved:
+            // The peer was unreachable or violated protocol — count this as
+            // a real failure against its quality score.
+            AttemptInternal(svc, /*count_failure=*/true, now);
+            break;
+
+        case ConnectionOutcome::LocalDisconnect:
+            // We hung up first (eviction, shutdown). Don't penalize the peer.
+            AttemptInternal(svc, /*count_failure=*/false, now);
+            break;
+    }
 }
 
 std::optional<NetProtocol::CAddress> CAddrMan_v2::Select(OutboundClass /*cls*/)
@@ -656,19 +676,77 @@ size_t CAddrMan_v2::Size() const
 // Day-2 internal stubs (kept here to make the link-edit surface explicit).
 // ============================================================================
 
-bool CAddrMan_v2::GoodInternal(const CService& /*addr*/,
-                               bool /*test_before_evict*/,
-                               int64_t /*now_secs*/)
+// Mirrors upstream's Good_ (addrman.cpp:626-679). Promotes a known address
+// from new to tried — with optional test-before-evict on collision.
+//
+// Returns true iff the address was moved into tried this call. False can mean
+// "already in tried", "not found", "collision queued for resolution", or
+// "test-before-evict skipped because slot was free". Callers don't currently
+// distinguish — the IAddressManager contract only exposes RecordAttempt's
+// void return.
+bool CAddrMan_v2::GoodInternal(const CService& addr,
+                               bool test_before_evict,
+                               int64_t now_secs)
 {
-    // TODO Day 2 PM
-    return false;
+    int id = 0;
+    m_last_good_secs = now_secs;
+
+    AddrInfo* pinfo = Find(addr, &id);
+    if (!pinfo) return false;
+    AddrInfo& info = *pinfo;
+
+    // Always update success/try metadata. nTime intentionally NOT touched
+    // here — Bitcoin Core comment: "to avoid leaking information about
+    // currently-connected peers" via ADDR gossip.
+    info.last_success_secs = now_secs;
+    info.last_try_secs = now_secs;
+    info.n_attempts = 0;
+
+    // Already tried? Nothing further to do.
+    if (info.in_tried) return false;
+
+    // Defensive: if the entry is in neither tried nor any new bucket, the
+    // tables are inconsistent. Bail rather than corrupt further.
+    if (info.n_ref_count == 0) return false;
+
+    // Where would this addr land in tried?
+    const int tried_bucket = GetTriedBucket(m_bucket_secret, addr);
+    const int tried_pos = GetBucketPosition(m_bucket_secret, /*fNew=*/false,
+                                            tried_bucket, addr);
+
+    // If the slot is occupied AND caller asked for test-before-evict, queue
+    // the candidate for ResolveTriedCollisions to settle later. Otherwise
+    // proceed with eviction now.
+    if (test_before_evict && m_tried_buckets[tried_bucket][tried_pos] != 0) {
+        if (m_tried_collisions.size() < ADDRMAN_SET_TRIED_COLLISION_SIZE) {
+            m_tried_collisions.insert(id);
+        }
+        return false;
+    }
+
+    MakeTried(id);
+    return true;
 }
 
-void CAddrMan_v2::AttemptInternal(const CService& /*addr*/,
-                                  bool /*count_failure*/,
-                                  int64_t /*now_secs*/)
+// Mirrors upstream's Attempt_ (addrman.cpp:693-711). Records that we tried
+// to connect; conditionally bumps the failure counter.
+void CAddrMan_v2::AttemptInternal(const CService& addr,
+                                  bool count_failure,
+                                  int64_t now_secs)
 {
-    // TODO Day 2 PM
+    AddrInfo* pinfo = Find(addr);
+    if (!pinfo) return;
+
+    pinfo->last_try_secs = now_secs;
+
+    // Debounce: only count this failure if the entry has been "good" since
+    // its last counted attempt. Otherwise rapid-fire failures from a single
+    // bad batch would inflate n_attempts unfairly.
+    if (count_failure &&
+        pinfo->last_count_attempt_secs < m_last_good_secs) {
+        pinfo->last_count_attempt_secs = now_secs;
+        ++pinfo->n_attempts;
+    }
 }
 
 std::optional<std::pair<NetProtocol::CAddress, int64_t>>
@@ -678,14 +756,86 @@ CAddrMan_v2::SelectInternal(bool /*new_only*/)
     return std::nullopt;
 }
 
+// Mirrors upstream's ResolveCollisions_ (addrman.cpp:903-963).
+//
+// For each address queued by GoodInternal as colliding with a tried slot:
+//   * If the existing tried entry has succeeded recently → keep it, drop the
+//     new one (it'll have to re-try later).
+//   * If the existing tried entry has been unreachable in the test window →
+//     evict it in favor of the new one.
+//   * If neither is true and the test window has elapsed → force-evict.
+//
+// Caller need not hold m_mutex specially — this is private and called from
+// public methods under their own lock. (Currently only RecordAttempt would
+// invoke it, but the call site is added in Phase 4 / 6 PeerManager.)
 void CAddrMan_v2::ResolveTriedCollisions()
 {
-    // TODO Day 2 PM
+    for (auto it = m_tried_collisions.begin(); it != m_tried_collisions.end();) {
+        const int id_new = *it;
+        bool erase_this = false;
+
+        auto info_it = m_info.find(id_new);
+        if (info_it == m_info.end()) {
+            // Entry vanished (Delete called between queueing and resolution).
+            erase_this = true;
+        } else {
+            AddrInfo& info_new = info_it->second;
+            const CService addr_svc = ToService(info_new.addr);
+            const int tried_bucket = GetTriedBucket(m_bucket_secret, addr_svc);
+            const int tried_pos = GetBucketPosition(m_bucket_secret,
+                                                    /*fNew=*/false,
+                                                    tried_bucket, addr_svc);
+
+            if (!addr_svc.IsRoutable()) {
+                // Address became unroutable — drop quietly.
+                erase_this = true;
+            } else if (m_tried_buckets[tried_bucket][tried_pos] != 0) {
+                const int id_old = m_tried_buckets[tried_bucket][tried_pos];
+                AddrInfo& info_old = m_info[id_old];
+                const int64_t now = NowSecs();
+
+                if (now - info_old.last_success_secs < ADDRMAN_REPLACEMENT_SECS) {
+                    // Old entry has connected successfully recently — keep it.
+                    erase_this = true;
+                } else if (now - info_old.last_try_secs < ADDRMAN_REPLACEMENT_SECS) {
+                    // Old entry is being tested. Give it ≥60s to either
+                    // succeed or fail clearly before we overrule.
+                    if (now - info_old.last_try_secs > 60) {
+                        GoodInternal(addr_svc, /*test_before_evict=*/false, now);
+                        erase_this = true;
+                    }
+                } else if (now - info_new.last_success_secs > ADDRMAN_TEST_WINDOW_SECS) {
+                    // Test window expired — force-evict to break the deadlock.
+                    GoodInternal(addr_svc, /*test_before_evict=*/false, now);
+                    erase_this = true;
+                }
+            } else {
+                // Slot freed up since queueing — promote without contest.
+                GoodInternal(addr_svc, /*test_before_evict=*/false, NowSecs());
+                erase_this = true;
+            }
+        }
+
+        if (erase_this) {
+            it = m_tried_collisions.erase(it);
+        } else {
+            ++it;
+        }
+    }
 }
 
-void CAddrMan_v2::ConnectedInternal(const CService& /*addr*/, int64_t /*time_secs*/)
+// Mirrors upstream's Connected_ (addrman.cpp:868-885). Bumps the wire-format
+// time on a known address — but only if it's stale by ≥20 minutes, to avoid
+// generating ADDR-message churn from every successful tick.
+void CAddrMan_v2::ConnectedInternal(const CService& addr, int64_t time_secs)
 {
-    // TODO Day 2 PM
+    AddrInfo* pinfo = Find(addr);
+    if (!pinfo) return;
+
+    constexpr int64_t kUpdateInterval = 20 * 60;  // 20 minutes
+    if (time_secs - static_cast<int64_t>(pinfo->addr.time) > kUpdateInterval) {
+        pinfo->addr.time = static_cast<uint32_t>(time_secs);
+    }
 }
 
 // ============================================================================
