@@ -7,12 +7,12 @@
 #include <node/block_index.h>
 #include <primitives/block.h>
 #include <consensus/pow.h>      // Phase 5: ChainWorkGreaterThan for candidate-set comparator
+#include <functional>
 #include <map>
 #include <set>                  // Phase 5: m_setBlockIndexCandidates
 #include <vector>
 #include <memory>
 #include <mutex>
-#include <functional>
 #include <atomic>
 #include <chrono>
 
@@ -41,7 +41,11 @@ struct CBlockIndexWorkComparator {
         if (ChainWorkGreaterThan(b->nChainWork, a->nChainWork)) return false;
         if (a->nSequenceId < b->nSequenceId) return true;
         if (b->nSequenceId < a->nSequenceId) return false;
-        return a < b;
+        // Phase 5 red-team CONCERN fix: raw `a < b` between separately-
+        // allocated objects is unspecified in C++17. std::less<T*> is
+        // explicitly required to provide a total order across all pointers
+        // of the type, regardless of whether they point into the same array.
+        return std::less<const CBlockIndex*>{}(a, b);
     }
 };
 

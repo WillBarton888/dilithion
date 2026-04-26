@@ -16,10 +16,12 @@
 
 #include <consensus/port/chain_selector_impl.h>
 #include <consensus/chain.h>
+#include <core/chainparams.h>
 #include <node/block_index.h>
 #include <primitives/block.h>
 
 #include <cassert>
+#include <cstdlib>     // setenv / _putenv_s
 #include <cstring>
 #include <iostream>
 #include <memory>
@@ -609,6 +611,222 @@ void test_adapter_find_most_work_chain_returns_heaviest()
     std::cout << " OK\n";
 }
 
+// ============================================================================
+// Red-team audit BLOCKER fixes (2026-04-26).
+// ============================================================================
+
+void test_blocker1_process_new_header_rejects_invalid_parent()
+{
+    // BLOCKER 1: ProcessNewHeader must refuse to extend a chain rooted in a
+    // known-invalid block. Without this, an attacker can flood headers
+    // descended from a single rejected-block hash and exhaust memory.
+    std::cout << "  test_blocker1_process_new_header_rejects_invalid_parent..."
+              << std::flush;
+
+    CChainState chainstate;
+    ::dilithion::consensus::port::ChainSelectorAdapter adapter(chainstate);
+
+    // Set up genesis A, then mark it invalid.
+    auto pA = MakePreValidationLeaf(0xD0, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+    A->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+    assert(A->IsInvalid());
+
+    // Build a header claiming A as its parent. ProcessNewHeader must reject.
+    auto h = MakeVDFHeader(hA, 0x1d00ffff, 1700000100);
+    bool ok = adapter.ProcessNewHeader(h);
+    assert(!ok && "ProcessNewHeader must reject headers rooted in invalid blocks");
+    // mapBlockIndex must be unchanged.
+    assert(chainstate.GetBlockIndex(h.GetHash()) == nullptr);
+
+    std::cout << " OK\n";
+}
+
+void test_blocker3_checkpoint_violation_in_ancestry_rejects_candidate()
+{
+    // BLOCKER 3: env-var=1 path must walk pindexMostWork's ancestry and
+    // run CheckpointCheck on each block back to the fork point. Without
+    // this, a heavier chain that violates a checkpoint MID-ANCESTRY (not
+    // at the leaf) gets activated. The legacy path checks only pindexNew
+    // because it activates one block at a time; the new path's reorg loop
+    // can advance many blocks ahead, opening this hole.
+    std::cout << "  test_blocker3_checkpoint_violation_in_ancestry_rejects_candidate..."
+              << std::flush;
+
+    // Save and stub g_chainParams (test isolates global state).
+    Dilithion::ChainParams* savedParams = Dilithion::g_chainParams;
+    Dilithion::ChainParams stubParams;
+
+    // Build chain A(genesis valid tip) -> B(h=1) -> C(h=2) -> D(h=3).
+    CChainState chainstate;
+
+    auto pA = MakePreValidationLeaf(0xF0, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    chainstate.SetTip(chainstate.GetBlockIndex(hA));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0xF1, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pC = MakePreValidationLeaf(0xF2, B, 2,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 3);
+    uint256 hC = pC->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hC, std::move(pC)));
+    CBlockIndex* C = chainstate.GetBlockIndex(hC);
+
+    auto pD = MakePreValidationLeaf(0xF3, C, 3,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 20, 4);
+    uint256 hD = pD->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hD, std::move(pD)));
+    CBlockIndex* D = chainstate.GetBlockIndex(hD);
+
+    // Install a checkpoint at height 2 with a hash that does NOT match C.
+    // CheckpointCheck(2, hC) will return false → ancestry-walk should
+    // mark C failed and prevent D from activating.
+    uint256 wrongHash;
+    std::memset(wrongHash.data, 0, 32);
+    wrongHash.data[0] = 0xAB;  // distinct from C's 0xF2 seed
+    stubParams.checkpoints.emplace_back(2, wrongHash);
+    Dilithion::g_chainParams = &stubParams;
+
+    // Engage the new path.
+#ifdef _WIN32
+    _putenv_s("DILITHION_USE_NEW_CHAIN_SELECTOR", "1");
+#else
+    setenv("DILITHION_USE_NEW_CHAIN_SELECTOR", "1", 1);
+#endif
+
+    chainstate.RecomputeCandidates();
+
+    // Dummy block — ActivateBestChain in the env-var=1 path checks the
+    // ancestry BEFORE ever calling ActivateBestChainStep, so the block
+    // contents are not exercised.
+    CBlock dummyBlock;
+    bool reorgOccurred = false;
+    bool ok = chainstate.ActivateBestChain(D, dummyBlock, reorgOccurred);
+
+    // Restore globals before any assert can throw.
+    Dilithion::g_chainParams = savedParams;
+#ifdef _WIN32
+    _putenv_s("DILITHION_USE_NEW_CHAIN_SELECTOR", "");
+#else
+    unsetenv("DILITHION_USE_NEW_CHAIN_SELECTOR");
+#endif
+
+    // Verify outcomes.
+    // 1. ActivateBestChain returns true (no hard failure; we just couldn't
+    //    activate any leaf because the only one violates the checkpoint).
+    assert(ok);
+    // 2. No reorg.
+    assert(!reorgOccurred);
+    // 3. Tip stays at A (the genesis).
+    assert(chainstate.GetTip() == A);
+    // 4. C — the violating block — is now invalid.
+    assert(C->IsInvalid() && "BLOCKER 3: checkpoint-violating ancestor must be marked failed");
+    // 5. D is invalid because C is.
+    assert(D->IsInvalid() && "BLOCKER 3: descendant of failed block must inherit FAILED_CHILD");
+    // 6. A and B are unaffected.
+    assert(!A->IsInvalid());
+    assert(!B->IsInvalid());
+
+    std::cout << " OK\n";
+}
+
+void test_blocker2_mark_block_as_valid_independent_failure_is_barrier()
+{
+    // BLOCKER 2: When a deep ancestor is reconsidered, an independently-
+    // FAILED_VALID descendant must act as a BARRIER for the propagation
+    // walk. Its own descendants stay FAILED_CHILD because their failure
+    // root is the still-failed descendant, not the reconsidered ancestor.
+    std::cout << "  test_blocker2_mark_block_as_valid_independent_failure_is_barrier..."
+              << std::flush;
+
+    // Topology: A -> B -> C -> D
+    //  - InvalidateBlock(A) marks A failed; B,C,D inherit FAILED_CHILD
+    //  - Then independently fail C (set FAILED_VALID on C)
+    //  - ReconsiderBlock(A) should clear:
+    //      * A's FAILED_VALID
+    //      * B's FAILED_CHILD (was only failed via A)
+    //    But should leave:
+    //      * C's FAILED_VALID (was independently set)
+    //      * C's FAILED_CHILD cleared (the A-rooted one) but C is still
+    //        IsInvalid via its FAILED_VALID
+    //      * D's FAILED_CHILD MUST stay because D descends from
+    //        still-invalid C — buggy code would clear it
+    CChainState chainstate;
+
+    auto pA = MakePreValidationLeaf(0xE0, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0xE1, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pC = MakePreValidationLeaf(0xE2, B, 2,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 3);
+    uint256 hC = pC->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hC, std::move(pC)));
+    CBlockIndex* C = chainstate.GetBlockIndex(hC);
+
+    auto pD = MakePreValidationLeaf(0xE3, C, 3,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 15, 4);
+    uint256 hD = pD->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hD, std::move(pD)));
+    CBlockIndex* D = chainstate.GetBlockIndex(hD);
+
+    // Step 1: Invalidate A. B/C/D all inherit FAILED_CHILD.
+    chainstate.MarkBlockAsFailed(A);
+    assert(A->IsInvalid());
+    assert(B->IsInvalid());
+    assert(C->IsInvalid());
+    assert(D->IsInvalid());
+    assert(B->nStatus & CBlockIndex::BLOCK_FAILED_CHILD);
+    assert(C->nStatus & CBlockIndex::BLOCK_FAILED_CHILD);
+    assert(D->nStatus & CBlockIndex::BLOCK_FAILED_CHILD);
+
+    // Step 2: Independently fail C (e.g., a ConnectTip on C failed
+    // separately at a later point). In real code C would already have
+    // BLOCK_FAILED_CHILD; we add BLOCK_FAILED_VALID to model an independent
+    // validation failure.
+    C->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+    assert(C->nStatus & CBlockIndex::BLOCK_FAILED_VALID);
+
+    // Step 3: Reconsider A. Walk should clear A's failure, clear B's
+    // FAILED_CHILD (B becomes valid). C's FAILED_CHILD gets cleared but
+    // C still has FAILED_VALID — C is still IsInvalid. D MUST stay
+    // marked because it descends from a still-invalid block.
+    chainstate.MarkBlockAsValid(A);
+
+    assert(!A->IsInvalid() && "A's failure flags cleared");
+    assert(!B->IsInvalid() && "B reconsidered (was only inherited)");
+
+    // C: FAILED_CHILD cleared, FAILED_VALID remains.
+    assert(!(C->nStatus & CBlockIndex::BLOCK_FAILED_CHILD));
+    assert(C->nStatus & CBlockIndex::BLOCK_FAILED_VALID);
+    assert(C->IsInvalid() && "C still invalid via independent FAILED_VALID");
+
+    // D: BLOCKER 2 fix — must still be marked because it descends from C.
+    // Buggy code would have cleared FAILED_CHILD on D (propagating through
+    // still-invalid C). Fixed code keeps it.
+    assert(D->IsInvalid() && "D must remain invalid — descends from still-failed C");
+    assert(D->nStatus & CBlockIndex::BLOCK_FAILED_CHILD);
+
+    std::cout << " OK\n";
+}
+
 void test_invalidate_block_impl_propagates_and_drops_candidates()
 {
     std::cout << "  test_invalidate_block_impl_propagates_and_drops_candidates..."
@@ -800,7 +1018,13 @@ int main()
         test_adapter_forwards_invalidate_and_reconsider();
         test_adapter_find_most_work_chain_returns_heaviest();
 
-        std::cout << "\n=== All chain_selector_tests passed (18 tests: 4 + 5 + 5 + 2 + 2) ==="
+        std::cout << "\n--- Red-team audit BLOCKER fixes ---"
+                  << std::endl;
+        test_blocker1_process_new_header_rejects_invalid_parent();
+        test_blocker2_mark_block_as_valid_independent_failure_is_barrier();
+        test_blocker3_checkpoint_violation_in_ancestry_rejects_candidate();
+
+        std::cout << "\n=== All chain_selector_tests passed (21 tests: 4 + 5 + 5 + 2 + 2 + 3) ==="
                   << std::endl;
         return 0;
     } catch (const std::exception& e) {

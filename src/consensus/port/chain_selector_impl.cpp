@@ -134,6 +134,17 @@ bool ChainSelectorAdapter::ProcessNewHeader(const CBlockHeader& header)
             // Orphan — caller must order parents before children.
             return false;
         }
+        // Phase 5 BLOCKER 1 fix (red-team audit 2026-04-26): refuse to
+        // extend a chain rooted in a known-invalid block. Without this,
+        // an attacker who learns one rejected-block hash (visible via
+        // getchaintips RPC) can flood the node with headers descended
+        // from it — each one adding a CBlockIndex to mapBlockIndex,
+        // computing chain-work, and worsening MarkBlockAsFailed's O(N²)
+        // walk. Memory grows unbounded under sustained flood.
+        // Mirrors upstream Bitcoin Core net_processing.cpp::AcceptBlockHeader.
+        if (pprev->IsInvalid()) {
+            return false;
+        }
         nHeight = pprev->nHeight + 1;
         nChainWork = ::dilithion::consensus::AddChainWork(
             pprev->nChainWork,

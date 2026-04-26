@@ -59,6 +59,17 @@ void CChainState::Cleanup() {
     // would dereference dangling pointers via the comparator.
     m_setBlockIndexCandidates.clear();
 
+    // Phase 5 red-team CONCERN fix: drop registered callbacks too. External
+    // components (HeadersManager, wallet) hold std::function<>s captured
+    // with raw const CBlockIndex* pointers from prior callback invocations.
+    // After Cleanup the underlying CBlockIndex objects are destroyed; firing
+    // a stale callback after Cleanup would be use-after-free. The Shutdown
+    // sequence in node_context.cpp resets HeadersManager BEFORE chainstate
+    // tears down — but defense-in-depth says clear them anyway.
+    m_tipCallbacks.clear();
+    m_blockConnectCallbacks.clear();
+    m_blockDisconnectCallbacks.clear();
+
     // HIGH-C001 FIX: Smart pointers automatically destruct when map is cleared
     // No need for manual delete - RAII handles cleanup
     mapBlockIndex.clear();
@@ -246,6 +257,12 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     // exactly the pre-Phase-5 behavior. Env-var=1 opt-in lets operators
     // exercise the new path during the burn-in window.
     {
+        // Phase 5: read env-var per call. Red-team flagged this as a
+        // possible perf/thread-safety concern, but block-receive rate is
+        // ~one per 4 minutes (DIL block spacing) — getenv overhead is
+        // negligible. setenv() is only used by tests (single-threaded);
+        // production operators set the env-var at process startup.
+        // PR5.4 retires this dispatch by flipping the default to ON.
         const char* envVar = std::getenv("DILITHION_USE_NEW_CHAIN_SELECTOR");
         const bool useNewPath = (envVar && std::string(envVar) == "1");
         if (useNewPath) {
@@ -270,6 +287,40 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                 CBlockIndex* pindexMostWork = FindMostWorkChainImpl();
                 if (!pindexMostWork) break;
                 if (pindexMostWork == pindexTip) break;  // already at best
+
+                // Phase 5 BLOCKER 3 fix (red-team audit 2026-04-26):
+                // checkpoint validation must cover the FULL ancestry from
+                // the current tip up to pindexMostWork, not just the
+                // single-block pindexNew. The legacy path activates one
+                // block at a time so its top-of-function CheckpointCheck
+                // is sufficient there. The new path's reorg loop can
+                // activate a leaf many blocks ahead of the current tip;
+                // any intermediate ancestor that violates a checkpoint
+                // would otherwise slip through.
+                if (Dilithion::g_chainParams) {
+                    CBlockIndex* pindexFork = pindexTip
+                        ? FindFork(pindexTip, pindexMostWork) : nullptr;
+                    bool checkpointViolated = false;
+                    CBlockIndex* violatingBlock = nullptr;
+                    for (CBlockIndex* p = pindexMostWork;
+                         p && p != pindexFork;
+                         p = p->pprev) {
+                        if (!Dilithion::g_chainParams->CheckpointCheck(
+                                p->nHeight, p->GetBlockHash())) {
+                            checkpointViolated = true;
+                            violatingBlock = p;
+                            break;
+                        }
+                    }
+                    if (checkpointViolated) {
+                        std::cerr << "[Chain] Checkpoint violation in candidate"
+                                  << " ancestry at height " << violatingBlock->nHeight
+                                  << " hash=" << violatingBlock->GetBlockHash().GetHex().substr(0, 16)
+                                  << "... — marking subtree failed" << std::endl;
+                        MarkBlockAsFailed(violatingBlock);
+                        continue;  // retry with next-best leaf
+                    }
+                }
 
                 bool fInvalidFound = false;
                 if (!ActivateBestChainStep(pindexMostWork, pblockShared, fInvalidFound)) {
@@ -2047,6 +2098,15 @@ void CChainState::MarkBlockAsValid(CBlockIndex* pindex)
     // a descendant stays — that flag means the descendant ITSELF failed
     // validation independently, not that an ancestor did. Reconsider only
     // unblocks the ancestry-implied failure.
+    //
+    // Phase 5 BLOCKER 2 fix (red-team audit 2026-04-26): an
+    // independently-FAILED_VALID descendant must act as a BARRIER for
+    // further propagation. Its OWN descendants may legitimately be
+    // BLOCK_FAILED_CHILD because of the independently-failed sub-tree
+    // root, NOT because of the originally-reconsidered ancestor. If we
+    // propagated "reconsidered" through the still-invalid descendant
+    // we'd incorrectly clear FAILED_CHILD on grandchildren that should
+    // stay marked.
     std::set<CBlockIndex*> reconsidered{pindex};
     bool changed = true;
     while (changed) {
@@ -2057,8 +2117,14 @@ void CChainState::MarkBlockAsValid(CBlockIndex* pindex)
             if (!p->pprev) continue;
             if (reconsidered.count(p->pprev) > 0) {
                 p->nStatus &= ~CBlockIndex::BLOCK_FAILED_CHILD;
-                reconsidered.insert(p);
-                changed = true;
+                // Only propagate "reconsidered" if this descendant is no
+                // longer invalid after clearing FAILED_CHILD. An
+                // independently-failed descendant blocks the walk so its
+                // own sub-tree retains its inherited-failure flags.
+                if (!p->IsInvalid()) {
+                    reconsidered.insert(p);
+                    changed = true;
+                }
             }
         }
     }
