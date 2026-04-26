@@ -1,0 +1,190 @@
+// Copyright (c) 2026 The Dilithion Core developers
+// Distributed under the MIT software license
+//
+// Phase 3 — MaybePunishNodeFor* thin wrappers (deferred from Phase 2 §10
+// Q5=C). Mirrors Bitcoin Core net_processing.cpp's dispatch pattern: take
+// a typed reject-reason from a validation layer, map it to the scoring-
+// policy enum, forward to IPeerScorer::Misbehaving with the canonical
+// weight from misbehavior_policy.h::DefaultWeight().
+//
+// First production consumer: HeadersSync (PR3.3 cutover replaces direct
+// CPeerManager::Misbehaving calls in headerssync_v2.cpp's reject paths
+// with MaybePunishNodeForHeaders). Block + tx wrappers wired at one site
+// each in PR3.3 to satisfy the Phase 1 "no dead code" lesson.
+//
+// ============================================================================
+// DELIBERATE DIVERGENCE: three MisbehaviorType enums coexist after Phase 3.
+// ============================================================================
+//
+// 1. `dilithion::net::MisbehaviorType` (ipeer_scorer.h, FROZEN Phase 0).
+//    The scoring-policy enum: 15 values. Used by IPeerScorer::Misbehaving
+//    and consumed by misbehavior_policy.h::DefaultWeight.
+//
+// 2. `::MisbehaviorType` (banman.h, EXISTING). The diagnostic-logging
+//    enum with uint16_t numeric codes 100–600, baked into production
+//    banlist.dat files. Renumbering breaks ban-list compatibility.
+//
+// 3. `dilithion::net::port::HeaderRejectReason` (this file, NEW Phase 3).
+//    HeadersSync-specific reject taxonomy. Granular because Phase 2's
+//    enum is intentionally coarse, and HeadersSync diagnostic logs need
+//    per-reason discrimination.
+//
+// The enum-to-enum bridge tables in this header consolidate all three.
+// Drift detection: peer_scorer_tests.cpp covers (1)<->(2); a unit test in
+// PR3.1 (test_header_reject_reason_maps_exhaustively) covers (3)->(1).
+//
+// When Phase 6 / future PeerManager rewrite consolidates the dispatch,
+// this comment block can come down with the enum-merge PR.
+// ============================================================================
+
+#ifndef DILITHION_NET_PORT_MAYBE_PUNISH_NODE_H
+#define DILITHION_NET_PORT_MAYBE_PUNISH_NODE_H
+
+#include <net/ipeer_scorer.h>
+#include <net/port/misbehavior_policy.h>
+
+#include <string>
+
+namespace dilithion::net::port {
+
+// ============================================================================
+// Header reject reasons
+// ============================================================================
+//
+// HeadersSync-specific taxonomy. Maps to Phase 2's MisbehaviorType via
+// MapHeaderRejectToMisbehaviorType(). One source of truth for what each
+// header-validation failure costs the peer.
+enum class HeaderRejectReason {
+    InvalidProof,                  // CheckHeaderProof returned false (PoW or VDF sanity) — weight 100
+    InvalidHeaderFields,           // nBits == 0 or nVersion <= 0 — weight 50
+    NonContinuousChain,            // hashPrevBlock mismatch — weight 20
+    InsufficientChainWork,         // PRESYNC ended below MIN_CHAIN_WORK — weight 50
+    RedownloadCommitmentMismatch,  // Q6=B: weight 100 (adversarial signal)
+    MemoryBoundExceeded,           // m_max_commitments cap hit — weight 20
+    FutureTimestamp,               // wall-clock guard — weight 50
+};
+
+// Map HeaderRejectReason -> MisbehaviorType (scoring-policy enum). Keeps
+// the entire Phase 3 reject-reason → policy → weight pipeline in one place.
+constexpr ::dilithion::net::MisbehaviorType
+MapHeaderRejectToMisbehaviorType(HeaderRejectReason reason)
+{
+    using R = HeaderRejectReason;
+    using T = ::dilithion::net::MisbehaviorType;
+    switch (reason) {
+        case R::InvalidProof:                  return T::InvalidPoW;
+        case R::InvalidHeaderFields:           return T::InvalidHeader;
+        case R::NonContinuousChain:            return T::NonContinuousHeaders;
+        case R::InsufficientChainWork:         return T::InvalidHeader;
+        case R::RedownloadCommitmentMismatch:  return T::InvalidHeader;
+        case R::MemoryBoundExceeded:           return T::OversizedMessage;
+        case R::FutureTimestamp:               return T::InvalidHeader;
+    }
+    return T::UnknownMessage;  // unreachable; switch covers all values
+}
+
+// Special-case weights where DefaultWeight()'s coarse policy doesn't
+// reflect the granular reason. Q6=B: REDOWNLOAD commitment mismatch is
+// adversarial (peer sent us headers, we computed commitments, peer
+// then redownloaded different headers — active deception, not passive
+// validation failure). Bump it to 100 (immediate ban) regardless of the
+// underlying MisbehaviorType's default 50.
+constexpr int HeaderRejectWeight(HeaderRejectReason reason)
+{
+    switch (reason) {
+        case HeaderRejectReason::RedownloadCommitmentMismatch:
+            return 100;  // Q6=B override
+        default:
+            return ::dilithion::net::port::DefaultWeight(
+                MapHeaderRejectToMisbehaviorType(reason));
+    }
+}
+
+// ============================================================================
+// Public wrappers
+// ============================================================================
+//
+// All three return the bool that IPeerScorer::Misbehaving returns: true if
+// the peer's score crossed the ban threshold. Callers use that signal to
+// decide whether to disconnect immediately.
+
+inline bool MaybePunishNodeForHeaders(
+    ::dilithion::net::IPeerScorer& scorer,
+    ::dilithion::net::NodeId peer,
+    HeaderRejectReason reason,
+    const std::string& detail = "")
+{
+    return scorer.Misbehaving(peer, HeaderRejectWeight(reason), detail);
+}
+
+// Block-validation reject reasons (PR3.3 wires one site).
+enum class BlockRejectReason {
+    InvalidProof,
+    InvalidMerkleRoot,
+    InvalidCoinbase,
+    DuplicateTransactions,
+    DoubleSpend,
+};
+
+constexpr ::dilithion::net::MisbehaviorType
+MapBlockRejectToMisbehaviorType(BlockRejectReason reason)
+{
+    using R = BlockRejectReason;
+    using T = ::dilithion::net::MisbehaviorType;
+    switch (reason) {
+        case R::InvalidProof:           return T::InvalidPoW;
+        case R::InvalidMerkleRoot:      return T::InvalidBlock;
+        case R::InvalidCoinbase:        return T::InvalidBlock;
+        case R::DuplicateTransactions:  return T::InvalidBlock;
+        case R::DoubleSpend:            return T::InvalidBlock;
+    }
+    return T::UnknownMessage;
+}
+
+inline bool MaybePunishNodeForBlock(
+    ::dilithion::net::IPeerScorer& scorer,
+    ::dilithion::net::NodeId peer,
+    BlockRejectReason reason,
+    const std::string& detail = "")
+{
+    return scorer.Misbehaving(peer,
+        ::dilithion::net::port::DefaultWeight(MapBlockRejectToMisbehaviorType(reason)),
+        detail);
+}
+
+// Tx-validation reject reasons (PR3.3 wires one site).
+enum class TxRejectReason {
+    InvalidSignature,
+    DuplicateInputs,
+    Oversized,
+    DoubleSpend,
+};
+
+constexpr ::dilithion::net::MisbehaviorType
+MapTxRejectToMisbehaviorType(TxRejectReason reason)
+{
+    using R = TxRejectReason;
+    using T = ::dilithion::net::MisbehaviorType;
+    switch (reason) {
+        case R::InvalidSignature:  return T::InvalidSignature;
+        case R::DuplicateInputs:   return T::InvalidBlock;
+        case R::Oversized:         return T::OversizedMessage;
+        case R::DoubleSpend:       return T::InvalidBlock;
+    }
+    return T::UnknownMessage;
+}
+
+inline bool MaybePunishNodeForTx(
+    ::dilithion::net::IPeerScorer& scorer,
+    ::dilithion::net::NodeId peer,
+    TxRejectReason reason,
+    const std::string& detail = "")
+{
+    return scorer.Misbehaving(peer,
+        ::dilithion::net::port::DefaultWeight(MapTxRejectToMisbehaviorType(reason)),
+        detail);
+}
+
+}  // namespace dilithion::net::port
+
+#endif  // DILITHION_NET_PORT_MAYBE_PUNISH_NODE_H
