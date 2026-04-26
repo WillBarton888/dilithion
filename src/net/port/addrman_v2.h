@@ -195,6 +195,11 @@ public:
     };
     std::map<int /*Network*/, NetworkCounts> GetNetworkCountsForTest() const;
 
+    // Current size of the tried-collision queue. Used by the Phase 1 drain
+    // regression test (addrman_v2_tests::test_select_drains_tried_collisions)
+    // to verify that Select drains queued promotions instead of leaking them.
+    size_t TriedCollisionsSizeForTest() const;
+
 private:
     // Mutex protects all member state. Public methods take this lock at entry.
     mutable std::mutex m_mutex;

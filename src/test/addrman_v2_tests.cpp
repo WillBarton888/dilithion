@@ -303,6 +303,59 @@ void test_addrman_save_no_path_noop()
     std::cout << " OK\n";
 }
 
+// 12a. Cursor-review BLOCKER regression: Select drains m_tried_collisions.
+//      Pre-fix: GoodInternal queued collisions but ResolveTriedCollisions
+//      had no caller, so the queue grew until capped at
+//      ADDRMAN_SET_TRIED_COLLISION_SIZE (10) and stayed there forever —
+//      test-before-evict promotions were silently dropped.
+//      Post-fix: SelectInternal drains the queue at entry.
+void test_select_drains_tried_collisions()
+{
+    std::cout << "  test_select_drains_tried_collisions..." << std::flush;
+    CAddrMan_v2 a;
+    a.SetBucketSecret(MakeFixedKey());
+
+    // Add ~800 addrs across 200 /16 groups, then promote each to tried.
+    // With 16384 tried slots (256×64), collisions arise statistically and
+    // queue into m_tried_collisions.
+    constexpr uint16_t kAddrCount = 800;
+    for (uint16_t i = 1; i <= kAddrCount; ++i) {
+        uint16_t group = static_cast<uint16_t>((i % 200) + 1);
+        uint16_t host  = i;
+        auto addr = MakeAddrInGroup(group, host);
+        auto src  = MakeAddrInGroup(static_cast<uint16_t>(group + 50), 0);
+        a.Add(addr, src);
+    }
+    for (uint16_t i = 1; i <= kAddrCount; ++i) {
+        uint16_t group = static_cast<uint16_t>((i % 200) + 1);
+        uint16_t host  = i;
+        auto addr = MakeAddrInGroup(group, host);
+        a.RecordAttempt(addr, ConnectionOutcome::Success);
+    }
+
+    // Queue is bounded by ADDRMAN_SET_TRIED_COLLISION_SIZE (10) by design;
+    // verify the cap holds.
+    const size_t queue_after_good = a.TriedCollisionsSizeForTest();
+    assert(queue_after_good <= 10);
+
+    // Drain via Select. Branch 1 of ResolveTriedCollisions erases entries
+    // whose colliding-slot occupant has a recent success (which all do in
+    // this hot-loop test — both old and new entries got promoted at
+    // ~NowSecs()), so the queue should reach zero.
+    for (int i = 0; i < 20; ++i) {
+        a.Select(OutboundClass::FullRelay);
+    }
+    const size_t queue_after_select = a.TriedCollisionsSizeForTest();
+
+    // Critical assertion: queue must shrink (and ideally drain). Pre-fix
+    // value was monotonically nondecreasing and pinned at the cap.
+    assert(queue_after_select <= queue_after_good);
+    assert(queue_after_select == 0);  // tighter — recent-success branch erases all
+
+    std::cout << " OK (queue: " << queue_after_good
+              << " -> " << queue_after_select << ")\n";
+}
+
 // 12. Group-diversity sanity: same /16 prefix should land in the same new
 //     bucket (under fixed secret + identical source). Two addrs from
 //     10.5.x.x with same source -> same new-bucket placement; the second
@@ -540,6 +593,7 @@ int main()
         test_addrman_save_no_path_noop();
 
         std::cout << "\n--- Algorithm ---" << std::endl;
+        test_select_drains_tried_collisions();
         test_addrman_group_bucket_consistency();
 
         std::cout << "\n--- Migration ---" << std::endl;
@@ -549,7 +603,7 @@ int main()
         test_migration_apply_into_v2();
         test_migration_backup_renames();
 
-        std::cout << "\n=== All AddrMan v2 Tests Passed (17 tests) ===" << std::endl;
+        std::cout << "\n=== All AddrMan v2 Tests Passed (18 tests) ===" << std::endl;
         return 0;
 
     } catch (const std::exception& e) {

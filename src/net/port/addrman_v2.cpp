@@ -256,6 +256,17 @@ int GetBucketPosition(const uint256& nKey, bool fNew, int bucket, const CService
 
 // Mirrors bitcoin/src/addrman.cpp::AddrInfo::IsTerrible (v28.0 lines 69-92).
 // All durations expressed in Unix seconds (Dilithion idiom).
+//
+// Deliberate divergence from upstream (Cursor review Q1, 2026-04-26): the
+// "tried in the last minute" branch adds an explicit `now_secs >= last_try_secs`
+// guard. Upstream's chrono-typed comparison (`now - m_last_try <= 1min`) on a
+// future-timestamped entry yields a NEGATIVE chrono::duration which compares
+// less-than-or-equal-to 1min, so future entries are NOT terrible — same end
+// state as ours. The guard is defensive: makes intent explicit at the cost of
+// one extra compare. If a clock jumps backward and stamps `last_try_secs`
+// into the future, both implementations protect the entry; ours just makes
+// the protection visible in source. Not a behavioral change — documentation
+// of an existing semantic.
 bool AddrInfo::IsTerrible(int64_t now_secs) const
 {
     // Never remove an entry tried in the last minute — too eager to evict
@@ -795,9 +806,20 @@ std::optional<NetProtocol::CAddress> CAddrMan_v2::Select(OutboundClass cls)
 
 // Mirrors upstream's Select_ (addrman.cpp:713-787). Bucket walk with
 // chance_factor ramp.
+//
+// Phase 1 BLOCKER fix (Cursor review 2026-04-26): drain m_tried_collisions
+// before the bucket walk. Upstream relies on PeerManager invoking
+// ResolveCollisions on a 30s timer; that infrastructure lands in Phase 4/6.
+// Until then, every Select call resolves any pending collisions so the
+// queue stays bounded by ADDRMAN_SET_TRIED_COLLISION_SIZE and
+// test-before-evict actually completes (a queued promotion never stays
+// queued forever, which it would have in the dead-code-path version of
+// this method).
 std::optional<std::pair<NetProtocol::CAddress, int64_t>>
 CAddrMan_v2::SelectInternal(bool new_only)
 {
+    ResolveTriedCollisions();
+
     if (m_random.empty()) return std::nullopt;
     if (new_only && m_new_count == 0) return std::nullopt;
     if (m_new_count + m_tried_count == 0) return std::nullopt;
@@ -844,13 +866,23 @@ CAddrMan_v2::SelectInternal(bool new_only)
         assert(info_it != m_info.end());
         const AddrInfo& info = info_it->second;
 
-        // Probability check: randbits<30> < chance_factor * info.GetChance() * 2^30.
-        // Rearranged as integer compare to keep parity with upstream's
-        // randbits<30> < (1<<30) * factor * chance pattern.
+        // Probability check: upstream is `randbits<30>() < chance * (1<<30)`.
+        // Draws are in [0, 2^30). When `chance >= 1.0` upstream's threshold
+        // becomes 2^30 and every draw is accepted. We short-circuit that
+        // case first to preserve fidelity — clamping `threshold` to
+        // `(1u<<30)-1` (Cursor Q4) would silently reject one in 2^30 draws
+        // even at certainty.
+        //
+        // Below the certainty threshold, the integer cast is well-defined:
+        // `accept_p` is non-negative (GetChance ≥ 0; chance_factor ≥ 1 by
+        // construction) and clamped < 1.0 here, so the multiply lands in
+        // [0, 2^30) and fits uint32_t cleanly.
         const double accept_p = chance_factor * info.GetChance(NowSecs());
-        const uint32_t threshold = (accept_p >= 1.0)
-            ? ((1u << 30) - 1)  // ceiling — accept every time
-            : static_cast<uint32_t>(accept_p * static_cast<double>(1u << 30));
+        if (accept_p >= 1.0) {
+            return std::make_pair(info.addr, info.last_try_secs);
+        }
+        const uint32_t threshold =
+            static_cast<uint32_t>(accept_p * static_cast<double>(1u << 30));
         const uint32_t draw = std::uniform_int_distribution<uint32_t>(
             0, (1u << 30) - 1)(m_rng);
 
@@ -1276,6 +1308,12 @@ std::map<int, CAddrMan_v2::NetworkCounts> CAddrMan_v2::GetNetworkCountsForTest()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_network_counts;
+}
+
+size_t CAddrMan_v2::TriedCollisionsSizeForTest() const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    return m_tried_collisions.size();
 }
 
 }  // namespace dilithion::net::port

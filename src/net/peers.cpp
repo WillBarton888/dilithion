@@ -315,13 +315,22 @@ void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
         return;
     }
 
-    // Phase 1 port: IAddressManager takes (CAddress, CAddress source). The
-    // pre-port code wrapped the CAddress into a CNetworkAddr + CNetAddr;
-    // the new interface accepts CAddress directly. Source is unknown at
-    // this call site (pre-port behavior was empty CNetAddr) — pass an empty
-    // CAddress placeholder which converts to an empty source group.
-    NetProtocol::CAddress empty_source;  // all-zero source (legacy parity)
-    addrman->Add(addr, empty_source);
+    // Phase 1 port: IAddressManager takes (CAddress, CAddress source).
+    //
+    // BLOCKER fix per Cursor review (2026-04-26): pass addr as its own
+    // source. The legacy code passed an empty CNetAddr here, which made
+    // every unknown-origin address share source group [0,0]. Upstream's
+    // new-bucket math caps "addresses from one source group" at 64 buckets
+    // (ADDRMAN_NEW_BUCKETS_PER_SOURCE_GROUP) — sharing a source group
+    // collapses self-discovered addresses into 64/1024 = 6.25% of the
+    // bucket grid, weakening the eclipse-defense diversity property.
+    //
+    // Self-source restores diversity: each addr's group becomes its own
+    // source group, so addresses spread across the full 1024 new buckets.
+    // The "addr == source -> time_penalty = 0" early-return in AddInternal
+    // is the intended behavior for self-announced addresses, which is what
+    // an unknown-origin address effectively is.
+    addrman->Add(addr, addr);
 }
 
 std::vector<NetProtocol::CAddress> CPeerManager::QueryDNSSeeds() {
