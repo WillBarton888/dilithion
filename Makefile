@@ -217,6 +217,7 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/netaddress.cpp \
                src/net/addrman.cpp \
                src/net/port/addrman_v2.cpp \
+               src/net/port/addrman_migrator.cpp \
                src/net/banman.cpp \
                src/net/headerssync.cpp \
                src/net/blockencodings.cpp \

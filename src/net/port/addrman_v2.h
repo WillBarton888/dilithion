@@ -80,8 +80,11 @@ constexpr size_t ADDRMAN_SET_TRIED_COLLISION_SIZE = 10;         // Test-before-e
 constexpr int64_t ADDRMAN_TEST_WINDOW_SECS = 40 * 60;          // Test-before-evict window
 
 // File format version. Increment for any incompatible on-disk change.
-// Current format: addresses + per-AddrInfo state, no MIK appendix (KISS).
-constexpr uint8_t ADDRMAN_V2_FORMAT_VERSION = 1;
+// Set to 2 (not 1) so version-byte dispatch can distinguish our format from
+// the legacy CAddrMan format on disk: legacy uses version byte = 1, this
+// port uses version byte = 2. addrman_migrator.cpp reads version-1 files
+// and converts in-memory to this manager's tables.
+constexpr uint8_t ADDRMAN_V2_FORMAT_VERSION = 2;
 
 // ============================================================================
 // AddrInfo — per-address tracked state
