@@ -99,6 +99,13 @@ ChainParams ChainParams::Mainnet() {
     // Moved from 20160 to 18500 to stop ongoing chain degradation.
     params.compactEncodingFixHeight = 18500;
 
+    // Phase 3 port: HeadersSync PRESYNC chain-work gate. Zero for now
+    // (preserves pre-port behaviour where this gate was hardcoded zero in
+    // CHeadersManager). A non-zero value can be set in a follow-up after
+    // smoke-testing that a fresh node successfully clears the threshold
+    // against a live seed. Q7 plan recommendation deferred to Phase 4.
+    params.nMinimumChainWork = uint256();
+
     // ASERT difficulty algorithm activation
     // Replaces periodic retarget + EDA with per-block exponential adjustment.
     // Anchor block: height 23039 (the block at activationHeight - 1).
@@ -300,6 +307,9 @@ ChainParams ChainParams::Testnet() {
     // Timestamp validation: active from genesis on testnet
     params.timestampValidationHeight = 0;
 
+    // Phase 3 port: testnet has no PRESYNC chain-work gate.
+    params.nMinimumChainWork = uint256();
+
     // VDF Fair Mining — VDF-only from genesis for MVP testing
     params.vdfActivationHeight = 0;
     params.vdfExclusiveHeight  = 0;            // VDF-only from genesis (like DilV)
@@ -440,6 +450,11 @@ ChainParams ChainParams::DilV() {
 
     // Timestamp validation: active from genesis
     params.timestampValidationHeight = 0;
+
+    // Phase 3 port: DilV starts with no PRESYNC chain-work gate; the
+    // gate value can be tightened in Phase 4 after telemetry confirms
+    // typical fresh-node IBD work accumulation against live seeds.
+    params.nMinimumChainWork = uint256();
 
     // VDF: active from genesis — DilV is a VDF-only chain
     params.vdfActivationHeight = 0;

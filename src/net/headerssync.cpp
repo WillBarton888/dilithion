@@ -5,6 +5,7 @@
 
 #include <net/headerssync.h>
 #include <consensus/pow.h>
+#include <consensus/chain_work.h>  // Phase 3: shared chain-work helper
 #include <crypto/sha3.h>
 #include <util/time.h>
 
@@ -373,54 +374,12 @@ bool HeadersSyncState::CalculateCommitment(const uint256& hash) const {
 }
 
 uint256 HeadersSyncState::GetBlockWork(uint32_t nBits) const {
-    // Same calculation as CHeadersManager::GetBlockWork()
-    uint256 proof;
-    memset(proof.data, 0, 32);
-
-    int size = nBits >> 24;
-    uint64_t mantissa = nBits & 0x00FFFFFF;
-
-    if (mantissa == 0) {
-        memset(proof.data, 0xFF, 32);
-        return proof;
-    }
-
-    // Calculate work = 2^(256 - 8*size) / mantissa
-    int work_exponent = 256 - 8 * size;
-    int work_byte_pos = work_exponent / 8;
-
-    if (work_byte_pos < 0) work_byte_pos = 0;
-    if (work_byte_pos > 31) work_byte_pos = 31;
-
-    // CID 1675253/1675270 FIX: Calculate reciprocal of mantissa scaled to 64 bits
-    // Note: mantissa > 0 is guaranteed here because we check mantissa == 0 and return early at line 377
-    // The ternary operator's else branch was dead code, so we simplified to just the division
-    // This eliminates the logical contradiction where mantissa > 0 was always true at this point
-    uint64_t work_mantissa = 0xFFFFFFFFFFFFFFFFULL / mantissa;
-
-    for (int i = 0; i < 8 && (work_byte_pos + i) < 32; i++) {
-        proof.data[work_byte_pos + i] = (work_mantissa >> (i * 8)) & 0xFF;
-    }
-
-    return proof;
+    // Phase 3 (2026-04-26): consolidated through shared helper.
+    return dilithion::consensus::ComputeChainWork(nBits);
 }
 
 uint256 HeadersSyncState::AddChainWork(const uint256& a, const uint256& b) const {
-    uint256 result;
-    uint32_t carry = 0;
-
-    for (int i = 0; i < 32; i++) {
-        uint32_t sum = (uint32_t)a.data[i] + (uint32_t)b.data[i] + carry;
-        result.data[i] = sum & 0xFF;
-        carry = sum >> 8;
-    }
-
-    // Saturate on overflow
-    if (carry != 0) {
-        memset(result.data, 0xFF, 32);
-    }
-
-    return result;
+    return dilithion::consensus::AddChainWork(a, b);
 }
 
 bool HeadersSyncState::ChainWorkGreaterOrEqual(const uint256& a, const uint256& b) const {

@@ -138,6 +138,14 @@ public:
     // After this height: verified MIKs get 12, unverified get 3 free blocks
     int dfmpV34ActivationHeight;
 
+    // Phase 3 port: minimum chain-work threshold for HeadersSync PRESYNC
+    // gating. A peer's claimed header chain must accumulate at least this
+    // much work in PRESYNC before transitioning to REDOWNLOAD. Mainnet:
+    // recent-checkpoint chain-work value. Testnet/regtest: zero (no gate).
+    // Pre-Phase-3 the gate was hardcoded to zero in CHeadersManager;
+    // chainparams now owns the value per chain.
+    uint256 nMinimumChainWork;
+
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)
     // vdfExclusiveHeight:  VDF-only period (reject RandomX blocks after this)
