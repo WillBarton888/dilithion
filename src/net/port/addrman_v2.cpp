@@ -39,6 +39,7 @@
 
 #include <net/port/addrman_v2.h>
 #include <net/port/addrman_hash.h>
+#include <net/port/addrman_migrator.h>     // legacy v1 peers.dat reader + applier
 #include <net/netaddress_dilithion.h>
 
 #include <algorithm>
@@ -1027,29 +1028,66 @@ bool CAddrMan_v2::Save()
 
 bool CAddrMan_v2::Load()
 {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    // First pass: peek the format version byte under the lock. We need a
+    // very short critical section here because the legacy migration path
+    // calls back into our public IAddressManager methods (Add, RecordAttempt,
+    // Save) which each acquire m_mutex. A long-held lock would deadlock.
+    bool is_legacy = false;
+    std::string path_copy;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
 
-    if (m_data_path.empty()) {
-        // No file path configured — caller wants in-memory operation.
-        return true;
+        if (m_data_path.empty()) {
+            // No file path configured — caller wants in-memory operation.
+            return true;
+        }
+        path_copy = m_data_path;
+
+        std::ifstream f(m_data_path, std::ios::in | std::ios::binary);
+        if (!f.is_open()) {
+            // File missing is NOT an error — empty AddrMan + DNS seeds will
+            // bootstrap.
+            return true;
+        }
+        char version_byte = 0;
+        f.read(&version_byte, 1);
+        if (!f.good()) return false;
+
+        const uint8_t version = static_cast<uint8_t>(version_byte);
+        if (version == 1) {
+            // Legacy CAddrMan format. Drop the lock and migrate via public
+            // APIs (lock-free here, public APIs each take the mutex).
+            is_legacy = true;
+        } else if (version != ADDRMAN_V2_FORMAT_VERSION) {
+            std::cerr << "[AddrMan_v2] Unknown format version "
+                      << static_cast<int>(version)
+                      << " in " << m_data_path << "; ignoring\n";
+            return false;
+        }
+        // version == 2 path falls through to the v2 body below; lock retaken.
     }
 
-    std::ifstream f(m_data_path, std::ios::in | std::ios::binary);
+    if (is_legacy) {
+        return LoadLegacyAndMigrate();
+    }
+
+    // V2 format — re-acquire lock and parse the rest of the file.
+    std::lock_guard<std::mutex> lock(m_mutex);
+
+    std::ifstream f(path_copy, std::ios::in | std::ios::binary);
     if (!f.is_open()) {
-        // File missing is NOT an error — empty AddrMan + DNS seeds will
-        // bootstrap. Caller distinguishes load-failed-fatally from load-
-        // empty-OK by inspecting Size() afterward.
+        // Race: file was deleted between peek and full read. Treat as
+        // load-empty-OK rather than spurious failure.
         return true;
     }
 
     try {
-        // Format version.
+        // Re-read and validate the format version byte (peek consumed it
+        // but we open a fresh stream here for the full parse).
         uint8_t version = ReadU8(f);
         if (!f.good()) return false;
         if (version != ADDRMAN_V2_FORMAT_VERSION) {
-            std::cerr << "[AddrMan_v2] Unknown format version "
-                      << static_cast<int>(version)
-                      << " in " << m_data_path << "; ignoring\n";
+            // Race: file flipped formats between peek and full read. Reject.
             return false;
         }
 
@@ -1139,6 +1177,64 @@ size_t CAddrMan_v2::Size() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return m_random.size();
+}
+
+// Migrate a legacy (v1) peers.dat into v2 in-place. Called from Load() when
+// the version-byte peek returned 1. Lock-free at entry — uses public
+// IAddressManager methods on `this`, each of which takes m_mutex
+// independently. Order matters:
+//
+//   1. Read legacy entries via ReadLegacyPeersDat (free fn — no AddrMan state)
+//   2. Apply to in-memory tables via ApplyMigration (uses public Add +
+//      RecordAttempt; recent-success entries land in tried)
+//   3. Rename legacy file out of the way (peers.dat -> peers.dat.v1.bak.<ts>).
+//      Must precede Save() because Save() will overwrite peers.dat — if we
+//      Save() first we'd lose the legacy file as a recovery resource.
+//   4. Save in v2 format (writes peers.dat under the data path)
+//
+// Best-effort throughout — any failure leaves the in-memory state as far as
+// we got and returns true (DNS seeds rebuild the rest).
+bool CAddrMan_v2::LoadLegacyAndMigrate()
+{
+    // Snapshot path under lock; release immediately so the public-API path
+    // below can acquire freely.
+    std::string path;
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        path = m_data_path;
+    }
+
+    auto entries = ReadLegacyPeersDat(path);
+    if (!entries) {
+        std::cerr << "[AddrMan_v2] Legacy peers.dat detected at " << path
+                  << " but read failed; starting empty\n";
+        return true;
+    }
+
+    const MigrationResult result = ApplyMigration(*this, *entries);
+    std::cerr << "[AddrMan_v2] Migrated " << result.total_added
+              << "/" << result.total_seen << " addresses from legacy peers.dat ("
+              << result.to_tried << " to tried, "
+              << result.to_new << " to new)\n";
+
+    // Rename legacy file FIRST so Save() doesn't overwrite the only copy.
+    std::string backup_path;
+    if (!BackupLegacyFile(path, backup_path)) {
+        std::cerr << "[AddrMan_v2] Warning: failed to back up legacy peers.dat; "
+                  << "skipping v2 save (legacy file preserved in place, will "
+                  << "re-migrate next start)\n";
+        return true;
+    }
+
+    if (!Save()) {
+        std::cerr << "[AddrMan_v2] Warning: failed to save migrated peers.dat; "
+                  << "in-memory state intact, legacy backup at " << backup_path
+                  << "\n";
+    } else {
+        std::cerr << "[AddrMan_v2] Wrote v2 peers.dat; legacy backed up at "
+                  << backup_path << "\n";
+    }
+    return true;
 }
 
 // ============================================================================

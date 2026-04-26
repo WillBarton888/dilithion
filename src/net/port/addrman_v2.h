@@ -302,6 +302,12 @@ private:
     // Clear a position in the new table. The only place where new-bucket
     // entries are actually freed.
     void ClearNew(int bucket, int slot);
+
+    // Detect a legacy v1 peers.dat and migrate it into v2 in-place. Called
+    // from Load() when the version byte is 1. Uses ONLY public IAddressManager
+    // methods on `this`, so it must NOT be invoked while m_mutex is held —
+    // each public call takes the mutex independently.
+    bool LoadLegacyAndMigrate();
 };
 
 }  // namespace dilithion::net::port

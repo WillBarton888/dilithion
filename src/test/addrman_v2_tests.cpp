@@ -538,6 +538,106 @@ void test_migration_apply_into_v2()
     std::cout << " OK\n";
 }
 
+// Auto-migration end-to-end (Cursor Q13 fix). Writes a synthetic legacy
+// peers.dat, points a fresh CAddrMan_v2 at it, calls Load(), and verifies:
+//   * Load returns true
+//   * Migrated addresses are in the new manager (Size > 0)
+//   * peers.dat now begins with v2 version byte (= 2)
+//   * peers.dat.v1.bak.<ts> exists and starts with the legacy version byte (= 1)
+void test_load_auto_migrates_legacy()
+{
+    std::cout << "  test_load_auto_migrates_legacy..." << std::flush;
+    const std::string path = "addrman_v2_auto_migrate.dat";
+    RemoveIfExists(path);
+    // Pre-clean any stale backups from previous runs.
+    // (Not strictly necessary, but keeps the test directory tidy.)
+
+    // Step 1: write a synthetic legacy v1 file.
+    std::vector<MigrationEntry> in;
+    for (uint16_t g = 1; g <= 7; ++g) {
+        MigrationEntry e;
+        e.addr = MakeAddrInGroup(g, 1);
+        uint8_t srcbytes[16] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff,
+                                 192,168,2,static_cast<uint8_t>(g)};
+        e.source = CNetAddr(srcbytes);
+        e.last_success_secs = 1700000000 + g * 100;
+        e.n_attempts = 0;
+        in.push_back(e);
+    }
+    WriteLegacyPeersDat(path, in);
+
+    // Sanity: file starts with version byte 1.
+    {
+        std::ifstream f(path, std::ios::binary);
+        char b = 0;
+        f.read(&b, 1);
+        assert(static_cast<uint8_t>(b) == 1);
+    }
+
+    // Step 2: load through CAddrMan_v2 — should auto-migrate.
+    CAddrMan_v2 a;
+    a.SetBucketSecret(MakeFixedKey());
+    a.SetDataPath(path);
+
+    bool loaded = a.Load();
+    assert(loaded);
+    assert(a.Size() == 7);  // all 7 routable, all imported
+
+    // Step 3: peers.dat now contains v2 format (version byte = 2).
+    {
+        std::ifstream f(path, std::ios::binary);
+        assert(f.is_open());
+        char b = 0;
+        f.read(&b, 1);
+        assert(static_cast<uint8_t>(b) == 2);
+    }
+
+    // Step 4: legacy backup file exists with version byte 1. Find it via a
+    // simple glob (the timestamp suffix varies); KISS — just iterate the
+    // current directory looking for the prefix.
+    bool found_backup = false;
+    {
+        // Scan for any file matching path + ".v1.bak."
+        const std::string prefix = path + ".v1.bak.";
+        // Try a small set of recent timestamps spanning the test run.
+        // Since we can't directly enumerate without a directory iterator,
+        // and BackupLegacyFile was just called, just check that some file
+        // matching the pattern exists by trying common timestamps.
+        // Simpler: directly look at the file with a fixed-suffix variant.
+        // The timestamp is NowSecs() — we capture by reading the rename
+        // result via test backdoor. Since we don't have one, fall back to
+        // scanning numerically near current time.
+        const int64_t now = static_cast<int64_t>(std::chrono::duration_cast<std::chrono::seconds>(
+            std::chrono::system_clock::now().time_since_epoch()).count());
+        for (int64_t t = now; t >= now - 5 && !found_backup; --t) {
+            std::string candidate = prefix + std::to_string(t);
+            std::ifstream f(candidate, std::ios::binary);
+            if (f.is_open()) {
+                char b = 0;
+                f.read(&b, 1);
+                if (static_cast<uint8_t>(b) == 1) {
+                    found_backup = true;
+                    f.close();
+                    RemoveIfExists(candidate);
+                }
+            }
+        }
+    }
+    assert(found_backup);
+
+    // Step 5: re-loading is now a v2 read (no second migration triggered).
+    {
+        CAddrMan_v2 b;
+        b.SetBucketSecret(MakeFixedKey());
+        b.SetDataPath(path);
+        assert(b.Load());
+        assert(b.Size() == 7);  // same address book, no duplicate migration
+    }
+
+    RemoveIfExists(path);
+    std::cout << " OK\n";
+}
+
 // 17. BackupLegacyFile renames the file to .v1.bak.<ts>; original gone.
 void test_migration_backup_renames()
 {
@@ -602,8 +702,9 @@ int main()
         test_migration_missing_file();
         test_migration_apply_into_v2();
         test_migration_backup_renames();
+        test_load_auto_migrates_legacy();
 
-        std::cout << "\n=== All AddrMan v2 Tests Passed (18 tests) ===" << std::endl;
+        std::cout << "\n=== All AddrMan v2 Tests Passed (19 tests) ===" << std::endl;
         return 0;
 
     } catch (const std::exception& e) {
