@@ -6,7 +6,9 @@
 
 #include <node/block_index.h>
 #include <primitives/block.h>
+#include <consensus/pow.h>      // Phase 5: ChainWorkGreaterThan for candidate-set comparator
 #include <map>
+#include <set>                  // Phase 5: m_setBlockIndexCandidates
 #include <vector>
 #include <memory>
 #include <mutex>
@@ -19,6 +21,29 @@ class CBlockchainDB;
 class CUTXOSet;
 class CReorgWAL;
 class CTxMemPool;  // BUG #109 FIX: Mempool for confirmed TX cleanup
+
+/**
+ * Phase 5: Comparator for ordering CBlockIndex candidates by chain work.
+ *
+ * Used by CChainState::m_setBlockIndexCandidates to maintain a strict
+ * weak ordering with the heaviest-work block first. Tiebreakers (in order):
+ *   1. Strictly greater chain work (ChainWorkGreaterThan)
+ *   2. Lower nSequenceId (earlier insertion order — deterministic)
+ *   3. Pointer comparison (deterministic within a process)
+ *
+ * Mirrors upstream Bitcoin Core's `CBlockIndexWorkComparator` in
+ * `validation.cpp` v28. The selection algorithm pops the front of the
+ * set; that block is the candidate-best leaf for the next reorg.
+ */
+struct CBlockIndexWorkComparator {
+    bool operator()(const CBlockIndex* a, const CBlockIndex* b) const {
+        if (ChainWorkGreaterThan(a->nChainWork, b->nChainWork)) return true;
+        if (ChainWorkGreaterThan(b->nChainWork, a->nChainWork)) return false;
+        if (a->nSequenceId < b->nSequenceId) return true;
+        if (b->nSequenceId < a->nSequenceId) return false;
+        return a < b;
+    }
+};
 
 /**
  * Chain State Manager
@@ -84,6 +109,16 @@ private:
     uint256 m_last_undo_failure_hash;
     mutable std::mutex m_undo_failure_mutex;
     static constexpr int kPersistentUndoFailureThreshold = 3;
+
+    // ============================================================
+    // Phase 5: block-index-tree-based chain selection (PR5.1 scaffold)
+    // ============================================================
+    //
+    // Set of leaf candidates ordered by descending chain work. The front
+    // is the heaviest-work leaf — the next reorg target. Maintained by
+    // ProcessNewHeader / AddBlockIndex / InvalidateBlockImpl /
+    // ReconsiderBlockImpl. Empty until PR5.3 wires population.
+    std::set<CBlockIndex*, CBlockIndexWorkComparator> m_setBlockIndexCandidates;
 
     // Bug #40 fix: Callback mechanism for tip updates
     // Allows HeadersManager and other components to be notified when chain tip changes
@@ -373,6 +408,70 @@ public:
      * @param callback Function to call with block data and height
      */
     void RegisterBlockDisconnectCallback(BlockDisconnectCallback callback);
+
+    // ============================================================
+    // Phase 5: chain-selection helpers (PR5.1 declarations only)
+    // ============================================================
+    //
+    // These methods hold the actual block-index-tree algorithm. The
+    // ChainSelectorAdapter in src/consensus/port/chain_selector_impl.cpp
+    // is a thin wrapper that forwards into these. Real bodies land in
+    // PR5.3 — PR5.1 ships assert(false) so the type system + linker are
+    // exercised end-to-end.
+
+    /**
+     * Phase 5: pop max-work candidate leaf; if any ancestor is invalid,
+     * mark BLOCK_FAILED_CHILD, remove from candidates, retry.
+     * Returns the heaviest valid leaf or nullptr.
+     */
+    CBlockIndex* FindMostWorkChainImpl();
+
+    /**
+     * Phase 5: walk back to common ancestor and forward to pindexMostWork,
+     * calling DisconnectTip / ConnectTip at each step. WAL-wrapped.
+     * On ConnectTip failure: mark BLOCK_FAILED_VALID, set fInvalidFound.
+     */
+    bool ActivateBestChainStep(CBlockIndex* pindexMostWork,
+                               std::shared_ptr<const CBlock> pblock_optional,
+                               bool& fInvalidFound);
+
+    /**
+     * Phase 5: mark pindex BLOCK_FAILED_VALID; propagate BLOCK_FAILED_CHILD
+     * to descendants; remove invalid leaves from candidate set; trigger
+     * re-selection.
+     */
+    bool InvalidateBlockImpl(const uint256& hash);
+
+    /**
+     * Phase 5: reverse InvalidateBlockImpl. Clear failure flags on pindex
+     * and descendants; re-add eligible leaves to candidate set; trigger
+     * re-selection.
+     */
+    bool ReconsiderBlockImpl(const uint256& hash);
+
+    /**
+     * Phase 5: set BLOCK_FAILED_VALID on pindex AND propagate
+     * BLOCK_FAILED_CHILD to all descendants in mapBlockIndex.
+     */
+    void MarkBlockAsFailed(CBlockIndex* pindex);
+
+    /**
+     * Phase 5: clear BLOCK_FAILED_VALID and BLOCK_FAILED_CHILD on pindex
+     * AND its descendants.
+     */
+    void MarkBlockAsValid(CBlockIndex* pindex);
+
+    /**
+     * Phase 5: full rescan of mapBlockIndex; rebuilds m_setBlockIndexCandidates
+     * from scratch. Called after major topology changes (Reconsider, startup).
+     */
+    void RecomputeCandidates();
+
+    /**
+     * Phase 5: predicate — pindex is a leaf, has BLOCK_VALID_TRANSACTIONS,
+     * is not invalid, and has more work than current tip.
+     */
+    bool IsBlockACandidateForActivation(CBlockIndex* pindex) const;
 
     /**
      * RACE CONDITION FIX: Get a thread-safe snapshot of the chain path

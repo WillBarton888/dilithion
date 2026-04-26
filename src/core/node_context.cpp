@@ -12,6 +12,8 @@
 #include <node/block_validation_queue.h>  // Phase 2: Async block validation
 #include <digital_dna/dna_registry_db.h>  // Digital DNA: LevelDB-backed registry
 #include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
+#include <consensus/ichain_selector.h>             // Phase 5: frozen interface
+#include <consensus/port/chain_selector_impl.h>    // Phase 5: ChainSelectorAdapter
 #include <util/logging.h>
 
 // Global node context instance
@@ -49,6 +51,17 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
     }
 
     chainstate = chainstate_ptr;
+
+    // Phase 5: instantiate chain selector adapter over the chainstate.
+    // The adapter is a thin wrapper; lifetime is tied to NodeContext
+    // and MUST be reset before chainstate is freed (handled in Shutdown/Reset).
+    try {
+        chain_selector = std::make_unique<::dilithion::consensus::port::ChainSelectorAdapter>(*chainstate);
+        LogPrintf(ALL, INFO, "Phase 5: chain selector adapter wired");
+    } catch (const std::exception& e) {
+        LogPrintf(ALL, ERROR, "Failed to instantiate chain selector adapter: %s", e.what());
+        return false;
+    }
 
     // Initialize peer manager
     try {
@@ -186,6 +199,10 @@ void NodeContext::Shutdown() {
     }
     SetDNACollector(nullptr);
 
+    // Phase 5: reset chain selector BEFORE clearing chainstate (adapter
+    // holds a non-owning reference into chainstate).
+    chain_selector.reset();
+
     // Clear pointers
     chainstate = nullptr;
     rpc_server = nullptr;
@@ -198,6 +215,8 @@ void NodeContext::Shutdown() {
 }
 
 void NodeContext::Reset() {
+    // Phase 5: reset selector BEFORE clearing chainstate.
+    chain_selector.reset();
     chainstate = nullptr;
     peer_manager.reset();
     connman.reset();  // Phase 2: Reset CConnman

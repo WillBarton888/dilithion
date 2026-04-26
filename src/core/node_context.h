@@ -36,6 +36,11 @@ class CVDFMiner;         // VDF fair mining controller
 class CCooldownTracker;  // VDF cooldown rate limiter
 class CPeerMIKTracker;   // Sybil defense: block relay source tracking
 
+// Phase 5: chain selector (frozen interface from Phase 0).
+namespace dilithion::consensus {
+    class IChainSelector;
+}
+
 // Digital DNA: Sybil-resistant identity system
 // Full include required because unique_ptr needs the complete type for default_delete
 #include <digital_dna/dna_registry_db.h>
@@ -57,6 +62,11 @@ class CPeerMIKTracker;   // Sybil defense: block relay source tracking
 struct NodeContext {
     // Core blockchain state
     CChainState* chainstate{nullptr};
+
+    // Phase 5: chain selector adapter (block-index-tree based selection).
+    // Owned here; ChainSelectorAdapter holds a non-owning CChainState&
+    // reference, so this MUST be reset before chainstate is freed.
+    std::unique_ptr<dilithion::consensus::IChainSelector> chain_selector;
 
     // P2P networking
     std::unique_ptr<CPeerManager> peer_manager;

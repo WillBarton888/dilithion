@@ -1863,3 +1863,60 @@ bool CChainState::VerifyRecentUndoIntegrity(int probeDepth,
     }
     return true;
 }
+
+// ============================================================================
+// Phase 5: chain-selection helpers — PR5.1 scaffold (assert(false) bodies).
+// ============================================================================
+//
+// These methods are declared in chain.h and consumed by ChainSelectorAdapter
+// in src/consensus/port/chain_selector_impl.cpp. Real bodies land in PR5.3.
+// PR5.1 ships the scaffold so the type system + linker are exercised
+// end-to-end and the interface contract can be unit-tested for trivial
+// getters (GetActiveTip, GetActiveHeight, etc.) before the algorithm goes in.
+
+CBlockIndex* CChainState::FindMostWorkChainImpl()
+{
+    assert(false && "CChainState::FindMostWorkChainImpl — real impl in PR5.3");
+    return nullptr;
+}
+
+bool CChainState::ActivateBestChainStep(CBlockIndex* /*pindexMostWork*/,
+                                        std::shared_ptr<const CBlock> /*pblock_optional*/,
+                                        bool& /*fInvalidFound*/)
+{
+    assert(false && "CChainState::ActivateBestChainStep — real impl in PR5.3");
+    return false;
+}
+
+bool CChainState::InvalidateBlockImpl(const uint256& /*hash*/)
+{
+    assert(false && "CChainState::InvalidateBlockImpl — real impl in PR5.3");
+    return false;
+}
+
+bool CChainState::ReconsiderBlockImpl(const uint256& /*hash*/)
+{
+    assert(false && "CChainState::ReconsiderBlockImpl — real impl in PR5.3");
+    return false;
+}
+
+void CChainState::MarkBlockAsFailed(CBlockIndex* /*pindex*/)
+{
+    assert(false && "CChainState::MarkBlockAsFailed — real impl in PR5.3");
+}
+
+void CChainState::MarkBlockAsValid(CBlockIndex* /*pindex*/)
+{
+    assert(false && "CChainState::MarkBlockAsValid — real impl in PR5.3");
+}
+
+void CChainState::RecomputeCandidates()
+{
+    assert(false && "CChainState::RecomputeCandidates — real impl in PR5.3");
+}
+
+bool CChainState::IsBlockACandidateForActivation(CBlockIndex* /*pindex*/) const
+{
+    assert(false && "CChainState::IsBlockACandidateForActivation — real impl in PR5.3");
+    return false;
+}
