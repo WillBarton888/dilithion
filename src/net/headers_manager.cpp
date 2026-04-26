@@ -2091,6 +2091,45 @@ void CHeadersManager::UpdateChainTips(const uint256& hashNew)
             setChainTips.erase(header.hashPrevBlock);
         }
     }
+
+    // CONCERN #2 fix (red-team audit 2026-04-26): bound setChainTips
+    // size with eviction-by-lowest-work. Without this cap, an attacker
+    // who feeds disjoint forks can grow setChainTips monotonically;
+    // each ibd_coordinator tick then walks O(K) entries. At K >> 1000
+    // this becomes a DoS amplifier.
+    //
+    // 256 is a balance: well above realistic tip-counts during normal
+    // operation (typically 1-2; rare bursts to ~10 during fork events)
+    // but well below pathological growth. When the cap is exceeded,
+    // evict the LOWEST-work tip — these are the least useful for any
+    // future reorg consideration.
+    static constexpr size_t MAX_CHAIN_TIPS = 256;
+    if (setChainTips.size() > MAX_CHAIN_TIPS) {
+        uint256 worstHash;
+        uint256 worstWork;
+        bool worstSet = false;
+        for (const auto& tipHash : setChainTips) {
+            // Never evict the new tip we just added; we just inserted it
+            // for a reason and immediate eviction would be silly.
+            if (std::memcmp(tipHash.data, hashNew.data, 32) == 0) continue;
+            auto tipIt = mapHeaders.find(tipHash);
+            if (tipIt == mapHeaders.end()) {
+                // Orphaned setChainTips entry (no mapHeaders match) —
+                // safe to evict; cleans up stale state.
+                worstHash = tipHash;
+                worstSet = true;
+                break;
+            }
+            if (!worstSet || ChainWorkGreaterThan(worstWork, tipIt->second.chainWork)) {
+                worstHash = tipHash;
+                worstWork = tipIt->second.chainWork;
+                worstSet = true;
+            }
+        }
+        if (worstSet) {
+            setChainTips.erase(worstHash);
+        }
+    }
 }
 
 uint256 CHeadersManager::AddChainWork(const uint256& blockProof, const uint256& parentChainWork) const
