@@ -124,6 +124,23 @@ int CPeerManager::GetMisbehaviorScore(int peer_id) const {
     return m_scorer->GetScore(peer_id);
 }
 
+// Phase 3: typed-reason Misbehaving for HeadersSync-layer call sites.
+// Routes through the maybe_punish_node.h wrapper to compute the weight
+// (DefaultWeight + Q6=B override), maps to the legacy diagnostic enum
+// for banlist.dat audit, then calls the existing Misbehaving forwarder
+// so seed-node guard + banman.Ban + AddrMan signal all fire.
+void CPeerManager::MisbehaveHeaders(
+    int peer_id,
+    ::dilithion::net::port::HeaderRejectReason reason)
+{
+    const int weight = ::dilithion::net::port::HeaderRejectWeight(reason);
+    const auto policy_type =
+        ::dilithion::net::port::MapHeaderRejectToMisbehaviorType(reason);
+    const ::MisbehaviorType diag =
+        ::dilithion::net::port::MapPolicyToDiagnostic(policy_type);
+    Misbehaving(peer_id, weight, diag);
+}
+
 bool CPeerManager::SavePeers() {
     if (data_dir.empty()) {
         return false;

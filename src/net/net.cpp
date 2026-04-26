@@ -1571,7 +1571,12 @@ bool CNetMessageProcessor::ProcessHeadersMessage(int peer_id, CDataStream& strea
         if (header_count > Consensus::MAX_HEADERS_RESULTS) {
             if (g_verbose.load(std::memory_order_relaxed))
                 std::cout << "[P2P] ERROR: HEADERS count too large: " << header_count << std::endl;
-            peer_manager.Misbehaving(peer_id, 20, MisbehaviorType::INVALID_MESSAGE_SIZE);
+            // Phase 3: route through MaybePunishNodeForHeaders via the
+            // CPeerManager::MisbehaveHeaders forwarder. Same end weight (20)
+            // and same banlist.dat diagnostic code as pre-cutover; the
+            // wrapper is now on a production path.
+            peer_manager.MisbehaveHeaders(peer_id,
+                ::dilithion::net::port::HeaderRejectReason::MemoryBoundExceeded);
             return false;
         }
 

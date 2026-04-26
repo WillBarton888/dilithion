@@ -7,6 +7,7 @@
 #include <net/protocol.h>
 #include <net/iaddress_manager.h>  // Phase 1 port: IAddressManager interface
 #include <net/ipeer_scorer.h>      // Phase 2 port: IPeerScorer interface
+#include <net/port/maybe_punish_node.h>  // Phase 3: HeaderRejectReason enum
 #include <net/banman.h>   // Bitcoin Core-style ban manager with persistence
 #include <net/peer_discovery.h>  // Network: Enhanced peer discovery
 #include <net/connection_quality.h>  // Network: Connection quality metrics
@@ -317,6 +318,16 @@ public:
     // (DILITHION_USE_NEW_PEER_SCORER=0). Replaces direct reads of the deleted
     // CPeer::misbehavior_score field at all call sites.
     int GetMisbehaviorScore(int peer_id) const;
+
+    // Phase 3: typed-reason variant of Misbehaving for HeadersSync-layer
+    // call sites. Resolves the weight via maybe_punish_node.h's wrappers
+    // (DefaultWeight + Q6=B override for REDOWNLOAD commitment mismatch),
+    // then forwards to the existing Misbehaving forwarder (so seed-node
+    // protection, banman.Ban, AddrMan signal all still fire). Wires the
+    // Phase 3 MaybePunishNodeForHeaders wrapper into the production path.
+    void MisbehaveHeaders(
+        int peer_id,
+        ::dilithion::net::port::HeaderRejectReason reason);
 
     // Phase 2.5 ticket PHASE-2.5-ADDRMAN-BIAS: test-only accessor for the
     // owned addrman, used by integration tests that need to observe AddrMan
