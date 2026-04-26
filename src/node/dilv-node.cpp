@@ -75,7 +75,10 @@
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
 // DilV: No RandomX — VDF-only chain
-// #include <crypto/randomx_hash.h>
+// Phase 5 regtest: validation-mode RandomX init (see ChainParams::Regtest()
+// rationale in chainparams.cpp). Production DilV doesn't link RandomX in;
+// regtest path explicitly does.
+#include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
 #include <util/stacktrace.h>  // Phase 2.2: Crash diagnostics
 #include <util/pidfile.h>  // STRESS TEST FIX: Stale lock detection
@@ -509,6 +512,7 @@ void SignalHandler(int signal) {
 struct NodeConfig {
     // DilV: No testnet flag — DilV is its own standalone network
     bool testnet = false;  // Always false for DilV (kept for compatibility with shared code)
+    bool regtest = false;  // Phase 5: regression-test mode for V2 byte-equivalence
     std::string datadir = "";       // Will be set to ~/.dilv
     uint16_t rpcport = 0;           // Will be set to 9332
     uint16_t p2pport = 0;           // Will be set to 9444
@@ -541,6 +545,9 @@ struct NodeConfig {
             if (arg == "--testnet") {
                 std::cerr << "Error: DilV node does not support --testnet (DilV is its own network)" << std::endl;
                 return false;
+            }
+            else if (arg == "--regtest") {
+                regtest = true;
             }
             else if (arg.find("--datadir=") == 0) {
                 datadir = arg.substr(10);
@@ -1971,9 +1978,14 @@ int main(int argc, char* argv[]) {
     std::cout << "======================================" << std::endl;
     std::cout << std::endl;
 
-    // Initialize chain parameters — always DilV
-    Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::DilV());
-    std::cout << "Network: DILV (VDF distribution, ~45s blocks)" << std::endl;
+    // Initialize chain parameters — DilV by default, regtest when --regtest is set
+    if (config.regtest) {
+        Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::Regtest());
+        std::cout << "Network: REGTEST (Phase 5 byte-equivalence integration testing)" << std::endl;
+    } else {
+        Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::DilV());
+        std::cout << "Network: DILV (VDF distribution, ~45s blocks)" << std::endl;
+    }
 
     // Phase 10: Set default datadir, ports from chain params if not specified
     // (Config file values already applied above, now apply chain params as final fallback)
@@ -2275,8 +2287,24 @@ int main(int argc, char* argv[]) {
         std::cout << "  [OK] Chain state initialized" << std::endl;
 
         // DilV: No RandomX initialization — VDF-only chain
-        // Block hashing uses SHA3 (FastHash), no RandomX needed
-        std::cout << "  [OK] DilV uses VDF consensus (no RandomX initialization needed)" << std::endl;
+        // Block hashing uses SHA3 (FastHash), no RandomX needed.
+        //
+        // EXCEPTION: regtest mode (Phase 5 V2 byte-equivalence testing).
+        // HeadersManager's validation worker thread starts up unconditionally
+        // via NodeContext::Init and expects RandomX VM to be initialized
+        // when it runs. For production DilV the path that triggers this is
+        // never reached (existing testnet datadirs were created before the
+        // VDF-genesis switch and skip relevant codepaths). For a FRESH
+        // regtest datadir we hit it. Initialize LIGHT validation mode so
+        // the worker thread can spawn cleanly. Adds ~1-2s startup time.
+        if (config.regtest) {
+            std::cout << "  Initializing RandomX LIGHT validation mode (regtest)..." << std::endl;
+            const char* rx_key = "Dilithion-RandomX-v1";
+            randomx_init_validation_mode(rx_key, strlen(rx_key));
+            std::cout << "  [OK] RandomX validation mode ready" << std::endl;
+        } else {
+            std::cout << "  [OK] DilV uses VDF consensus (no RandomX initialization needed)" << std::endl;
+        }
 
         // Load and verify genesis block
 load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe

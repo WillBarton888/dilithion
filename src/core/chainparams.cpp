@@ -639,16 +639,28 @@ ChainParams ChainParams::Regtest() {
     params.checkpoints.clear();
     params.defaultAssumeValid = "";
 
-    // Faster VDF for quick test runs. Real testnet uses 500K iterations
-    // (~4-8s); regtest at 50K is ~0.4-0.8s per block.
-    params.vdfIterations = 50000;
-    params.vdfLotteryGracePeriod = 3;        // 3s grace
-    params.blockTime = 3;                    // 3s target
-
     // Identifying coinbase message for regtest blocks.
     params.genesisCoinbaseMsg = "Dilithion Regtest";
-    // Genesis hash is computed at startup (genesisHash empty).
-    params.genesisHash = "";
+    params.genesisHash = "";  // computed at startup
+
+    // Phase 5 (2026-04-26): regtest IS a VDF chain, run via dilv-node binary.
+    //
+    // Why dilv-node: dilithion-node calls Genesis::CreateGenesisBlock() at
+    // boot (non-VDF path), which fails IsGenesisBlock's nVersion check
+    // when genesis params indicate VDF-from-genesis. dilv-node correctly
+    // calls CreateDilVGenesisBlock(), so a fresh regtest datadir loads
+    // cleanly there.
+    //
+    // The chain-selection algorithm is chain-agnostic (same CChainState,
+    // same m_setBlockIndexCandidates, same ActivateBestChainStep
+    // regardless of IHeaderProofChecker). V2 byte-equivalence on the
+    // DilV-style regtest chain proves the algorithm equally for DIL.
+    //
+    // Reduced VDF iterations for fast block production in tests
+    // (~0.4-0.8s per block at 50K iterations vs production's 500K).
+    params.vdfIterations = 50000;
+    params.vdfLotteryGracePeriod = 3;  // 3s grace
+    params.blockTime = 3;              // 3s target
 
     return params;
 }
