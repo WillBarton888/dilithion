@@ -13,9 +13,11 @@
 #include <consensus/port/chain_selector_impl.h>
 
 #include <consensus/chain.h>
+#include <consensus/chain_work.h>
 #include <node/block_index.h>
 #include <primitives/block.h>
 
+#include <atomic>
 #include <cassert>
 
 namespace dilithion::consensus::port {
@@ -62,10 +64,61 @@ bool ChainSelectorAdapter::ProcessNewBlock(std::shared_ptr<const CBlock> /*block
     return false;
 }
 
-bool ChainSelectorAdapter::ProcessNewHeader(const CBlockHeader& /*header*/)
+// Phase 5 PR5.3 prerequisite (Day 2 PM, 2026-04-26):
+// Populate CChainState::mapBlockIndex with EVERY received header, matching
+// upstream Bitcoin Core's invariant. Pre-validation entries get nStatus =
+// BLOCK_VALID_HEADER (NOT BLOCK_VALID_TRANSACTIONS); the existing
+// block-receive code path upgrades the status when the block arrives and
+// validates (PR5.3 Day 3+).
+//
+// Guardrails (per Cursor sign-off 2026-04-26):
+//   G1 — pre-validation siblings remain visible to fork detection.
+//   G2 — BLOCK_VALID_HEADER-only entries are NOT IsInvalid(); BLOCK_FAILED_*
+//        flags are only set on entries that reached full block validation.
+//
+// Returns false (orphan) if parent is missing — caller (HeadersSync /
+// HeadersManager) is responsible for topological-order delivery. Returns
+// true (idempotent) if entry already exists.
+bool ChainSelectorAdapter::ProcessNewHeader(const CBlockHeader& header)
 {
-    assert(false && "ChainSelectorAdapter::ProcessNewHeader — real impl in PR5.3");
-    return false;
+    const uint256 hash = header.GetHash();
+
+    // Idempotency: already in mapBlockIndex (could be from a prior
+    // ProcessNewHeader call OR from full-block validation). No work needed.
+    if (m_chainstate.HasBlockIndex(hash)) {
+        return true;
+    }
+
+    // Locate parent. A null hashPrevBlock means genesis (height 0, no parent).
+    CBlockIndex* pprev = nullptr;
+    int nHeight = 0;
+    uint256 nChainWork = ::dilithion::consensus::ComputeChainWork(header.nBits);
+    if (!header.hashPrevBlock.IsNull()) {
+        pprev = m_chainstate.GetBlockIndex(header.hashPrevBlock);
+        if (!pprev) {
+            // Orphan — caller must order parents before children.
+            return false;
+        }
+        nHeight = pprev->nHeight + 1;
+        nChainWork = ::dilithion::consensus::AddChainWork(
+            pprev->nChainWork,
+            ::dilithion::consensus::ComputeChainWork(header.nBits));
+    }
+
+    auto pindex = std::make_unique<CBlockIndex>(header);
+    pindex->pprev = pprev;
+    pindex->nHeight = nHeight;
+    pindex->nChainWork = nChainWork;
+    pindex->nStatus = CBlockIndex::BLOCK_VALID_HEADER;  // G2: pre-validation only
+    pindex->phashBlock = hash;
+
+    // Deterministic insertion order for the candidate-set comparator
+    // tiebreak. Process-local atomic — every header receipt gets a
+    // fresh sequence id.
+    static std::atomic<uint32_t> s_seq{1};
+    pindex->nSequenceId = s_seq.fetch_add(1, std::memory_order_relaxed);
+
+    return m_chainstate.AddBlockIndex(hash, std::move(pindex));
 }
 
 // Phase 5 PR5.2.A: real implementation. Forwards into the (extended)
