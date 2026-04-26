@@ -183,6 +183,16 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // so there's no reason to compute expensive RandomX PoW hashes.
         // But we MUST still store headers so the chain walk in
         // GetBestChainHashAtHeight() works during IBD block fetching.
+        //
+        // Phase 3 disposition (Q3 plan recommended PR3.4 deletion): Patch H
+        // STAYS until Phase 5 retires the legacy `ProcessHeaders` path. The
+        // upstream-pattern HeadersSyncStateV2 (Phase 3) bypasses this code
+        // entirely (its `pow_validated_headers` get pushed into mapHeaders
+        // through ProcessHeadersWithDoSProtection's success path), but
+        // ProcessHeaders is still reachable for non-DoS-protected callers.
+        // Deleting Patch H now would re-introduce the silent-drop bug for
+        // any flow that lands here. Phase 5's chain-selection rewrite is the
+        // natural retirement point.
         if (expectedHeight <= highestCheckpoint) {
             // Patch H (v4.0.22) -- Compute incoming hash and check for true
             // duplicate. PRIOR BUG: if mapHeightIndex already had ANY header
