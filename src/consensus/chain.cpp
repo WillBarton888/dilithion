@@ -994,6 +994,12 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
         return false;
     }
 
+    // Phase 5 TEST-ONLY override hook (chain_case_2_5_equivalence_tests).
+    // Production never sets this; default-empty std::function falls through.
+    if (m_testConnectTipOverride) {
+        return m_testConnectTipOverride(pindex, block);
+    }
+
     // ============================================================================
     // CS-005: Chain Reorganization Rollback - ConnectTip Implementation
     // ============================================================================
@@ -1438,6 +1444,12 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
 bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
     if (pindex == nullptr) {
         return false;
+    }
+
+    // Phase 5 TEST-ONLY override hook (chain_case_2_5_equivalence_tests).
+    // Production never sets this; default-empty std::function falls through.
+    if (m_testDisconnectTipOverride) {
+        return m_testDisconnectTipOverride(pindex);
     }
 
     // ============================================================================
@@ -2281,6 +2293,15 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
         const CBlock* pblock = nullptr;
         if (pblock_optional && pblock_optional->GetHash() == p->GetBlockHash()) {
             pblock = pblock_optional.get();
+        } else if (m_testReadBlockOverride) {
+            // Phase 5 Day 4 V1 TEST-ONLY: serve block from in-memory test map.
+            // Production never sets this; default-empty std::function falls
+            // through to the real pdb->ReadBlock path below.
+            if (!m_testReadBlockOverride(p->GetBlockHash(), localBlock)) {
+                if (m_reorgWAL) m_reorgWAL->AbortReorg();
+                return false;
+            }
+            pblock = &localBlock;
         } else {
             if (!pdb || !pdb->ReadBlock(p->GetBlockHash(), localBlock)) {
                 std::cerr << "[Chain] ActivateBestChainStep: ReadBlock failed for "
@@ -2312,8 +2333,16 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
     }
 
     // 8) Full reorg success — persist best block to disk.
-    if (pdb && pindexTip) {
-        pdb->WriteBestBlock(pindexTip->GetBlockHash());
+    // TEST-ONLY override (Phase 5 Day 4 Patch B equivalence harness):
+    // when set, replaces pdb->WriteBestBlock to allow simulation of
+    // WriteBestBlock failure (Scenario 5 — silent-proceed lock).
+    if (pindexTip) {
+        if (m_testWriteBestBlockOverride) {
+            (void)m_testWriteBestBlockOverride(pindexTip->GetBlockHash());
+            // Mirror legacy: return value captured but ignored (silent-proceed).
+        } else if (pdb) {
+            pdb->WriteBestBlock(pindexTip->GetBlockHash());
+        }
     }
     if (m_reorgWAL) m_reorgWAL->CompleteReorg();
     return true;

@@ -115,6 +115,41 @@ private:
     static constexpr int kPersistentUndoFailureThreshold = 3;
 
     // ============================================================
+    // Phase 5: TEST-ONLY hooks for Patch B equivalence harness.
+    // ============================================================
+    //
+    // These std::function hooks let the Day 4 equivalence test inject
+    // controllable success/failure for the inner DisconnectTip/ConnectTip
+    // primitives, without standing up the full validation pipeline (UTXO
+    // mutations, MIK/DNA/cooldown checks, RandomX/VDF proofs).
+    //
+    // Production code MUST NOT set these. Default-constructed
+    // std::function is empty; the production path checks `if (hook)`
+    // and falls through to the real implementation when unset — zero
+    // perf cost, zero behavior change in release.
+    //
+    // Used by chain_case_2_5_equivalence_tests.cpp ONLY.
+public:
+    using ConnectTipOverride = std::function<bool(CBlockIndex*, const CBlock&)>;
+    using DisconnectTipOverride = std::function<bool(CBlockIndex*)>;
+    using WriteBestBlockOverride = std::function<bool(const uint256&)>;
+    // Phase 5 Day 4 V1: when set, ActivateBestChainStep consults this
+    // INSTEAD of pdb->ReadBlock when fetching blocks for connect loop
+    // retries. Lets unit tests serve block data from an in-memory map
+    // without standing up a real CBlockchainDB. Production never sets this.
+    using ReadBlockOverride = std::function<bool(const uint256&, CBlock&)>;
+
+    void SetTestConnectTipOverride(ConnectTipOverride h) { m_testConnectTipOverride = std::move(h); }
+    void SetTestDisconnectTipOverride(DisconnectTipOverride h) { m_testDisconnectTipOverride = std::move(h); }
+    void SetTestWriteBestBlockOverride(WriteBestBlockOverride h) { m_testWriteBestBlockOverride = std::move(h); }
+    void SetTestReadBlockOverride(ReadBlockOverride h) { m_testReadBlockOverride = std::move(h); }
+private:
+    ConnectTipOverride m_testConnectTipOverride;
+    DisconnectTipOverride m_testDisconnectTipOverride;
+    WriteBestBlockOverride m_testWriteBestBlockOverride;
+    ReadBlockOverride m_testReadBlockOverride;
+
+    // ============================================================
     // Phase 5: block-index-tree-based chain selection (PR5.1 scaffold)
     // ============================================================
     //
