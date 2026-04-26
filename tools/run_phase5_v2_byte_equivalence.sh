@@ -16,6 +16,21 @@
 # (3 entries each) when the mining window was too short to produce any
 # real blocks. (BLOCKER #3 from the deletion-batch audit.)
 #
+# KNOWN LIMITATION (2026-04-26 empirical finding):
+#   regtest peering between two local dilv-node binaries does not
+#   sustain multi-block sync within reasonable test windows. Tested:
+#     * Node A mining alone reaches height 3-4 in 180s
+#     * Node B (whether env-var=0 or env-var=1) reaches height 1 only
+#     * Issue affects BOTH legacy=legacy AND legacy=new path pairs
+#   Conclusion: regtest peering instability is a PRE-EXISTING issue,
+#   NOT a Phase 5 regression. Hardening is a Phase 6 task (HeadersManager
+#   rewrite + IBDCoordinator wiring).
+#
+#   Until then, this script's strict checks correctly exit with
+#   CHAIN-TOO-SHALLOW (3) rather than declaring vacuous equivalence.
+#   The infrastructure (RPC polling, dual-hash, entry-count assertions)
+#   is in place and ready for use once peering is hardened.
+#
 # Usage: bash tools/run_phase5_v2_byte_equivalence.sh [MIN_HEIGHT] [MAX_WAIT_SECONDS]
 #   defaults: MIN_HEIGHT=5, MAX_WAIT_SECONDS=180
 #
@@ -86,8 +101,11 @@ if ! kill -0 "$PID_A" 2>/dev/null; then
 fi
 echo "[A] Running (PID $PID_A)"
 
-echo "[B] Starting node B (new path, port 19445, exclusively peering with A)..."
-# --connect= (exclusive) skips DNS seeds + hardcoded seed connections.
+echo "[B] Starting node B (new path, port 19445, peering with A)..."
+# --addnode adds Node A while still using --connect=0 to skip seed DNS.
+# Wait — --addnode and --connect together: --addnode adds the peer to
+# AddrMan; --connect with non-empty arg makes that an exclusive list.
+# With --connect=127.0.0.1:19444, peering is exclusive to Node A.
 DILITHION_USE_NEW_CHAIN_SELECTOR=1 \
     "$BIN" --regtest --datadir="$DB" --no-upnp --relay-only --yes \
     --connect=127.0.0.1:19444 \
