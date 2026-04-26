@@ -254,6 +254,47 @@ void test_map_policy_to_diagnostic_covers_all_values()
     std::cout << " OK\n";
 }
 
+// Cursor Phase 2 review Q14 (2026-04-26): codify intended semantics of
+// SetBanThreshold for invalid (0 or negative) values. Operator config might
+// expose this in the future; behaviour must be predictable.
+//
+// `score >= m_ban_threshold` is the trigger. With threshold = 0, ANY
+// positive weight crosses (0 >= 0 false; 1 >= 0 true). With threshold < 0,
+// a peer with score = 0 immediately satisfies score >= threshold — but
+// AddScoreLocked rejects weight <= 0 as a no-op, so a fresh-but-zero peer
+// can't actually trigger the ban path (no insertion to reach the test).
+// First positive weight crosses regardless of how negative the threshold.
+void test_set_ban_threshold_zero_traps_first_positive_weight()
+{
+    std::cout << "  test_set_ban_threshold_zero_traps_first_positive_weight..." << std::flush;
+    CPeerScorer s;
+    s.SetBanThreshold(0);
+
+    // Weight 1 immediately crosses: 0+1=1 >= 0.
+    bool banned = s.Misbehaving(NodeId{90}, 1, "tiny weight");
+    assert(banned);
+    assert(s.GetScore(NodeId{90}) == 1);
+    std::cout << " OK\n";
+}
+
+void test_set_ban_threshold_negative_first_positive_weight_crosses()
+{
+    std::cout << "  test_set_ban_threshold_negative_first_positive_weight_crosses..." << std::flush;
+    CPeerScorer s;
+    s.SetBanThreshold(-50);  // pathological — would be rejected at config layer
+
+    // Zero/negative weights are still no-ops (AddScoreLocked early returns).
+    // GetScore on the never-inserted node is 0 — matches threshold trigger
+    // condition `0 >= -50`, but no Misbehaving call has happened so the
+    // returned bool path isn't exercised.
+    assert(s.GetScore(NodeId{91}) == 0);
+
+    // First positive weight crosses immediately.
+    bool banned = s.Misbehaving(NodeId{91}, 1, "");
+    assert(banned);
+    std::cout << " OK\n";
+}
+
 // Bonus: zero/negative weight is a no-op per upstream pattern.
 void test_zero_or_negative_weight_is_noop()
 {
@@ -288,6 +329,8 @@ int main()
         test_get_score_for_unknown_node_is_zero();
         test_reset_score_clears_map_entry();
         test_set_ban_threshold_changes_trigger_point();
+        test_set_ban_threshold_zero_traps_first_positive_weight();
+        test_set_ban_threshold_negative_first_positive_weight_crosses();
         test_score_persists_within_session_across_misbehaving_calls();
         test_score_does_not_persist_after_reset_score();
         test_zero_or_negative_weight_is_noop();
@@ -302,7 +345,7 @@ int main()
         test_premature_dna_sample_weight_matches_arch();
         test_map_policy_to_diagnostic_covers_all_values();
 
-        std::cout << "\n=== All Phase 2 CPeerScorer Tests Passed (16 tests) ===" << std::endl;
+        std::cout << "\n=== All Phase 2 CPeerScorer Tests Passed (18 tests) ===" << std::endl;
         return 0;
     } catch (const std::exception& e) {
         std::cerr << "Test failed with exception: " << e.what() << std::endl;

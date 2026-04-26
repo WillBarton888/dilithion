@@ -18,6 +18,7 @@
 
 #include <net/port/peer_scorer.h>
 #include <net/port/misbehavior_policy.h>
+#include <net/peers.h>             // CPeerManager::MAX_TOTAL_CONNECTIONS for assertion bound
 
 #include <algorithm>
 #include <cassert>
@@ -120,10 +121,14 @@ bool CPeerScorer::AddScoreLocked(::dilithion::net::NodeId peer,
     if (weight <= 0) return false;
 
     // Sanity assertion (debug-only): catch unbounded growth from a
-    // forgotten ResetScore in CPeerManager::RemovePeer. Bound is 10x the
-    // expected MAX_TOTAL_CONNECTIONS=125.
-    assert(m_scores.size() <= 10000 && "CPeerScorer score map leak — "
-           "ResetScore likely missing from a disconnect path");
+    // forgotten ResetScore on a disconnect path. Bound is 10x the
+    // configured peer cap. Cursor Phase 2 review Q9 (2026-04-26): named
+    // constant (not magic number) so the bound stays anchored if
+    // MAX_TOTAL_CONNECTIONS ever moves.
+    constexpr size_t kScoreMapMaxBound = 10 * CPeerManager::MAX_TOTAL_CONNECTIONS;
+    assert(m_scores.size() <= kScoreMapMaxBound &&
+           "CPeerScorer score map leak — ResetScore likely missing from a "
+           "disconnect path");
 
     int& score = m_scores[peer];  // creates entry if missing (default 0)
     score += weight;

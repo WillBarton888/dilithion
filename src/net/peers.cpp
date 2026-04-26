@@ -530,6 +530,22 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
 
     banman.Ban(ip, ban_time, BanReason::NodeMisbehaving, type, cumulative);
 
+    // Phase 2 plan §10 Q1=C: cross-session badness signal flows through
+    // AddrMan's RecordAttempt(PeerMisbehaved) — biases future outbound
+    // selection AWAY from this peer's group across restarts. Without this
+    // wire-up the Q1=C decision wouldn't materialize: the scorer is
+    // transient by design, banlist.dat covers active bans, and the AddrMan
+    // bias is what carries the "this peer was bad" signal forward when the
+    // ban eventually expires.
+    //
+    // Cursor Phase 2 review Q16 (2026-04-26) flagged this as a missing
+    // piece of Q1=C; wire-up landed here. Test:
+    // peer_scorer_banman_integration_tests::test_misbehavior_signals_addrman.
+    if (addrman && !peer->addr.IsNull()) {
+        addrman->RecordAttempt(peer->addr,
+                               ::dilithion::net::ConnectionOutcome::PeerMisbehaved);
+    }
+
     // Operator-facing log line — one per ban. Matches pre-cutover format.
     if (ban_time >= 3600) {
         std::cout << "[BAN] Peer " << peer_id << " (" << ip

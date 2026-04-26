@@ -251,12 +251,15 @@ private:
     // Network: Connection quality tracking
     CConnectionQualityTracker connection_quality;
 
-    // Connection limits
+public:
+    // Connection limits — public so CPeerScorer (and any future
+    // peer-bookkeeping component) can size data structures against the
+    // node-wide cap. Moved from private->public per Cursor Phase 2 review
+    // Q9 (2026-04-26).
     static const int MAX_OUTBOUND_CONNECTIONS = 8;
     static const int MAX_INBOUND_CONNECTIONS = 117;
     static const int MAX_TOTAL_CONNECTIONS = 125;
 
-public:
     // DoS protection thresholds (public so CPeer can access)
     static const int BAN_THRESHOLD = 100;
     static const int64_t DEFAULT_BAN_TIME = 1 * 60 * 60;  // 1 hour (temporary during DFMP transition)

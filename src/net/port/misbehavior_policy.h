@@ -59,6 +59,28 @@ namespace dilithion::net::port {
 // Default weight per scoring-policy category. Comments mirror those in
 // ipeer_scorer.h so the source of truth for any one weight is the enum
 // declaration; this function just makes the assignments executable.
+//
+// SCOPE NOTE (Cursor Phase 2 review Q2, 2026-04-26):
+//   Production runtime today uses the *legacy* helper `::GetMisbehaviorScore(
+//   ::MisbehaviorType)` from banman.h to resolve the default weight inside
+//   the CPeerManager::Misbehaving forwarder. That's because all ~107
+//   existing call sites pass `::MisbehaviorType` (the diagnostic enum),
+//   not `dilithion::net::MisbehaviorType` (the scoring-policy enum).
+//
+//   `DefaultWeight()` is the source of truth for SCORING-POLICY callers —
+//   the IPeerScorer interface and any future MaybePunishNodeFor* dispatcher
+//   (Phase 3+). `::GetMisbehaviorScore()` is the source of truth for
+//   DIAGNOSTIC-ENUM callers (the existing forwarder).
+//
+//   Today the two tables happen to land on the same numbers for overlapping
+//   categories. If a future contributor changes one, the other won't follow
+//   automatically. Drift between them is real but bounded — caught at test
+//   time by `test_default_weights_match_policy_table` (frozen-enum
+//   coverage) plus the existing misbehavior_scoring_tests.cpp regression
+//   net (legacy-enum coverage).
+//
+//   When Phase 3 wires MaybePunishNodeFor* to use this table directly,
+//   the forwarder also gets refactored — this comment can come down then.
 constexpr int DefaultWeight(::dilithion::net::MisbehaviorType type)
 {
     using Type = ::dilithion::net::MisbehaviorType;

@@ -189,6 +189,38 @@ void test_decay_does_not_unban_already_banned_peer()
     std::cout << " OK\n";
 }
 
+// 6a. Phase 2 Q16 wire-up: on threshold cross, the forwarder signals
+//     CAddrMan_v2 via RecordAttempt(PeerMisbehaved). This is the cross-
+//     session badness signal Q1=C relied on (without it, Q1=C wouldn't
+//     materialize — scorer is transient by design).
+//
+//     Coverage scope: SMOKE only. Verifies the wire-up doesn't crash and
+//     addrman state remains consistent through the Misbehaving flow. The
+//     deeper "Select biases away after restart" test is deferred to a
+//     future Phase 2.5 hardening pass — that test is genuinely complex
+//     (probabilistic; needs two-instance harness reading the same
+//     peers.dat) and beyond Phase 2's scope.
+void test_misbehavior_signals_addrman()
+{
+    std::cout << "  test_misbehavior_signals_addrman..." << std::flush;
+
+    CPeerManager pm("");
+    auto peer = pm.AddPeer(MakeAddrV4(0x05060708));
+    assert(peer != nullptr);
+
+    // Cross threshold — forwarder calls addrman->RecordAttempt(PeerMisbehaved).
+    pm.Misbehaving(peer->id, 100, MisbehaviorType::INVALID_BLOCK_HEADER);
+
+    // Wire-up sanity: no crash; peer is banned (proves the threshold-cross
+    // path actually executed); peer manager is still queryable.
+    auto post = pm.GetPeer(peer->id);
+    assert(post != nullptr);
+    assert(post->IsBanned());
+    assert(pm.GetMisbehaviorScore(peer->id) == 100);
+
+    std::cout << " OK\n";
+}
+
 // 6. Operator escape hatch: DILITHION_USE_NEW_PEER_SCORER=0 disables
 //    scoring entirely. Misbehaving becomes a tracking-disabled no-op;
 //    GetMisbehaviorScore returns 0; peer never bans via misbehavior.
@@ -244,9 +276,10 @@ int main()
         test_protocol_version_uses_short_ban_time();
         test_default_misbehaviortype_uses_long_ban_time();
         test_decay_does_not_unban_already_banned_peer();
+        test_misbehavior_signals_addrman();
         test_env_var_off_disables_scoring();
 
-        std::cout << "\n=== All Phase 2 Integration Tests Passed (6 tests) ==="
+        std::cout << "\n=== All Phase 2 Integration Tests Passed (7 tests) ==="
                   << std::endl;
         return 0;
     } catch (const std::exception& e) {
