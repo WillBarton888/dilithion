@@ -14,7 +14,9 @@
 
 #include <consensus/chain.h>
 #include <consensus/chain_work.h>
+#include <core/node_context.h>           // g_node_context.ibd_coordinator
 #include <node/block_index.h>
+#include <node/ibd_coordinator.h>         // IsInitialBlockDownload
 #include <primitives/block.h>
 
 #include <atomic>
@@ -56,12 +58,45 @@ CBlockIndex* ChainSelectorAdapter::LookupBlockIndex(const uint256& hash) const
 // PR5.2.A / PR5.3 — assert(false) until those PRs land bodies.
 // ============================================================================
 
-bool ChainSelectorAdapter::ProcessNewBlock(std::shared_ptr<const CBlock> /*block*/,
+// PR5.3: ProcessNewBlock entry point. The frozen Phase 0 contract says
+// this is called by the IBlockSink consumer (HeadersManager / block-receive
+// path). Phase 5 only owns the chain-selection plumbing, not the consumer
+// wiring — the production block-receive code (block_processing.cpp,
+// dilithion-node.cpp main loop) still drives validation directly into
+// CChainState today, and Phase 6 retires that direct call in favor of
+// this adapter entry point.
+//
+// For PR5.3 acceptance: provide a working forwarder so when a Phase 6
+// caller does invoke this, the block flows through the same sequence as
+// the legacy path: validate via existing block-receive helpers, AddBlockIndex,
+// then ActivateBestChain (which dispatches to the new path under env-var=1).
+//
+// Keeping this minimal — full ProcessNewBlock contract (validation,
+// orphan handling, block-relay coordination) is Phase 6 territory.
+bool ChainSelectorAdapter::ProcessNewBlock(std::shared_ptr<const CBlock> block,
                                            bool /*force_processing*/,
-                                           bool* /*triggered_reorg*/)
+                                           bool* triggered_reorg)
 {
-    assert(false && "ChainSelectorAdapter::ProcessNewBlock — real impl in PR5.3");
-    return false;
+    if (!block) return false;
+    if (triggered_reorg) *triggered_reorg = false;
+
+    const uint256 hash = block->GetHash();
+
+    // If we already have a CBlockIndex for this block, look it up. Otherwise
+    // ProcessNewBlock isn't responsible for synthesizing one — the caller
+    // (Phase 6 IBlockSink) must have already added it via the validation
+    // pipeline. Returning false here matches the upstream contract.
+    CBlockIndex* pindex = m_chainstate.GetBlockIndex(hash);
+    if (!pindex) {
+        return false;
+    }
+
+    bool reorg = false;
+    if (!m_chainstate.ActivateBestChain(pindex, *block, reorg)) {
+        return false;
+    }
+    if (triggered_reorg) *triggered_reorg = reorg;
+    return true;
 }
 
 // Phase 5 PR5.3 prerequisite (Day 2 PM, 2026-04-26):
@@ -154,27 +189,36 @@ std::vector<ChainTipInfo> ChainSelectorAdapter::GetChainTips() const
     return out;
 }
 
+// PR5.3: thin wrapper around CChainState::FindMostWorkChainImpl. The Impl
+// version is non-const because it mutates m_setBlockIndexCandidates when
+// it removes invalid-ancestor leaves. The frozen interface declares
+// FindMostWorkChain const — that const is a contract about the chain
+// state appearing unchanged from the caller's perspective (no tip move,
+// no commit), not about the candidate-set bookkeeping. We use a const_cast
+// to bridge; documented inline.
 CBlockIndex* ChainSelectorAdapter::FindMostWorkChain() const
 {
-    assert(false && "ChainSelectorAdapter::FindMostWorkChain — real impl in PR5.3");
-    return nullptr;
+    return const_cast<CChainState&>(m_chainstate).FindMostWorkChainImpl();
 }
 
-bool ChainSelectorAdapter::InvalidateBlock(const uint256& /*hash*/)
+bool ChainSelectorAdapter::InvalidateBlock(const uint256& hash)
 {
-    assert(false && "ChainSelectorAdapter::InvalidateBlock — real impl in PR5.3");
-    return false;
+    return m_chainstate.InvalidateBlockImpl(hash);
 }
 
-bool ChainSelectorAdapter::ReconsiderBlock(const uint256& /*hash*/)
+bool ChainSelectorAdapter::ReconsiderBlock(const uint256& hash)
 {
-    assert(false && "ChainSelectorAdapter::ReconsiderBlock — real impl in PR5.3");
-    return false;
+    return m_chainstate.ReconsiderBlockImpl(hash);
 }
 
+// PR5.3: route through IBDCoordinator if wired (production), otherwise
+// return false (fresh-test default — no IBD context). g_node_context.
+// ibd_coordinator is the canonical authority on IBD state.
 bool ChainSelectorAdapter::IsInitialBlockDownload() const
 {
-    assert(false && "ChainSelectorAdapter::IsInitialBlockDownload — real impl in PR5.3");
+    if (g_node_context.ibd_coordinator) {
+        return g_node_context.ibd_coordinator->IsInitialBlockDownload();
+    }
     return false;
 }
 

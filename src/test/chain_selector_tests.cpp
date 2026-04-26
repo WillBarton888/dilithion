@@ -539,6 +539,76 @@ void test_mark_block_as_valid_clears_failed_child()
     std::cout << " OK\n";
 }
 
+void test_adapter_forwards_invalidate_and_reconsider()
+{
+    std::cout << "  test_adapter_forwards_invalidate_and_reconsider..."
+              << std::flush;
+
+    // Build A -> B -> D, all valid. Adapter.InvalidateBlock(B) marks
+    // B+D failed. Adapter.ReconsiderBlock(B) restores them.
+    CChainState chainstate;
+    auto pA = MakePreValidationLeaf(0xB0, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    chainstate.SetTip(chainstate.GetBlockIndex(hA));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0xB1, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pD = MakePreValidationLeaf(0xB2, B, 2,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 20, 3);
+    uint256 hD = pD->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hD, std::move(pD)));
+    CBlockIndex* D = chainstate.GetBlockIndex(hD);
+
+    ::dilithion::consensus::port::ChainSelectorAdapter adapter(chainstate);
+
+    assert(adapter.InvalidateBlock(hB));
+    assert(B->IsInvalid());
+    assert(D->IsInvalid());
+
+    assert(adapter.ReconsiderBlock(hB));
+    assert(!B->IsInvalid());
+    assert(!D->IsInvalid());
+    std::cout << " OK\n";
+}
+
+void test_adapter_find_most_work_chain_returns_heaviest()
+{
+    std::cout << "  test_adapter_find_most_work_chain_returns_heaviest..."
+              << std::flush;
+
+    CChainState chainstate;
+    auto pA = MakePreValidationLeaf(0xC0, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    chainstate.SetTip(chainstate.GetBlockIndex(hA));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0xC1, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+
+    auto pC = MakePreValidationLeaf(0xC2, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 20, 3);
+    uint256 hC = pC->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hC, std::move(pC)));
+    CBlockIndex* C = chainstate.GetBlockIndex(hC);
+
+    chainstate.RecomputeCandidates();
+
+    ::dilithion::consensus::port::ChainSelectorAdapter adapter(chainstate);
+    assert(adapter.FindMostWorkChain() == C);
+    std::cout << " OK\n";
+}
+
 void test_invalidate_block_impl_propagates_and_drops_candidates()
 {
     std::cout << "  test_invalidate_block_impl_propagates_and_drops_candidates..."
@@ -725,7 +795,12 @@ int main()
         test_invalidate_block_impl_propagates_and_drops_candidates();
         test_reconsider_block_impl_restores_candidates();
 
-        std::cout << "\n=== All chain_selector_tests passed (16 tests: 4 + 5 + 5 + 2) ==="
+        std::cout << "\n--- PR5.3 Day 3 PM: adapter forwarders (no more assert(false)) ---"
+                  << std::endl;
+        test_adapter_forwards_invalidate_and_reconsider();
+        test_adapter_find_most_work_chain_returns_heaviest();
+
+        std::cout << "\n=== All chain_selector_tests passed (18 tests: 4 + 5 + 5 + 2 + 2) ==="
                   << std::endl;
         return 0;
     } catch (const std::exception& e) {

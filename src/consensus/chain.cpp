@@ -233,6 +233,66 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         }
     }
 
+    // ============================================================
+    // Phase 5 PR5.3: env-var-gated dispatch to new chain-selection path.
+    // ============================================================
+    //
+    // DILITHION_USE_NEW_CHAIN_SELECTOR:
+    //   "1"          -> new path (FindMostWorkChainImpl + ActivateBestChainStep)
+    //   "0" or unset -> legacy Cases 1/2/2.5/3 below (default OFF in PR5.3)
+    //
+    // PR5.4 flips the default to ON. Until then the legacy body remains
+    // the production code path and is preserved verbatim — env-var=0 is
+    // exactly the pre-Phase-5 behavior. Env-var=1 opt-in lets operators
+    // exercise the new path during the burn-in window.
+    {
+        const char* envVar = std::getenv("DILITHION_USE_NEW_CHAIN_SELECTOR");
+        const bool useNewPath = (envVar && std::string(envVar) == "1");
+        if (useNewPath) {
+            // Make sure pindexNew is in the candidate set if eligible. The
+            // new path picks the heaviest leaf via FindMostWorkChainImpl.
+            if (IsBlockACandidateForActivation(pindexNew)) {
+                m_setBlockIndexCandidates.insert(pindexNew);
+            }
+
+            std::shared_ptr<const CBlock> pblockShared =
+                std::make_shared<const CBlock>(block);
+
+            // Capture old tip BEFORE the loop — reorgOccurred is "did the
+            // tip move?" relative to entry, not relative to any
+            // intermediate state.
+            CBlockIndex* pindexOldTip = pindexTip;
+
+            // Activation loop: try to activate the heaviest valid leaf;
+            // if a ConnectTip fails (fInvalidFound), the failed leaf has
+            // been marked + dropped, so we retry with the next-best.
+            while (true) {
+                CBlockIndex* pindexMostWork = FindMostWorkChainImpl();
+                if (!pindexMostWork) break;
+                if (pindexMostWork == pindexTip) break;  // already at best
+
+                bool fInvalidFound = false;
+                if (!ActivateBestChainStep(pindexMostWork, pblockShared, fInvalidFound)) {
+                    // Hard failure — abort entirely.
+                    return false;
+                }
+                if (fInvalidFound) {
+                    // The leaf was marked failed; loop to try next-best.
+                    continue;
+                }
+                // Activation succeeded — break and report.
+                break;
+            }
+
+            reorgOccurred = (pindexTip != pindexOldTip);
+            if (pindexTip) {
+                NotifyTipUpdate(pindexTip);
+            }
+            return true;
+        }
+        // Else: fall through to the legacy path preserved below.
+    }
+
     // Case 1: Genesis block (first block in chain)
     if (pindexTip == nullptr) {
 
@@ -2133,6 +2193,12 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
             if (m_reorgWAL) m_reorgWAL->AbortReorg();
             return false;
         }
+        // Rewind tip after each successful disconnect (mirrors legacy
+        // Case 3's per-step tip update pattern; keeps pindexTip consistent
+        // with what's actually on-chain through the loop).
+        pindexTip = p->pprev;
+        m_cachedHeight.store(pindexTip ? pindexTip->nHeight : -1,
+                             std::memory_order_release);
         ++disconnectedCount;
         if (m_reorgWAL) m_reorgWAL->UpdateDisconnectProgress(disconnectedCount);
     }
@@ -2172,11 +2238,17 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
             // re-enters FindMostWorkChain to pick the next-best leaf.
             return true;
         }
+        // Advance tip after each successful connect.
+        pindexTip = p;
+        m_cachedHeight.store(p->nHeight, std::memory_order_release);
         ++connectedCount;
         if (m_reorgWAL) m_reorgWAL->UpdateConnectProgress(connectedCount);
     }
 
-    // 8) Full reorg success.
+    // 8) Full reorg success — persist best block to disk.
+    if (pdb && pindexTip) {
+        pdb->WriteBestBlock(pindexTip->GetBlockHash());
+    }
     if (m_reorgWAL) m_reorgWAL->CompleteReorg();
     return true;
 }
