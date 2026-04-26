@@ -517,6 +517,7 @@ void SignalHandler(int signal) {
 // Parse command line arguments
 struct NodeConfig {
     bool testnet = false;
+    bool regtest = false;  // Phase 5: regression-test mode (isolated network)
     std::string datadir = "";       // Will be set based on network
     uint16_t rpcport = 0;           // Will be set based on network
     uint16_t p2pport = 0;           // Will be set based on network
@@ -549,6 +550,9 @@ struct NodeConfig {
 
             if (arg == "--testnet") {
                 testnet = true;
+            }
+            else if (arg == "--regtest") {
+                regtest = true;
             }
             else if (arg.find("--datadir=") == 0) {
                 datadir = arg.substr(10);
@@ -2008,7 +2012,10 @@ int main(int argc, char* argv[]) {
     std::cout << std::endl;
 
     // Initialize chain parameters based on network
-    if (config.testnet) {
+    if (config.regtest) {
+        Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::Regtest());
+        std::cout << "Network: REGTEST (Phase 5 byte-equivalence integration testing)" << std::endl;
+    } else if (config.testnet) {
         Dilithion::g_chainParams = new Dilithion::ChainParams(Dilithion::ChainParams::Testnet());
         std::cout << "Network: TESTNET (production difficulty, ~60s blocks)" << std::endl;
     } else {

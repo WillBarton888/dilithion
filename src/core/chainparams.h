@@ -11,7 +11,8 @@ namespace Dilithion {
 enum Network {
     MAINNET,
     TESTNET,
-    DILV        // DilV: VDF distribution payment chain
+    DILV,       // DilV: VDF distribution payment chain
+    REGTEST     // Phase 5: regression-test mode for byte-equivalence integration tests
 };
 
 /**
@@ -422,6 +423,7 @@ public:
     static ChainParams Mainnet();
     static ChainParams Testnet();
     static ChainParams DilV();
+    static ChainParams Regtest();  // Phase 5: regression-test mode
 
     // Helper methods
     const char* GetNetworkName() const {
@@ -429,6 +431,7 @@ public:
             case MAINNET: return "mainnet";
             case TESTNET: return "testnet";
             case DILV:    return "dilv";
+            case REGTEST: return "regtest";
             default:      return "unknown";
         }
     }
@@ -436,6 +439,7 @@ public:
     bool IsMainnet() const { return network == MAINNET; }
     bool IsTestnet() const { return network == TESTNET; }
     bool IsDilV() const { return network == DILV; }
+    bool IsRegtest() const { return network == REGTEST; }
 
     /**
      * MAINNET SECURITY: Get the last checkpoint at or before given height

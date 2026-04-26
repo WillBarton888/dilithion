@@ -604,4 +604,53 @@ ChainParams ChainParams::DilV() {
     return params;
 }
 
+// ===========================================================================
+// Phase 5 (2026-04-26): Regression-test mode.
+// ===========================================================================
+//
+// Regtest is a deterministic, isolated network for byte-equivalence
+// integration tests. Built on the testnet baseline with these overrides:
+//   * Distinct network magic + ports (no cross-contamination)
+//   * No checkpoints (reorgs can be tested freely)
+//   * Reduced VDF iterations for fast block generation
+//   * Short grace period + faster block time for tests
+//   * No pre-funded addresses
+//
+// Used by: tools/run_phase5_v2_byte_equivalence.sh and similar test
+// scripts that spin up two binaries with different env-var settings,
+// mine N blocks, and compare LevelDB hashes.
+ChainParams ChainParams::Regtest() {
+    // Start from testnet (most permissive baseline) and override.
+    ChainParams params = Testnet();
+    params.network = REGTEST;
+
+    // Network identification — distinct from mainnet/testnet/dilv.
+    params.networkMagic = 0xDA8FB5BB;  // Regtest magic
+    params.chainID = 9999;             // Regtest chain ID
+
+    // Distinct ports for regtest (allow running alongside any other network).
+    params.p2pPort = 19444;
+    params.rpcPort = 19332;
+
+    // Regtest datadir.
+    params.dataDir = GetDataDir(false) + "-regtest";
+
+    // No checkpoints — regtest exists to test reorgs, including deep ones.
+    params.checkpoints.clear();
+    params.defaultAssumeValid = "";
+
+    // Faster VDF for quick test runs. Real testnet uses 500K iterations
+    // (~4-8s); regtest at 50K is ~0.4-0.8s per block.
+    params.vdfIterations = 50000;
+    params.vdfLotteryGracePeriod = 3;        // 3s grace
+    params.blockTime = 3;                    // 3s target
+
+    // Identifying coinbase message for regtest blocks.
+    params.genesisCoinbaseMsg = "Dilithion Regtest";
+    // Genesis hash is computed at startup (genesisHash empty).
+    params.genesisHash = "";
+
+    return params;
+}
+
 } // namespace Dilithion
