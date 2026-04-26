@@ -31,10 +31,11 @@
 //   * ResolveTriedCollisions (test-before-evict resolver)
 //   * SelectInternal / Select (bucket walk with chance_factor ramp)
 //   * GetAddresses (random subset for ADDR gossip)
+//   * AddrInfo::SerializeTo / DeserializeFrom (binary stream layout)
+//   * Save / Load (atomic peers.dat persistence, tmp + rename pattern)
 //
-// Remaining Day-2 surface (still stubbed):
-//   * AddrInfo::SerializeTo / DeserializeFrom — binary stream layout
-//   * Save / Load — atomic peers.dat persistence (tmp + rename pattern)
+// Day 2 PM remaining: addrman_migrator (legacy peers.dat import) + initial
+// addrman_tests.cpp port. Day 3: rest of tests + cutover.
 
 #include <net/port/addrman_v2.h>
 #include <net/port/addrman_hash.h>
@@ -44,10 +45,15 @@
 #include <cassert>
 #include <chrono>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <iostream>
 #include <vector>
+
+#ifdef _WIN32
+#include <windows.h>  // GetLastError, ERROR_FILE_NOT_FOUND
+#endif
 
 namespace dilithion::net::port {
 
@@ -55,6 +61,103 @@ namespace dilithion::net::port {
 // Local helpers (anonymous namespace — no external linkage)
 // ============================================================================
 namespace {
+
+// ----------------------------------------------------------------------------
+// Little-endian binary read/write helpers (for peers.dat persistence)
+// ----------------------------------------------------------------------------
+
+void WriteU8(std::ostream& os, uint8_t v)
+{
+    os.put(static_cast<char>(v));
+}
+
+void WriteU16(std::ostream& os, uint16_t v)
+{
+    char b[2] = {
+        static_cast<char>(v & 0xff),
+        static_cast<char>((v >> 8) & 0xff),
+    };
+    os.write(b, 2);
+}
+
+void WriteU32(std::ostream& os, uint32_t v)
+{
+    char b[4];
+    for (int i = 0; i < 4; ++i) b[i] = static_cast<char>((v >> (i * 8)) & 0xff);
+    os.write(b, 4);
+}
+
+void WriteU64(std::ostream& os, uint64_t v)
+{
+    char b[8];
+    for (int i = 0; i < 8; ++i) b[i] = static_cast<char>((v >> (i * 8)) & 0xff);
+    os.write(b, 8);
+}
+
+void WriteI64(std::ostream& os, int64_t v)
+{
+    WriteU64(os, static_cast<uint64_t>(v));
+}
+
+uint8_t ReadU8(std::istream& is)
+{
+    char b = 0;
+    is.read(&b, 1);
+    return static_cast<uint8_t>(b);
+}
+
+uint16_t ReadU16(std::istream& is)
+{
+    char b[2] = {};
+    is.read(b, 2);
+    return static_cast<uint16_t>(static_cast<uint8_t>(b[0])) |
+           (static_cast<uint16_t>(static_cast<uint8_t>(b[1])) << 8);
+}
+
+uint32_t ReadU32(std::istream& is)
+{
+    char b[4] = {};
+    is.read(b, 4);
+    uint32_t v = 0;
+    for (int i = 0; i < 4; ++i) {
+        v |= static_cast<uint32_t>(static_cast<uint8_t>(b[i])) << (i * 8);
+    }
+    return v;
+}
+
+uint64_t ReadU64(std::istream& is)
+{
+    char b[8] = {};
+    is.read(b, 8);
+    uint64_t v = 0;
+    for (int i = 0; i < 8; ++i) {
+        v |= static_cast<uint64_t>(static_cast<uint8_t>(b[i])) << (i * 8);
+    }
+    return v;
+}
+
+int64_t ReadI64(std::istream& is)
+{
+    return static_cast<int64_t>(ReadU64(is));
+}
+
+// ----------------------------------------------------------------------------
+// CNetAddr stream adapters
+// ----------------------------------------------------------------------------
+// CNetAddr's templated Serialize/Unserialize takes a Stream with .read/.write.
+// Adapt std::istream/std::ostream to satisfy that contract — gets us proper
+// network detection (DetectNetwork is called inside CNetAddr::Unserialize)
+// without re-implementing the IPv4-mapped-prefix check here.
+
+struct StreamWriter {
+    std::ostream& os;
+    void write(const char* data, size_t len) { os.write(data, len); }
+};
+
+struct StreamReader {
+    std::istream& is;
+    void read(char* data, size_t len) { is.read(data, len); }
+};
 
 // ----------------------------------------------------------------------------
 // Time
@@ -206,16 +309,54 @@ double AddrInfo::GetChance(int64_t now_secs) const
     return chance;
 }
 
-void AddrInfo::SerializeTo(std::ostream& /*os*/) const
+// Per-entry binary layout (59 bytes total — see CAddrMan_v2::Save format spec):
+//
+//   [4 bytes]  addr.time          uint32 LE
+//   [8 bytes]  addr.services      uint64 LE
+//   [16 bytes] addr.ip            raw IPv6 (IPv4-mapped if applicable)
+//   [2 bytes]  addr.port          uint16 LE
+//   [16 bytes] source             raw IPv6 (network detected on read)
+//   [8 bytes]  last_success_secs  int64 LE
+//   [4 bytes]  n_attempts         int32 LE (sign-extended via uint32 cast)
+//   [1 byte]   in_tried           bool flag (0 or 1)
+//
+// Memory-only fields (last_try_secs, last_count_attempt_secs, n_ref_count,
+// random_pos) are NOT persisted; they reset on Load.
+void AddrInfo::SerializeTo(std::ostream& os) const
 {
-    // TODO Day 2 PM: write [time, services, ip, port, source, last_success_secs,
-    // n_attempts, in_tried_flag] in well-defined byte order. Format spec lives
-    // alongside CAddrMan_v2::Save() so they evolve together.
+    WriteU32(os, addr.time);
+    WriteU64(os, addr.services);
+    os.write(reinterpret_cast<const char*>(addr.ip), 16);
+    WriteU16(os, addr.port);
+    // CNetAddr is just 16 raw bytes; net is detected on read.
+    os.write(reinterpret_cast<const char*>(source.GetAddrBytes()), 16);
+    WriteI64(os, last_success_secs);
+    WriteU32(os, static_cast<uint32_t>(n_attempts));
+    WriteU8(os, in_tried ? 1 : 0);
 }
 
-void AddrInfo::DeserializeFrom(std::istream& /*is*/)
+void AddrInfo::DeserializeFrom(std::istream& is)
 {
-    // TODO Day 2 PM: counterpart of SerializeTo.
+    addr.time = ReadU32(is);
+    addr.services = ReadU64(is);
+    is.read(reinterpret_cast<char*>(addr.ip), 16);
+    addr.port = ReadU16(is);
+
+    // Use CNetAddr's templated Unserialize so DetectNetwork populates m_net
+    // correctly (handles IPv4-mapped prefix detection).
+    StreamReader r{is};
+    source.Unserialize(r);
+
+    last_success_secs = ReadI64(is);
+    n_attempts = static_cast<int>(ReadU32(is));
+    in_tried = (ReadU8(is) != 0);
+
+    // Memory-only fields — reset to defaults; bucket placement on Load
+    // populates n_ref_count and random_pos.
+    last_try_secs = 0;
+    last_count_attempt_secs = 0;
+    n_ref_count = 0;
+    random_pos = -1;
 }
 
 // ============================================================================
@@ -776,24 +917,190 @@ std::vector<NetProtocol::CAddress> CAddrMan_v2::GetAddresses(
     return out;
 }
 
+// peers.dat format (v2, ADDRMAN_V2_FORMAT_VERSION = 1):
+//
+//   [1 byte]   format version
+//   [32 bytes] m_bucket_secret (raw, restored verbatim so bucket math is
+//              deterministic across restarts)
+//   [8 bytes]  m_last_good_secs (int64 LE)
+//   [4 bytes]  count of entries (uint32 LE)
+//   [count × 59 bytes] entries, each via AddrInfo::SerializeTo
+//
+// Buckets are NOT persisted — Load rebuilds them from each entry's
+// (addr, source, in_tried) state by re-running GetTriedBucket /
+// GetNewBucket / GetBucketPosition under the restored secret. KISS:
+// avoids serializing the bucket grid (~320KB) and keeps the format
+// resilient to bucket-arithmetic changes.
+//
+// Atomic-write discipline: write to peers.dat.new, close, then rename.
+// On Windows, rename does not replace an existing file, so we remove
+// the old peers.dat first (mirrors src/net/addrman.cpp:684-733).
 bool CAddrMan_v2::Save()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    // TODO Day 2 PM: atomic tmp+rename write of peers.dat in the v2 format
-    // (header byte, nKey, last_good_secs, entries with in_tried flag — buckets
-    // rebuilt on Load from nKey). Returns true to satisfy the IAddressManager
-    // contract until persistence lands; addresses live in memory only meanwhile.
-    return true;
+
+    if (m_data_path.empty()) {
+        // Caller never set a data path — silently skip rather than fail
+        // (lets headless tests reuse CAddrMan_v2 without filesystem setup).
+        return true;
+    }
+
+    const std::string tmp_path = m_data_path + ".new";
+
+    try {
+        std::ofstream f(tmp_path, std::ios::out | std::ios::binary | std::ios::trunc);
+        if (!f.is_open()) return false;
+
+        // Header.
+        WriteU8(f, ADDRMAN_V2_FORMAT_VERSION);
+        f.write(reinterpret_cast<const char*>(m_bucket_secret.data), 32);
+        WriteI64(f, m_last_good_secs);
+        WriteU32(f, static_cast<uint32_t>(m_info.size()));
+
+        // Entries — iteration order doesn't matter; Load rebuilds buckets.
+        for (const auto& kv : m_info) {
+            kv.second.SerializeTo(f);
+        }
+
+        if (!f.good()) {
+            f.close();
+            (void)std::remove(tmp_path.c_str());
+            return false;
+        }
+        f.close();
+
+        // Atomic-rename dance.
+#ifdef _WIN32
+        if (std::remove(m_data_path.c_str()) != 0) {
+            DWORD err = GetLastError();
+            if (err != ERROR_FILE_NOT_FOUND && err != ERROR_PATH_NOT_FOUND) {
+                std::cerr << "[AddrMan_v2] Warning: failed to remove old "
+                          << m_data_path << " (err=" << err << ")\n";
+                // Fall through — rename may still succeed if file was
+                // already gone underneath us.
+            }
+        }
+#endif
+        if (std::rename(tmp_path.c_str(), m_data_path.c_str()) != 0) {
+            (void)std::remove(tmp_path.c_str());
+            return false;
+        }
+        return true;
+
+    } catch (...) {
+        (void)std::remove(tmp_path.c_str());
+        return false;
+    }
 }
 
 bool CAddrMan_v2::Load()
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    // TODO Day 2 PM: read peers.dat, rebuild m_info / m_id_by_addr / m_random
-    // and re-run GetTriedBucket / GetNewBucket on every entry to populate the
-    // bucket grids. Falls back to fresh-empty if file missing (per plan §2.1).
-    // Returns true (= "no fatal error") for now so node startup proceeds.
-    return true;
+
+    if (m_data_path.empty()) {
+        // No file path configured — caller wants in-memory operation.
+        return true;
+    }
+
+    std::ifstream f(m_data_path, std::ios::in | std::ios::binary);
+    if (!f.is_open()) {
+        // File missing is NOT an error — empty AddrMan + DNS seeds will
+        // bootstrap. Caller distinguishes load-failed-fatally from load-
+        // empty-OK by inspecting Size() afterward.
+        return true;
+    }
+
+    try {
+        // Format version.
+        uint8_t version = ReadU8(f);
+        if (!f.good()) return false;
+        if (version != ADDRMAN_V2_FORMAT_VERSION) {
+            std::cerr << "[AddrMan_v2] Unknown format version "
+                      << static_cast<int>(version)
+                      << " in " << m_data_path << "; ignoring\n";
+            return false;
+        }
+
+        // Bucket secret — restored verbatim so bucket math reproduces.
+        f.read(reinterpret_cast<char*>(m_bucket_secret.data), 32);
+
+        m_last_good_secs = ReadI64(f);
+        uint32_t count = ReadU32(f);
+        if (!f.good()) return false;
+
+        // Sanity bound: combined-table capacity is 1024×64 + 256×64 = 81920.
+        // Anything materially larger is a corruption signal.
+        constexpr uint32_t kMaxEntries = 100000;
+        if (count > kMaxEntries) {
+            std::cerr << "[AddrMan_v2] Refusing to load: count=" << count
+                      << " exceeds sanity bound " << kMaxEntries << "\n";
+            return false;
+        }
+
+        // Read all entries; place each into its canonical bucket. Drop any
+        // entry that fails to place (collides) — same as upstream's nLost
+        // accounting at addrman.cpp:294-314.
+        for (uint32_t i = 0; i < count; ++i) {
+            AddrInfo info;
+            info.DeserializeFrom(f);
+            if (!f.good()) return false;
+
+            const CService addr_svc = ToService(info.addr);
+            if (!addr_svc.IsRoutable()) continue;  // skip stale unroutables
+
+            const int id = m_next_id++;
+            info.random_pos = static_cast<int>(m_random.size());
+
+            const int net = static_cast<int>(ToNetAddr(info.addr).GetNetwork());
+
+            if (info.in_tried) {
+                // Tried bucket placement.
+                const int b = GetTriedBucket(m_bucket_secret, addr_svc);
+                const int p = GetBucketPosition(m_bucket_secret, /*fNew=*/false,
+                                                b, addr_svc);
+                if (m_tried_buckets[b][p] != 0) continue;  // collision: drop
+                m_tried_buckets[b][p] = id;
+                ++m_tried_count;
+                ++m_network_counts[net].n_tried;
+            } else {
+                // New bucket placement (single-ref, primary source).
+                const int b = GetNewBucket(m_bucket_secret, addr_svc, info.source);
+                const int p = GetBucketPosition(m_bucket_secret, /*fNew=*/true,
+                                                b, addr_svc);
+                if (m_new_buckets[b][p] != 0) continue;
+                m_new_buckets[b][p] = id;
+                info.n_ref_count = 1;
+                ++m_new_count;
+                ++m_network_counts[net].n_new;
+            }
+
+            m_info[id] = info;
+            m_id_by_addr[addr_svc] = id;
+            m_random.push_back(id);
+        }
+
+        return true;
+
+    } catch (...) {
+        // Reset state on any throw — better to start fresh than partial.
+        m_info.clear();
+        m_id_by_addr.clear();
+        m_random.clear();
+        m_tried_count = 0;
+        m_new_count = 0;
+        m_network_counts.clear();
+        for (int b = 0; b < ADDRMAN_TRIED_BUCKET_COUNT; ++b) {
+            for (int s = 0; s < ADDRMAN_BUCKET_SIZE; ++s) {
+                m_tried_buckets[b][s] = 0;
+            }
+        }
+        for (int b = 0; b < ADDRMAN_NEW_BUCKET_COUNT; ++b) {
+            for (int s = 0; s < ADDRMAN_BUCKET_SIZE; ++s) {
+                m_new_buckets[b][s] = 0;
+            }
+        }
+        return false;
+    }
 }
 
 size_t CAddrMan_v2::Size() const
