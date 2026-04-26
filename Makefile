@@ -216,6 +216,7 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/block_fetcher.cpp \
                src/net/netaddress.cpp \
                src/net/addrman.cpp \
+               src/net/port/addrman_v2.cpp \
                src/net/banman.cpp \
                src/net/headerssync.cpp \
                src/net/blockencodings.cpp \
@@ -711,6 +712,7 @@ $(OBJ_DIR)/db \
 $(OBJ_DIR)/dfmp \
 $(OBJ_DIR)/miner \
 $(OBJ_DIR)/net \
+$(OBJ_DIR)/net/port \
 $(OBJ_DIR)/node \
 $(OBJ_DIR)/primitives \
 $(OBJ_DIR)/rpc \
@@ -728,7 +730,7 @@ $(OBJ_DIR)/test/fuzz:
 	@mkdir -p $@
 
 # Compile C++ source files
-$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/test
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/net/port $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/test
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 

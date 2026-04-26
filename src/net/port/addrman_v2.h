@@ -28,6 +28,7 @@
 
 #include <net/iaddress_manager.h>
 #include <net/netaddress.h>     // CNetAddr, CService, Network
+#include <net/protocol.h>       // NetProtocol::CAddress (by-value member of AddrInfo)
 #include <primitives/block.h>   // uint256
 
 #include <chrono>
