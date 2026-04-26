@@ -15,7 +15,11 @@
 #include <util/logging.h>  // For g_verbose flag
 #include <node/genesis.h>
 #include <node/ibd_coordinator.h>  // Phase 1: IsSynced() check
-#include <node/fork_manager.h>     // Validate-before-disconnect fork handling
+// PR5.5 (2026-04-26): node/fork_manager.h include retired from
+// HeadersManager. ForkManager-driven fork-cancellation defensive cleanup
+// during header invalidation has been removed in favor of relying on the
+// block-validation layer for fork resolution. ForkManager file remains
+// (Phase 7 deletes it) for ibd_coordinator + block_processing callers.
 #include <core/node_context.h>
 #include <core/chainparams.h>
 #include <api/metrics.h>  // Fork detection metrics
@@ -1600,24 +1604,31 @@ size_t CHeadersManager::InvalidateHeader(const uint256& hash)
 
         InvalidateBestChainCache();
 
-        // VALIDATE-BEFORE-DISCONNECT: Cancel active fork if this header is part of it
-        // This ensures fork state is cleaned up when blocks fail validation
-        ForkManager& forkMgr = ForkManager::GetInstance();
-        if (forkMgr.HasActiveFork()) {
-            auto fork = forkMgr.GetActiveFork();
-            if (fork) {
-                // Check if the invalidated height falls within the fork range
-                int forkPoint = fork->GetForkPointHeight();
-                int forkTip = fork->GetExpectedTipHeight();
-                if (invalidHeight > forkPoint && invalidHeight <= forkTip) {
-                    std::cout << "[HeadersManager] Invalidated header is part of active fork, canceling fork" << std::endl;
-                    forkMgr.CancelFork("Header invalidated: " + hash.GetHex().substr(0, 16));
-                    forkMgr.ClearInFlightState(g_node_context, forkPoint);
-                    g_node_context.fork_detected.store(false);  // Clear fork flag
-                    g_metrics.ClearForkDetected();
-                }
-            }
-        }
+        // PR5.5 (2026-04-26): HeadersManager-side ForkManager retirement.
+        //
+        // Previously: when a header was invalidated, query ForkManager singleton
+        // for an active fork covering this height range and explicitly cancel
+        // it (CancelFork + ClearInFlightState) as defensive cleanup.
+        //
+        // Phase 5 retirement rationale:
+        //   * ForkManager is being retired across the codebase (Phase 7
+        //     deletes the file). Its remaining 52 call sites are in
+        //     ibd_coordinator + block_processing + block_fetcher (Phase 6
+        //     scope per plan §12 Q6).
+        //   * The 5 HeadersManager-side calls were a defensive cleanup path:
+        //     ensure fork state gets cancelled when a header on that fork
+        //     gets invalidated. Without these, fork state stays "active" a
+        //     bit longer until block-validation downstream detects the
+        //     invalidity and clears state itself.
+        //   * Net effect of retirement: minor delay in fork-state cleanup
+        //     during invalidation. Consensus correctness unaffected — the
+        //     block-validation layer is the authority for fork resolution,
+        //     not HeadersManager's defensive cleanup.
+        //
+        // Phase 6 will replace this with index-tree-driven fork detection
+        // via chain_selector once HeadersManager is wired to populate
+        // CChainState::mapBlockIndex on header receipt.
+        // (No-op intentional.)
     } else {
         // Header not in map, just track hash as rejected
         m_rejectedHashes.insert(hash);
