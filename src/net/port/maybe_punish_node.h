@@ -7,10 +7,17 @@
 // policy enum, forward to IPeerScorer::Misbehaving with the canonical
 // weight from misbehavior_policy.h::DefaultWeight().
 //
-// First production consumer: HeadersSync (PR3.3 cutover replaces direct
-// CPeerManager::Misbehaving calls in headerssync_v2.cpp's reject paths
-// with MaybePunishNodeForHeaders). Block + tx wrappers wired at one site
-// each in PR3.3 to satisfy the Phase 1 "no dead code" lesson.
+// Production-path status (corrected 2026-04-26 per Cursor Phase 3 review
+// CONCERN Q5):
+//   * MaybePunishNodeForHeaders — WIRED at net.cpp:1574 (HEADERS-count-too-
+//     large reject) via the CPeerManager::MisbehaveHeaders forwarder.
+//   * MaybePunishNodeForBlock — NOT YET WIRED to a production callsite.
+//     Test-covered only (test_block_and_tx_reject_reasons_map_exhaustively).
+//     Production cutover deferred to Phase 4/5/6 where block-validation
+//     paths get rewritten — wiring at existing call sites now would force
+//     weight-mismatch drift between the wrapper's DefaultWeight and the
+//     existing call-site weights.
+//   * MaybePunishNodeForTx — same disposition as MaybePunishNodeForBlock.
 //
 // ============================================================================
 // DELIBERATE DIVERGENCE: three MisbehaviorType enums coexist after Phase 3.

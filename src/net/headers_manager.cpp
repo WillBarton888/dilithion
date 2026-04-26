@@ -7,6 +7,7 @@
 #include <net/protocol.h>
 #include <net/peers.h>
 #include <net/port/header_proof_checkers.h>  // Phase 3: VDF + RandomX impls
+#include <consensus/chain_work.h>             // Phase 3 BLOCKER fix: shared chain-work helper
 #include <consensus/params.h>
 #include <consensus/pow.h>
 #include <consensus/chain.h>
@@ -1710,56 +1711,12 @@ uint256 CHeadersManager::CalculateChainWork(const CBlockHeader& header, const He
 
 uint256 CHeadersManager::GetBlockWork(uint32_t nBits) const
 {
-    // Bug #46 Fix: Implement proper work calculation
-    // Uses same logic as CBlockIndex::GetBlockProof()
-    // Bug #47 Fix: Use consensus CompactToBig instead of custom GetTarget
-
-    uint256 target = CompactToBig(nBits);
-    uint256 proof;
-    memset(proof.data, 0, 32);
-
-    // If target is zero, return max work (should never happen)
-    bool isZero = true;
-    for (int i = 0; i < 32; i++) {
-        if (target.data[i] != 0) {
-            isZero = false;
-            break;
-        }
-    }
-
-    if (isZero) {
-        memset(proof.data, 0xFF, 32);
-        return proof;
-    }
-
-    // Extract size and mantissa from nBits compact form
-    int size = nBits >> 24;
-    uint64_t mantissa = nBits & 0x00FFFFFF;
-
-    if (mantissa == 0) {
-        memset(proof.data, 0xFF, 32);
-        return proof;
-    }
-
-    // Calculate work = 2^(256 - 8*size) / mantissa
-    int work_exponent = 256 - 8 * size;
-    int work_byte_pos = work_exponent / 8;
-
-    // Clamp to valid range
-    if (work_byte_pos < 0) work_byte_pos = 0;
-    if (work_byte_pos > 31) work_byte_pos = 31;
-
-    // CID 1675253 FIX: Calculate reciprocal of mantissa scaled to 64 bits
-    // Note: mantissa > 0 is guaranteed here because we check mantissa == 0 and return early at line 766
-    // The ternary operator's else branch is dead code, so we simplify to just the division
-    uint64_t work_mantissa = 0xFFFFFFFFFFFFFFFFULL / mantissa;
-
-    // Store the work value at the appropriate byte position
-    for (int i = 0; i < 8 && (work_byte_pos + i) < 32; i++) {
-        proof.data[work_byte_pos + i] = (work_mantissa >> (i * 8)) & 0xFF;
-    }
-
-    return proof;
+    // Phase 3 Cursor BLOCKER fix (2026-04-26): consolidated through the
+    // shared helper `dilithion::consensus::ComputeChainWork`. Previously
+    // this method had its own full formula copy — third copy missed
+    // during Phase 3 Day 1 Day 1 helper extraction. Drift risk between
+    // headers-manager work and block-index work eliminated.
+    return dilithion::consensus::ComputeChainWork(nBits);
 }
 
 // Bug #47 Fix: Use consensus PoW functions instead of custom implementation
@@ -2074,25 +2031,9 @@ void CHeadersManager::UpdateChainTips(const uint256& hashNew)
 
 uint256 CHeadersManager::AddChainWork(const uint256& blockProof, const uint256& parentChainWork) const
 {
-    // Implement same logic as CBlockIndex::BuildChainWork()
-    // Simple byte-by-byte addition with carry
-    uint256 result;
-    uint32_t carry = 0;
-
-    for (int i = 0; i < 32; i++) {
-        uint32_t sum = (uint32_t)parentChainWork.data[i] +
-                      (uint32_t)blockProof.data[i] +
-                      carry;
-        result.data[i] = sum & 0xFF;
-        carry = sum >> 8;
-    }
-
-    // Handle overflow - saturate at maximum value
-    if (carry != 0) {
-        memset(result.data, 0xFF, 32);
-    }
-
-    return result;
+    // Phase 3 Cursor BLOCKER fix (2026-04-26): consolidated through the
+    // shared helper. Sum is commutative; argument-order is irrelevant.
+    return dilithion::consensus::AddChainWork(blockProof, parentChainWork);
 }
 
 // ============================================================================
