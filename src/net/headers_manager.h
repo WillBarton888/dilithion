@@ -5,8 +5,10 @@
 #define DILITHION_NET_HEADERS_MANAGER_H
 
 #include <primitives/block.h>
+#include <node/block_index.h>     // CBlockIndex (was via chain_tips_tracker.h)
 #include <net/headerssync.h>
-#include <net/chain_tips_tracker.h>
+// PR5.2.B (2026-04-26): chain_tips_tracker.h retired — setChainTips
+// (std::set<uint256> below) alone serves as the canonical leaf set.
 #include <chrono>
 #include <condition_variable>
 #include <map>
@@ -525,12 +527,31 @@ public:
      */
     std::string GetForkDebugInfo() const;
 
-    /**
-     * @brief Get the chain tips tracker for advanced fork analysis
-     *
-     * @return Reference to chain tips tracker
-     */
-    const CChainTipsTracker& GetChainTipsTracker() const { return m_chainTipsTracker; }
+    // PR5.2.B (2026-04-26): GetChainTipsTracker() retired. Callers wanting
+    // tip enumeration should use HasCompetingForks() / GetForkCount() /
+    // GetForkDebugInfo() which now derive from setChainTips directly.
+    //
+    // Two compatibility helpers for external callers (ibd_coordinator)
+    // that previously walked ChainTipsTracker:
+    //   GetBestHeaderChainWork() — max chain_work across known tips
+    //   GetCompetingHeaderTips() — vector of (hash, height, chainWork) tuples
+    // These walk setChainTips + mapHeaders. Phase 6 HeadersManager rewrite
+    // retires both as ibd_coordinator stops needing them.
+
+    /// Per-tip info exposed to external callers (formerly ChainTip from
+    /// chain_tips_tracker.h).
+    struct HeaderTipInfo {
+        uint256 hash;
+        int height;
+        uint256 chainWork;
+    };
+
+    /// Returns the maximum chain_work observed across known tips, or
+    /// uint256() if no tips are known.
+    uint256 GetBestHeaderChainWork() const;
+
+    /// Returns all known tips (one entry per setChainTips member).
+    std::vector<HeaderTipInfo> GetCompetingHeaderTips() const;
 
     /**
      * @brief Build a map of storage hashes for a fork's ancestry
@@ -738,8 +759,9 @@ private:
     mutable std::map<int, uint256> m_bestChainCache;  ///< Height -> Hash on best chain
     mutable bool m_bestChainCacheDirty{true};          ///< Cache needs rebuild
 
-    // Bug #150 Fix: Chain tips tracker for fork management
-    CChainTipsTracker m_chainTipsTracker;              ///< Tracks competing chain tips
+    // PR5.2.B (2026-04-26): m_chainTipsTracker member retired. setChainTips
+    // (declared above as std::set<uint256>) is the canonical leaf set;
+    // chainWork lookups go through mapHeaders[tipHash].chainWork.
 
     // Peer synchronization state
     std::map<NodeId, PeerSyncState> mapPeerStates;        ///< Peer -> Basic sync state

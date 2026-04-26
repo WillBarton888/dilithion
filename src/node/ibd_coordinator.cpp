@@ -1722,7 +1722,7 @@ bool CIbdCoordinator::FetchBlocks() {
 
                     uint256 headerChainWork;
                     if (m_node_context.headers_manager)
-                        headerChainWork = m_node_context.headers_manager->GetChainTipsTracker().GetBestChainWork();
+                        headerChainWork = m_node_context.headers_manager->GetBestHeaderChainWork();
 
                     if (!localChainWork.IsNull() && !headerChainWork.IsNull()) {
                         if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
@@ -2433,7 +2433,7 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
 
         uint256 headerChainWork;
         if (m_node_context.headers_manager)
-            headerChainWork = m_node_context.headers_manager->GetChainTipsTracker().GetBestChainWork();
+            headerChainWork = m_node_context.headers_manager->GetBestHeaderChainWork();
 
         if (!localChainWork.IsNull() && !headerChainWork.IsNull()) {
             if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
@@ -2520,7 +2520,7 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
 
     uint256 headerChainWork;
     if (m_node_context.headers_manager) {
-        headerChainWork = m_node_context.headers_manager->GetChainTipsTracker().GetBestChainWork();
+        headerChainWork = m_node_context.headers_manager->GetBestHeaderChainWork();
     }
 
     // If chainwork data is available for both sides, use it for the comparison.
@@ -2639,8 +2639,9 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
     std::map<int32_t, uint256> expectedHashes;
 
     if (m_node_context.headers_manager) {
-        const auto& tipsTracker = m_node_context.headers_manager->GetChainTipsTracker();
-        auto competingTips = tipsTracker.GetCompetingTips();
+        // PR5.2.B: GetChainTipsTracker retired; use GetCompetingHeaderTips
+        // which derives from setChainTips via headers_manager.
+        auto competingTips = m_node_context.headers_manager->GetCompetingHeaderTips();
 
         for (const auto& tip : competingTips) {
             if (tip.height == headerTipHeight) {

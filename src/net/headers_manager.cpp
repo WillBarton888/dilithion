@@ -99,8 +99,8 @@ CHeadersManager::~CHeadersManager()
         m_bestChainCache.clear();
     }
 
-    // Clear chain tips tracker
-    m_chainTipsTracker.Clear();
+    // PR5.2.B: m_chainTipsTracker retired — setChainTips above already
+    // serves as the canonical leaf set; no separate cache to clear.
 }
 
 // ============================================================================
@@ -508,10 +508,12 @@ bool CHeadersManager::ShouldUseDoSProtection(NodeId peer) const
     }
 
     // Bug #150: Also activate if we have competing forks
-    // This helps protect against fork flooding attacks
-    if (m_chainTipsTracker.HasCompetingForks()) {
+    // This helps protect against fork flooding attacks.
+    // PR5.2.B: setChainTips replaces m_chainTipsTracker as the canonical
+    // leaf set — size > 1 means competing forks exist.
+    if (setChainTips.size() > 1) {
         std::cout << "[HeadersManager] DoS protection activated due to competing forks ("
-                  << m_chainTipsTracker.TipCount() << " tips)" << std::endl;
+                  << setChainTips.size() << " tips)" << std::endl;
         return true;
     }
 
@@ -1023,7 +1025,47 @@ int CHeadersManager::GetBestHeight() const
 uint256 CHeadersManager::GetBestHash() const
 {
     std::lock_guard<std::mutex> lock(cs_headers);
-    return m_chainTipsTracker.GetBestTip();
+    // PR5.2.B: walk setChainTips for max-work tip. setChainTips is small
+    // (typically O(1) tips, with rare O(N) during fork events); per-tip
+    // mapHeaders lookup is O(1). Net O(K) where K = tip count.
+    uint256 bestHash;
+    uint256 bestWork;
+    for (const auto& tipHash : setChainTips) {
+        auto it = mapHeaders.find(tipHash);
+        if (it == mapHeaders.end()) continue;
+        if (bestHash.IsNull() || ChainWorkGreaterThan(it->second.chainWork, bestWork)) {
+            bestHash = tipHash;
+            bestWork = it->second.chainWork;
+        }
+    }
+    return bestHash;
+}
+
+uint256 CHeadersManager::GetBestHeaderChainWork() const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    uint256 bestWork;
+    for (const auto& tipHash : setChainTips) {
+        auto it = mapHeaders.find(tipHash);
+        if (it == mapHeaders.end()) continue;
+        if (bestWork.IsNull() || ChainWorkGreaterThan(it->second.chainWork, bestWork)) {
+            bestWork = it->second.chainWork;
+        }
+    }
+    return bestWork;
+}
+
+std::vector<CHeadersManager::HeaderTipInfo> CHeadersManager::GetCompetingHeaderTips() const
+{
+    std::lock_guard<std::mutex> lock(cs_headers);
+    std::vector<HeaderTipInfo> out;
+    out.reserve(setChainTips.size());
+    for (const auto& tipHash : setChainTips) {
+        auto it = mapHeaders.find(tipHash);
+        if (it == mapHeaders.end()) continue;
+        out.push_back({tipHash, it->second.height, it->second.chainWork});
+    }
+    return out;
 }
 
 bool CHeadersManager::IsHeaderSyncInProgress() const
@@ -1210,7 +1252,7 @@ void CHeadersManager::Clear()
     hashBestHeader = uint256();
     nBestHeight = -1;
     setChainTips.clear();
-    m_chainTipsTracker.Clear();
+    // PR5.2.B: m_chainTipsTracker retired; setChainTips.clear() above is sufficient.
     InvalidateBestChainCache();
 
     // Clear rejected hashes on full reset
@@ -1289,8 +1331,8 @@ void CHeadersManager::ClearAboveHeight(int keepHeight, const uint256& preferredH
     }
 
     // Clear chain tips and rebuild with just the best header
+    // PR5.2.B: m_chainTipsTracker retired; setChainTips alone is canonical.
     setChainTips.clear();
-    m_chainTipsTracker.Clear();
     if (!hashBestHeader.IsNull()) {
         setChainTips.insert(hashBestHeader);
     }
@@ -1314,17 +1356,31 @@ void CHeadersManager::ClearAboveHeight(int keepHeight, const uint256& preferredH
 
 bool CHeadersManager::HasCompetingForks() const
 {
-    return m_chainTipsTracker.HasCompetingForks();
+    // PR5.2.B: setChainTips.size() > 1 ⇔ competing tips exist.
+    std::lock_guard<std::mutex> lock(cs_headers);
+    return setChainTips.size() > 1;
 }
 
 size_t CHeadersManager::GetForkCount() const
 {
-    return m_chainTipsTracker.TipCount();
+    std::lock_guard<std::mutex> lock(cs_headers);
+    return setChainTips.size();
 }
 
 std::string CHeadersManager::GetForkDebugInfo() const
 {
-    return m_chainTipsTracker.GetDebugInfo();
+    // PR5.2.B: format from setChainTips + mapHeaders rather than the
+    // retired m_chainTipsTracker. Same data, different source of truth.
+    std::lock_guard<std::mutex> lock(cs_headers);
+    std::string out = "Tips (" + std::to_string(setChainTips.size()) + "):\n";
+    for (const auto& tipHash : setChainTips) {
+        auto it = mapHeaders.find(tipHash);
+        if (it == mapHeaders.end()) continue;
+        out += "  hash=" + tipHash.GetHex().substr(0, 16) + "...";
+        out += " height=" + std::to_string(it->second.height);
+        out += " work=" + it->second.chainWork.GetHex().substr(0, 16) + "...\n";
+    }
+    return out;
 }
 
 bool CHeadersManager::GetParentHash(const uint256& hash, uint256& parentHash) const
@@ -1431,7 +1487,8 @@ size_t CHeadersManager::PruneOrphanedHeaders()
 
         // Keep chain tips that still have significant work
         // (Simplified: keep tips that are close to best work)
-        if (m_chainTipsTracker.IsTip(hash)) {
+        // PR5.2.B: setChainTips replaces m_chainTipsTracker as canonical leaf set.
+        if (setChainTips.count(hash) > 0) {
             // Keep this tip if it has at least some work (non-null)
             // More sophisticated pruning can compare work percentages later
             if (!header.chainWork.IsNull()) {
@@ -1456,8 +1513,8 @@ size_t CHeadersManager::PruneOrphanedHeaders()
             RemoveFromHeightIndex(hash, height);
 
             // Remove from chain tips (if present)
+            // PR5.2.B: m_chainTipsTracker retired; setChainTips alone.
             setChainTips.erase(hash);
-            m_chainTipsTracker.RemoveTip(hash);
 
             // Remove the header itself
             mapHeaders.erase(it);
@@ -1563,8 +1620,8 @@ size_t CHeadersManager::InvalidateHeader(const uint256& hash)
                 }
 
                 // Remove from chain tips
+                // PR5.2.B: m_chainTipsTracker retired; setChainTips alone.
                 setChainTips.erase(h);
-                m_chainTipsTracker.RemoveTip(h);
 
                 // Remove from mapHeaders
                 mapHeaders.erase(headerIt);
@@ -1993,17 +2050,13 @@ void CHeadersManager::UpdateChainTips(const uint256& hashNew)
     setChainTips.insert(hashNew);
 
     // Remove its parent from chain tips (no longer a leaf)
+    // PR5.2.B: m_chainTipsTracker retired; setChainTips alone is canonical.
     auto it = mapHeaders.find(hashNew);
     if (it != mapHeaders.end()) {
         const HeaderWithChainWork& header = it->second;
         if (!header.hashPrevBlock.IsNull()) {
             setChainTips.erase(header.hashPrevBlock);
-            // Bug #150: Also update the new tracker
-            m_chainTipsTracker.RemoveTip(header.hashPrevBlock);
         }
-
-        // Bug #150: Add to the new chain tips tracker with chain work
-        m_chainTipsTracker.AddOrUpdateTip(hashNew, header.height, header.chainWork);
     }
 }
 
