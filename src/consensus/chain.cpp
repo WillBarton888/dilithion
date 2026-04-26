@@ -1614,22 +1614,23 @@ std::vector<CChainState::ChainTip> CChainState::GetChainTips() const {
             ChainTip tip;
             tip.height = pindex->nHeight;
             tip.hash = pair.first;
+            tip.chain_work = pindex->nChainWork;  // Phase 5 PR5.2.A
 
-            // Determine status and branch length
+            // Determine status and branch length.
+            // Phase 5 PR5.2.A (Finding F3): expanded from 2 to 5 status values
+            // to match the frozen ChainTipInfo::Status enum.
             if (pindex == pindexTip) {
                 tip.status = "active";
                 tip.branchlen = 0;
             } else {
-                // Find fork point with main chain
+                // Find fork point with main chain.
                 const CBlockIndex* pWalk = pindex;
                 int branchlen = 0;
-                // Walk back to find where this tip diverges from main chain
-                // A block is on the main chain if walking from tip backwards reaches it
+                // Walk back to find where this tip diverges from main chain.
+                // A block is on the main chain if walking from tip backwards reaches it.
                 while (pWalk && pWalk->nHeight > 0) {
-                    // Check if this block is on the main chain by comparing with main chain at same height
                     bool onMainChain = false;
                     if (pWalk->nHeight <= pindexTip->nHeight) {
-                        // Walk main chain to this height
                         const CBlockIndex* pMain = pindexTip;
                         while (pMain && pMain->nHeight > pWalk->nHeight) {
                             pMain = pMain->pprev;
@@ -1643,7 +1644,21 @@ std::vector<CChainState::ChainTip> CChainState::GetChainTips() const {
                     pWalk = pWalk->pprev;
                 }
                 tip.branchlen = branchlen;
-                tip.status = "valid-fork";
+
+                // Status precedence: invalid > valid-fork (full block) >
+                // valid-headers (headers only) > unknown.
+                if (pindex->IsInvalid()) {
+                    tip.status = "invalid";
+                } else {
+                    const uint32_t validLevel = pindex->nStatus & CBlockIndex::BLOCK_VALID_MASK;
+                    if (validLevel >= CBlockIndex::BLOCK_VALID_TRANSACTIONS) {
+                        tip.status = "valid-fork";
+                    } else if (validLevel >= CBlockIndex::BLOCK_VALID_HEADER) {
+                        tip.status = "valid-headers";
+                    } else {
+                        tip.status = "unknown";
+                    }
+                }
             }
 
             tips.push_back(tip);

@@ -420,7 +420,7 @@ dilv-genesis-vdf: $(CORE_OBJECTS) $(OBJ_DIR)/tools/dilv_genesis_vdf.o $(DILITHIU
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests peer_scorer_tests peer_scorer_banman_integration_tests header_proof_checker_tests chain_selector_tests
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests peer_scorer_tests peer_scorer_banman_integration_tests header_proof_checker_tests chain_selector_tests getchaintips_equivalence_tests
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
@@ -550,6 +550,13 @@ chain_selector_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/chain_selector_tests.o $(D
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ chain_selector_tests built successfully$(COLOR_RESET)"
+
+# Phase 5 PR5.2.A: GetChainTips equivalence proof (legacy string-status
+# vs adapter enum-Status). Gates PR5.2.B CChainTipsTracker retirement.
+getchaintips_equivalence_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/getchaintips_equivalence_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ getchaintips_equivalence_tests built successfully$(COLOR_RESET)"
 
 dna_serialization_test: $(CORE_OBJECTS) $(OBJ_DIR)/digital_dna/dna_serialization_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"

@@ -366,16 +366,27 @@ public:
 
     /**
      * Get all chain tips (blocks with no children in the block index)
-     * Used by block explorer to show fork visibility
+     * Used by block explorer to show fork visibility AND by Phase 5
+     * ChainSelectorAdapter::GetChainTips (which maps string status to
+     * the frozen ChainTipInfo::Status enum).
      *
-     * Returns vector of tuples: (height, hash, branchlen, status)
-     * Status: "active" = main chain tip, "valid-fork" = valid alternative, "headers-only" = no block data
+     * Status taxonomy (Phase 5 Finding F3 — extended from 2 to 5 values):
+     *   "active"        — pindex == pindexTip (main chain tip)
+     *   "invalid"       — pindex->IsInvalid() (BLOCK_FAILED_VALID/CHILD)
+     *   "valid-fork"    — non-active tip, block fully validated (>= BLOCK_VALID_TRANSACTIONS)
+     *   "valid-headers" — non-active tip, header validated (>= BLOCK_VALID_HEADER) but block not
+     *   "unknown"       — non-active tip with no validation level recorded
+     *
+     * chain_work mirrors pindex->nChainWork at the time of the call —
+     * used by the adapter to populate ChainTipInfo::chain_work without
+     * a second mapBlockIndex lookup.
      */
     struct ChainTip {
         int height;
         uint256 hash;
         int branchlen;
         std::string status;
+        uint256 chain_work;  // Phase 5: mirrors pindex->nChainWork
     };
     std::vector<ChainTip> GetChainTips() const;
 

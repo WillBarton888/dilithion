@@ -68,10 +68,37 @@ bool ChainSelectorAdapter::ProcessNewHeader(const CBlockHeader& /*header*/)
     return false;
 }
 
+// Phase 5 PR5.2.A: real implementation. Forwards into the (extended)
+// CChainState::GetChainTips and converts each string status into the
+// frozen ChainTipInfo::Status enum.
+//
+// Mapping (must stay in sync with chain.cpp::GetChainTips status assignments):
+//   "active"        -> Status::Active
+//   "invalid"       -> Status::InvalidBlock
+//   "valid-fork"    -> Status::ValidFork
+//   "valid-headers" -> Status::ValidHeaders
+//   "unknown"       -> Status::Unknown   (also fallback for any drift)
 std::vector<ChainTipInfo> ChainSelectorAdapter::GetChainTips() const
 {
-    assert(false && "ChainSelectorAdapter::GetChainTips — real impl in PR5.2.A");
-    return {};
+    using Status = ChainTipInfo::Status;
+    const auto legacy_tips = m_chainstate.GetChainTips();
+
+    std::vector<ChainTipInfo> out;
+    out.reserve(legacy_tips.size());
+    for (const auto& t : legacy_tips) {
+        ChainTipInfo info;
+        info.hash = t.hash;
+        info.height = t.height;
+        info.branchlen = t.branchlen;
+        info.chain_work = t.chain_work;
+        if      (t.status == "active")        info.status = Status::Active;
+        else if (t.status == "invalid")       info.status = Status::InvalidBlock;
+        else if (t.status == "valid-fork")    info.status = Status::ValidFork;
+        else if (t.status == "valid-headers") info.status = Status::ValidHeaders;
+        else                                  info.status = Status::Unknown;
+        out.push_back(info);
+    }
+    return out;
 }
 
 CBlockIndex* ChainSelectorAdapter::FindMostWorkChain() const
