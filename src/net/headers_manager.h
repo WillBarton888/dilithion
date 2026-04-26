@@ -728,6 +728,12 @@ private:
     // Bug #46 Fix: Minimum chain work for DoS protection
     uint256 nMinimumChainWork;              ///< Reject chains below this work threshold
 
+    // Phase 3: chain-agnostic proof checker. Owned here; non-owning
+    // pointer passed to each HeadersSyncState. Picked at construction time
+    // based on g_chainParams (RandomXHeaderProofChecker for DIL,
+    // VDFHeaderProofChecker for DilV).
+    std::unique_ptr<::dilithion::net::IHeaderProofChecker> m_proof_checker;
+
     // Bug #150 Fix: Best chain cache for fork-safe height lookups
     mutable std::map<int, uint256> m_bestChainCache;  ///< Height -> Hash on best chain
     mutable bool m_bestChainCacheDirty{true};          ///< Cache needs rebuild

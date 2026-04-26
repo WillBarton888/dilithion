@@ -23,7 +23,8 @@ HeadersSyncState::HeadersSyncState(
     const HeadersSyncParams& params,
     const uint256& chain_start_hash,
     int64_t chain_start_height,
-    const uint256& minimum_work
+    const uint256& minimum_work,
+    const ::dilithion::net::IHeaderProofChecker* proof_checker
 )
     : m_id(peer_id),
       m_params(params),
@@ -35,7 +36,8 @@ HeadersSyncState::HeadersSyncState(
       m_current_height(chain_start_height),
       m_redownload_buffer_last_height(0),
       m_process_all_remaining_headers(false),
-      m_download_state(State::PRESYNC)
+      m_download_state(State::PRESYNC),
+      m_proof_checker(proof_checker)
 {
     // Initialize chain work to zero
     memset(m_current_chain_work.data, 0, 32);
@@ -220,8 +222,17 @@ bool HeadersSyncState::ValidateAndStoreHeadersCommitments(
 }
 
 bool HeadersSyncState::ValidateAndProcessSingleHeader(const CBlockHeader& header) {
-    // 1. Check proof of work (skip for VDF blocks which use VDF proof instead)
-    if (!header.IsVDFBlock()) {
+    // 1. Phase 3: route the proof check through the chain-agnostic
+    // IHeaderProofChecker if injected. Falls back to the legacy inline
+    // `IsVDFBlock()` branch + CheckProofOfWork path if no checker was
+    // passed (un-migrated test callsites).
+    if (m_proof_checker) {
+        if (!m_proof_checker->CheckHeaderProof(header)) {
+            std::cerr << "[HeadersSyncState] Invalid proof for header "
+                      << header.GetHash().GetHex().substr(0, 16) << "..." << std::endl;
+            return false;
+        }
+    } else if (!header.IsVDFBlock()) {
         uint256 hash = header.GetHash();
         if (!CheckProofOfWork(hash, header.nBits)) {
             std::cerr << "[HeadersSyncState] Invalid PoW for header "
@@ -263,9 +274,15 @@ bool HeadersSyncState::ValidateAndProcessSingleHeader(const CBlockHeader& header
 // ============================================================================
 
 bool HeadersSyncState::ValidateAndStoreRedownloadedHeader(const CBlockHeader& header) {
-    // 1. Validate PoW (skip for VDF blocks which use VDF proof instead)
+    // 1. Phase 3: route through IHeaderProofChecker if injected (same
+    // pattern as ValidateAndProcessSingleHeader above).
     uint256 hash = header.GetHash();
-    if (!header.IsVDFBlock()) {
+    if (m_proof_checker) {
+        if (!m_proof_checker->CheckHeaderProof(header)) {
+            std::cerr << "[HeadersSyncState] Invalid proof in REDOWNLOAD" << std::endl;
+            return false;
+        }
+    } else if (!header.IsVDFBlock()) {
         if (!CheckProofOfWork(hash, header.nBits)) {
             std::cerr << "[HeadersSyncState] Invalid PoW in REDOWNLOAD" << std::endl;
             return false;

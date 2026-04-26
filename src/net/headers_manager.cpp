@@ -6,6 +6,7 @@
 #include <net/connman.h>
 #include <net/protocol.h>
 #include <net/peers.h>
+#include <net/port/header_proof_checkers.h>  // Phase 3: VDF + RandomX impls
 #include <consensus/params.h>
 #include <consensus/pow.h>
 #include <consensus/chain.h>
@@ -35,9 +36,22 @@ CHeadersManager::CHeadersManager()
 {
     hashBestHeader = uint256();
 
-    // Bug #46 Fix: Initialize minimum chain work to zero (accept all chains initially)
-    // Production networks should set this to a reasonable threshold to prevent DoS
-    nMinimumChainWork = uint256();
+    // Phase 3: read minimum chain work from chainparams (was hardcoded 0).
+    nMinimumChainWork = (Dilithion::g_chainParams != nullptr)
+        ? Dilithion::g_chainParams->nMinimumChainWork
+        : uint256();
+
+    // Phase 3: pick the chain-agnostic proof checker. DilV (VDF-only chain)
+    // ships VDFHeaderProofChecker; DIL ships RandomXHeaderProofChecker.
+    // The HeadersSyncState instances we construct below get a non-owning
+    // pointer to this; lifetime: owned by manager, outlives all states.
+    if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) {
+        m_proof_checker =
+            std::make_unique<::dilithion::net::port::VDFHeaderProofChecker>();
+    } else {
+        m_proof_checker =
+            std::make_unique<::dilithion::net::port::RandomXHeaderProofChecker>();
+    }
 
     // BUG FIX: Add genesis to mapHeaders so block 1 can accumulate chain work properly
     // Without this, block 1's pprev is nullptr and chainWork doesn't include genesis work
@@ -545,13 +559,14 @@ bool CHeadersManager::InitializeDoSProtectedSync(NodeId peer, const uint256& min
         chainStartHeight = 0;
     }
 
-    // Create the state
+    // Create the state — Phase 3: pass the chain-agnostic proof checker.
     auto state = std::make_unique<HeadersSyncState>(
         peer,
         params,
         chainStartHash,
         chainStartHeight,
-        minimum_work
+        minimum_work,
+        m_proof_checker.get()
     );
 
     mapHeadersSyncStates[peer] = std::move(state);
