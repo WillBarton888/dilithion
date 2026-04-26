@@ -1412,4 +1412,15 @@ size_t CAddrMan_v2::TriedCollisionsSizeForTest() const
     return m_tried_collisions.size();
 }
 
+int CAddrMan_v2::GetEntryAttemptCountForTest(const NetProtocol::CAddress& addr) const
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    const CService svc = ToService(addr);
+    auto it = m_id_by_addr.find(svc);
+    if (it == m_id_by_addr.end()) return -1;
+    auto info_it = m_info.find(it->second);
+    if (info_it == m_info.end()) return -1;
+    return info_it->second.n_attempts;
+}
+
 }  // namespace dilithion::net::port

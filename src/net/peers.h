@@ -318,6 +318,15 @@ public:
     // CPeer::misbehavior_score field at all call sites.
     int GetMisbehaviorScore(int peer_id) const;
 
+    // Phase 2.5 ticket PHASE-2.5-ADDRMAN-BIAS: test-only accessor for the
+    // owned addrman, used by integration tests that need to observe AddrMan
+    // state changes from forwarder calls (e.g. RecordAttempt(PeerMisbehaved)
+    // wire-up). Returns the underlying IAddressManager*; cast to concrete
+    // type via dynamic_cast for impl-specific *ForTest diagnostics.
+    ::dilithion::net::IAddressManager* GetAddrManagerForTest() const {
+        return addrman.get();
+    }
+
     // Access to ban manager for advanced operations
     CBanManager& GetBanManager() { return banman; }
 

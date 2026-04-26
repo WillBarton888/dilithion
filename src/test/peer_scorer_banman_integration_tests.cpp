@@ -20,6 +20,7 @@
 #include <net/peers.h>
 #include <net/banman.h>
 #include <net/protocol.h>
+#include <net/port/addrman_v2.h>  // PHASE-2.5-ADDRMAN-BIAS: dynamic_cast target
 
 #include <cassert>
 #include <cstdlib>
@@ -189,6 +190,55 @@ void test_decay_does_not_unban_already_banned_peer()
     std::cout << " OK\n";
 }
 
+// PHASE-2.5-ADDRMAN-BIAS ticket: deterministic verification that the Phase 2
+// wire-up's effect on AddrMan state actually materializes. Q16 deferred
+// portion. Pairs with the smoke test below.
+//
+// Uses CAddrMan_v2::GetEntryAttemptCountForTest (added 2026-04-26 alongside
+// this test) to observe n_attempts directly — bounded to the direct effect
+// of RecordAttempt(PeerMisbehaved), not the full bias-on-Select chain
+// (which would need a probabilistic harness).
+void test_misbehavior_increments_addrman_attempts()
+{
+    std::cout << "  test_misbehavior_increments_addrman_attempts..." << std::flush;
+
+    CPeerManager pm("");
+
+    // Add the peer's IP to AddrMan first via the public Add path. Without
+    // an entry, RecordAttempt is a silent no-op.
+    auto addr = MakeAddrV4(0x09080706);
+    NetProtocol::CAddress empty_source;
+    auto* addrman_iface = pm.GetAddrManagerForTest();  // see below
+    assert(addrman_iface != nullptr);
+    addrman_iface->Add(addr, empty_source);
+
+    // Cast to concrete CAddrMan_v2 for the *ForTest accessor.
+    auto* v2 = dynamic_cast<dilithion::net::port::CAddrMan_v2*>(addrman_iface);
+    if (!v2) {
+        // Operator escape hatch is on (legacy adapter); skip — coverage is
+        // for the v2 production path.
+        std::cout << " SKIP (v2 adapter not active)\n";
+        return;
+    }
+
+    const int before = v2->GetEntryAttemptCountForTest(addr);
+    assert(before >= 0);  // entry exists
+
+    // Add the peer to peer-manager and cross misbehavior threshold.
+    auto peer = pm.AddPeer(addr);
+    assert(peer != nullptr);
+    pm.Misbehaving(peer->id, 100, MisbehaviorType::INVALID_BLOCK_HEADER);
+
+    // The forwarder calls addrman->RecordAttempt(addr, PeerMisbehaved) on
+    // threshold cross, which routes via AttemptInternal(count_failure=true)
+    // and bumps n_attempts. So after the call, the entry's attempt count
+    // should be strictly greater than `before`.
+    const int after = v2->GetEntryAttemptCountForTest(addr);
+    assert(after > before);
+
+    std::cout << " OK (n_attempts: " << before << " -> " << after << ")\n";
+}
+
 // 6a. Phase 2 Q16 wire-up: on threshold cross, the forwarder signals
 //     CAddrMan_v2 via RecordAttempt(PeerMisbehaved). This is the cross-
 //     session badness signal Q1=C relied on (without it, Q1=C wouldn't
@@ -276,10 +326,11 @@ int main()
         test_protocol_version_uses_short_ban_time();
         test_default_misbehaviortype_uses_long_ban_time();
         test_decay_does_not_unban_already_banned_peer();
+        test_misbehavior_increments_addrman_attempts();
         test_misbehavior_signals_addrman();
         test_env_var_off_disables_scoring();
 
-        std::cout << "\n=== All Phase 2 Integration Tests Passed (7 tests) ==="
+        std::cout << "\n=== All Phase 2 Integration Tests Passed (8 tests) ==="
                   << std::endl;
         return 0;
     } catch (const std::exception& e) {

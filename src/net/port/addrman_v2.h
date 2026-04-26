@@ -200,6 +200,13 @@ public:
     // to verify that Select drains queued promotions instead of leaking them.
     size_t TriedCollisionsSizeForTest() const;
 
+    // Phase 2.5 ticket PHASE-2.5-ADDRMAN-BIAS: returns AddrInfo.n_attempts
+    // for the entry matching `addr`, or -1 if not present. Verifies that
+    // the Phase 2 forwarder's RecordAttempt(PeerMisbehaved) wire-up bumps
+    // the attempt counter — bounded direct-observation test, not the full
+    // bias-on-Select chain (which would need a probabilistic harness).
+    int GetEntryAttemptCountForTest(const NetProtocol::CAddress& addr) const;
+
 private:
     // Mutex protects all member state. Public methods take this lock at entry.
     mutable std::mutex m_mutex;
