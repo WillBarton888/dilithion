@@ -146,6 +146,16 @@ public:
     // chainparams now owns the value per chain.
     uint256 nMinimumChainWork;
 
+    // Phase 4 port: outbound connection class targets. Bitcoin Core's
+    // ThreadOpenConnections maintains separate counts for each class.
+    //   nOutboundFullRelayTarget — exchanges blocks + tx + addrs (default 8)
+    //   nOutboundBlockRelayTarget — anti-eclipse, blocks only (per Phase 0
+    //                                §10 Q4: 4 for DilV's 45s blocks where
+    //                                propagation latency matters more, 2 for
+    //                                DIL's 240s where propagation absorbs)
+    int nOutboundFullRelayTarget;
+    int nOutboundBlockRelayTarget;
+
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)
     // vdfExclusiveHeight:  VDF-only period (reject RandomX blocks after this)

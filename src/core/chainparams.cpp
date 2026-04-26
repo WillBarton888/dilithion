@@ -106,6 +106,11 @@ ChainParams ChainParams::Mainnet() {
     // against a live seed. Q7 plan recommendation deferred to Phase 4.
     params.nMinimumChainWork = uint256();
 
+    // Phase 4 port: outbound connection class targets. DIL has 240s blocks
+    // where propagation latency is well-absorbed; Bitcoin defaults are fine.
+    params.nOutboundFullRelayTarget = 8;
+    params.nOutboundBlockRelayTarget = 2;
+
     // ASERT difficulty algorithm activation
     // Replaces periodic retarget + EDA with per-block exponential adjustment.
     // Anchor block: height 23039 (the block at activationHeight - 1).
@@ -310,6 +315,10 @@ ChainParams ChainParams::Testnet() {
     // Phase 3 port: testnet has no PRESYNC chain-work gate.
     params.nMinimumChainWork = uint256();
 
+    // Phase 4 port: outbound class targets — testnet uses DIL defaults.
+    params.nOutboundFullRelayTarget = 8;
+    params.nOutboundBlockRelayTarget = 2;
+
     // VDF Fair Mining — VDF-only from genesis for MVP testing
     params.vdfActivationHeight = 0;
     params.vdfExclusiveHeight  = 0;            // VDF-only from genesis (like DilV)
@@ -455,6 +464,11 @@ ChainParams ChainParams::DilV() {
     // gate value can be tightened in Phase 4 after telemetry confirms
     // typical fresh-node IBD work accumulation against live seeds.
     params.nMinimumChainWork = uint256();
+
+    // Phase 4 port: outbound class targets — DilV's 45s blocks benefit
+    // from faster propagation, so bump BlockRelay to 4 (Q4 recommendation).
+    params.nOutboundFullRelayTarget = 8;
+    params.nOutboundBlockRelayTarget = 4;
 
     // VDF: active from genesis — DilV is a VDF-only chain
     params.vdfActivationHeight = 0;

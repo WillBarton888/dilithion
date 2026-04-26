@@ -88,6 +88,25 @@ public:
     bool fInbound = false;                  // True if inbound connection
     bool fManual = false;                   // True if --connect/--addnode/RPC addnode (Bitcoin Core pattern)
 
+    // Phase 4 port: connection class (Bitcoin Core's four-class outbound
+    // typology). Inbound nodes are class-irrelevant; outbound class is set
+    // by ThreadOpenConnections at construction. Matches the FROZEN
+    // OutboundClass enum from iaddress_manager.h so addrman->Select(class)
+    // and per-class accounting use the same vocabulary.
+    //
+    // Usage:
+    //   FullRelay  — default outbound; exchanges blocks + tx + addrs
+    //   BlockRelay — anti-eclipse: blocks only, no tx, no addr gossip
+    //   Manual     — --connect/--addnode (mirrors fManual=true)
+    //   Feeler     — brief connect to refresh AddrMan freshness (Phase 5+)
+    enum class OutboundClass : uint8_t {
+        FullRelay,
+        BlockRelay,
+        Manual,
+        Feeler,
+    };
+    OutboundClass m_outbound_class = OutboundClass::FullRelay;
+
     //
     // Connection state
     //

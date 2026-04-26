@@ -100,7 +100,12 @@ public:
      * @param manual True for --connect/--addnode/RPC addnode peers (Bitcoin Core pattern)
      * @return CNode pointer on success, nullptr on failure
      */
-    CNode* ConnectNode(const NetProtocol::CAddress& addr, bool manual = false);
+    // Phase 4 port: connection class added (default FullRelay matches
+    // pre-port behaviour). `manual=true` overrides the class to Manual.
+    CNode* ConnectNode(
+        const NetProtocol::CAddress& addr,
+        bool manual = false,
+        CNode::OutboundClass cls = CNode::OutboundClass::FullRelay);
 
     /**
      * Add a manual node for auto-reconnect tracking
