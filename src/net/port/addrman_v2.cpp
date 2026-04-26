@@ -19,16 +19,22 @@
 //   * int64_t Unix seconds (no NodeSeconds chrono wrapper).
 //   * Manual std::ostream/std::istream serialization.
 //
-// Phase 1 Day 1 PM scope (this commit):
+// Implemented through Day 2 AM:
 //   * Constructor / destructor
-//   * Find / Create / Delete / SwapRandom
+//   * Find / Create / Delete / SwapRandom (basic table ops)
 //   * IsTerrible / GetChance (AddrInfo helpers)
 //   * GetTriedBucket / GetNewBucket / GetBucketPosition (free-fn bucket math)
-//   * AddInternal / Add (entry point)
+//   * AddInternal / Add (entry point with stochastic damping)
 //   * MakeTried / ClearNew (bucket transitions)
-//   * Stubs for: RecordAttempt, Select, GetAddresses, Save, Load,
-//     ResolveTriedCollisions, AttemptInternal, GoodInternal,
-//     ConnectedInternal, SelectInternal — Day 2 work.
+//   * ConnectedInternal / AttemptInternal / GoodInternal (state updates)
+//   * RecordAttempt (outcome dispatcher)
+//   * ResolveTriedCollisions (test-before-evict resolver)
+//   * SelectInternal / Select (bucket walk with chance_factor ramp)
+//   * GetAddresses (random subset for ADDR gossip)
+//
+// Remaining Day-2 surface (still stubbed):
+//   * AddrInfo::SerializeTo / DeserializeFrom — binary stream layout
+//   * Save / Load — atomic peers.dat persistence (tmp + rename pattern)
 
 #include <net/port/addrman_v2.h>
 #include <net/port/addrman_hash.h>
@@ -626,24 +632,148 @@ void CAddrMan_v2::RecordAttempt(const NetProtocol::CAddress& addr,
     }
 }
 
-std::optional<NetProtocol::CAddress> CAddrMan_v2::Select(OutboundClass /*cls*/)
+// Map IAddressManager's OutboundClass onto the binary new-only/either choice
+// that Bitcoin Core's Select_ exposes:
+//   * Feeler              — exclusively new (unverified) addrs to refresh
+//                           freshness signals
+//   * FullRelay / BlockRelay / Manual — either table; bucket walk picks
+//                           with 50/50 bias when both are populated
+//
+// Phase 4 PeerManager will refine this dispatch (e.g. BlockRelay may want to
+// avoid recently-tried-and-failed entries more aggressively); for Phase 1
+// the binary distinction is enough to satisfy IAddressManager's contract.
+std::optional<NetProtocol::CAddress> CAddrMan_v2::Select(OutboundClass cls)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    // TODO Day 2 PM: implement bucket-walk selection with chance_factor
-    // ramp; honor OutboundClass (FullRelay / BlockRelay / Manual / Feeler).
-    // Stubbed for Day 1 PM checkpoint compilation.
-    return std::nullopt;
+
+    const bool new_only = (cls == OutboundClass::Feeler);
+    auto sel = SelectInternal(new_only);
+    if (!sel) return std::nullopt;
+    return sel->first;
 }
 
+// Mirrors upstream's Select_ (addrman.cpp:713-787). Bucket walk with
+// chance_factor ramp.
+std::optional<std::pair<NetProtocol::CAddress, int64_t>>
+CAddrMan_v2::SelectInternal(bool new_only)
+{
+    if (m_random.empty()) return std::nullopt;
+    if (new_only && m_new_count == 0) return std::nullopt;
+    if (m_new_count + m_tried_count == 0) return std::nullopt;
+
+    // Decide which table to draw from. 50/50 when both populated; forced if
+    // one side is empty or caller asked for new-only.
+    bool search_tried;
+    if (new_only || m_tried_count == 0) {
+        search_tried = false;
+    } else if (m_new_count == 0) {
+        search_tried = true;
+    } else {
+        search_tried = (std::uniform_int_distribution<int>(0, 1)(m_rng) == 1);
+    }
+
+    const int bucket_count = search_tried
+        ? ADDRMAN_TRIED_BUCKET_COUNT
+        : ADDRMAN_NEW_BUCKET_COUNT;
+
+    // chance_factor escalates each rejected candidate so termination is
+    // guaranteed: GetChance() ≥ ~0.000036 (worst case), and 1.2^N grows
+    // unbounded. In expectation the loop terminates in <50 iterations.
+    double chance_factor = 1.0;
+
+    while (true) {
+        const int bucket = std::uniform_int_distribution<int>(0, bucket_count - 1)(m_rng);
+        const int initial_pos = std::uniform_int_distribution<int>(0, ADDRMAN_BUCKET_SIZE - 1)(m_rng);
+
+        int pos = 0;
+        int node_id = 0;
+        int i = 0;
+        for (; i < ADDRMAN_BUCKET_SIZE; ++i) {
+            pos = (initial_pos + i) % ADDRMAN_BUCKET_SIZE;
+            node_id = search_tried
+                ? m_tried_buckets[bucket][pos]
+                : m_new_buckets[bucket][pos];
+            if (node_id != 0) break;
+        }
+
+        // Bucket entirely empty — pick a different one.
+        if (i == ADDRMAN_BUCKET_SIZE) continue;
+
+        auto info_it = m_info.find(node_id);
+        assert(info_it != m_info.end());
+        const AddrInfo& info = info_it->second;
+
+        // Probability check: randbits<30> < chance_factor * info.GetChance() * 2^30.
+        // Rearranged as integer compare to keep parity with upstream's
+        // randbits<30> < (1<<30) * factor * chance pattern.
+        const double accept_p = chance_factor * info.GetChance(NowSecs());
+        const uint32_t threshold = (accept_p >= 1.0)
+            ? ((1u << 30) - 1)  // ceiling — accept every time
+            : static_cast<uint32_t>(accept_p * static_cast<double>(1u << 30));
+        const uint32_t draw = std::uniform_int_distribution<uint32_t>(
+            0, (1u << 30) - 1)(m_rng);
+
+        if (draw < threshold) {
+            return std::make_pair(info.addr, info.last_try_secs);
+        }
+
+        // Reject — escalate chance_factor and loop.
+        chance_factor *= 1.2;
+    }
+}
+
+// Mirrors upstream's GetAddr_ (addrman.cpp:806-842). Returns a random subset
+// of non-terrible addresses for ADDR-message gossip.
+//
+//   max_count    — hard cap on result size (0 = unlimited).
+//   max_pct      — soft cap as % of m_random.size() (0 = unlimited).
+//   network_filter — optional Network-as-int; when set, only addrs of that
+//                    network are returned.
 std::vector<NetProtocol::CAddress> CAddrMan_v2::GetAddresses(
-    size_t /*max_count*/,
-    size_t /*max_pct*/,
-    std::optional<int> /*network_filter*/)
+    size_t max_count,
+    size_t max_pct,
+    std::optional<int> network_filter)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    // TODO Day 2 PM: shuffle-pick a non-terrible random subset for ADDR
-    // gossip. Stubbed for Day 1 PM checkpoint compilation.
-    return {};
+
+    size_t n_nodes = m_random.size();
+    if (max_pct != 0) {
+        n_nodes = max_pct * n_nodes / 100;
+    }
+    if (max_count != 0) {
+        n_nodes = std::min(n_nodes, max_count);
+    }
+
+    const int64_t now = NowSecs();
+    std::vector<NetProtocol::CAddress> out;
+    out.reserve(n_nodes);
+
+    // Fisher-Yates partial shuffle: walk forward through m_random, swap each
+    // position with a random remaining slot, take the prefix. This produces
+    // an unbiased random sample of size n_nodes — same trick as upstream.
+    for (size_t n = 0; n < m_random.size(); ++n) {
+        if (out.size() >= n_nodes) break;
+
+        const size_t pick = std::uniform_int_distribution<size_t>(
+            n, m_random.size() - 1)(m_rng);
+        SwapRandom(static_cast<unsigned int>(n),
+                   static_cast<unsigned int>(pick));
+
+        auto info_it = m_info.find(m_random[n]);
+        assert(info_it != m_info.end());
+        const AddrInfo& info = info_it->second;
+
+        if (network_filter.has_value()) {
+            const int net = static_cast<int>(ToNetAddr(info.addr).GetNetwork());
+            if (net != *network_filter) continue;
+        }
+
+        if (info.IsTerrible(now)) continue;
+
+        out.push_back(info.addr);
+    }
+
+    return out;
 }
 
 bool CAddrMan_v2::Save()
@@ -747,13 +877,6 @@ void CAddrMan_v2::AttemptInternal(const CService& addr,
         pinfo->last_count_attempt_secs = now_secs;
         ++pinfo->n_attempts;
     }
-}
-
-std::optional<std::pair<NetProtocol::CAddress, int64_t>>
-CAddrMan_v2::SelectInternal(bool /*new_only*/)
-{
-    // TODO Day 2 PM
-    return std::nullopt;
 }
 
 // Mirrors upstream's ResolveCollisions_ (addrman.cpp:903-963).
