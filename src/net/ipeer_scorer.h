@@ -1,12 +1,19 @@
 // Copyright (c) 2026 The Dilithion Core developers
 // Distributed under the MIT software license
 //
-// Phase 6 interface contract. Tracks misbehavior score per peer; bans when
-// threshold exceeded. Bitcoin Core's Misbehaving() pattern.
+// Phase 2 interface contract for Misbehaving / banman alignment. Tracks
+// misbehavior score per peer; bans when threshold exceeded. Bitcoin Core's
+// Misbehaving() pattern (legacy v25.x scoring shape — current upstream
+// has migrated to a binary "should discourage" flag, but Dilithion retains
+// numeric scoring for finer-grained policy and operator visibility).
 //
 // Categories include both protocol-level misbehavior (invalid signatures,
 // malformed messages) and Dilithion-specific (invalid MIK signature,
 // invalid DFMP cooldown proof, malformed DNA Phase 1.5 envelope).
+//
+// Implementation: src/net/port/peer_scorer.{h,cpp} (Phase 2). Phase 0 froze
+// this file's signatures per the architecture §4 freeze contract; only
+// purely-additive method additions are permitted without an interface bump.
 
 #ifndef DILITHION_NET_IPEER_SCORER_H
 #define DILITHION_NET_IPEER_SCORER_H
