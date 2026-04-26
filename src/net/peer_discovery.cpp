@@ -7,11 +7,14 @@
 
 #include <net/peer_discovery.h>
 #include <net/peers.h>
+#include <net/netaddress_dilithion.h>  // Phase 1 port: ToService / ToNetAddr
 #include <util/logging.h>
 #include <util/time.h>
 #include <algorithm>
+#include <cstring>
 
-CPeerDiscovery::CPeerDiscovery(CPeerManager& peer_mgr, CAddrMan& addrman)
+CPeerDiscovery::CPeerDiscovery(CPeerManager& peer_mgr,
+                               ::dilithion::net::IAddressManager& addrman)
     : m_peer_manager(peer_mgr), m_addrman(addrman) {
     m_last_peer_connection = std::chrono::steady_clock::now();
 }
@@ -107,18 +110,22 @@ bool CPeerDiscovery::DetectNetworkPartition() const {
 size_t CPeerDiscovery::DiscoverFromAddrMan(size_t max_peers) {
     size_t discovered = 0;
 
-    // Get good addresses from addrman
-    std::vector<CNetworkAddr> addrs = m_addrman.GetAddr(max_peers, 23);  // 23% max
+    // Phase 1 port: GetAddresses returns vector<NetProtocol::CAddress>
+    // (no CNetworkAddr intermediate). 23% cap matches legacy.
+    std::vector<NetProtocol::CAddress> addrs =
+        m_addrman.GetAddresses(max_peers, 23, std::nullopt);
 
     for (const auto& addr : addrs) {
         if (discovered >= max_peers) {
             break;
         }
 
-        // Try to connect (this would need CPeerManager::ConnectToPeer)
-        // For now, just mark as attempted
-        // CNetworkAddr extends CService, so we can pass it directly
-        m_addrman.Attempt(static_cast<const CService&>(addr), false);
+        // Mark as attempted with no failure penalty — legacy passed
+        // fCountFailure=false (we're just asking for the address, not
+        // counting an actual connection failure here). Maps to
+        // ConnectionOutcome::LocalDisconnect in the new dispatch table.
+        m_addrman.RecordAttempt(addr,
+            ::dilithion::net::ConnectionOutcome::LocalDisconnect);
         discovered++;
     }
 
@@ -135,24 +142,28 @@ size_t CPeerDiscovery::DiscoverFromDNSSeeds(size_t max_peers) {
 size_t CPeerDiscovery::DiscoverFromSeedNodes(size_t max_peers) {
     size_t discovered = 0;
 
-    // Testnet seed nodes - use CService directly
-    // Format: CService::FromIPv4(ipv4_addr, port)
-    std::vector<CService> seeds = {
-        CService::FromIPv4(0x8606227A, 18444)  // 134.122.4.164:18444 (NYC)
+    // Testnet seed nodes — Phase 1 port: build NetProtocol::CAddress directly
+    // for the IAddressManager interface (no CNetworkAddr intermediate).
+    struct SeedSpec { uint32_t ipv4; uint16_t port; };
+    const SeedSpec seeds[] = {
+        { 0x8606227A, 18444 },  // 134.122.4.164:18444 (NYC)
     };
 
-    for (const auto& seed : seeds) {
-        if (discovered >= max_peers) {
-            break;
-        }
+    NetProtocol::CAddress empty_source;  // self-discovered = empty source
 
-        // Create CNetworkAddr from CService
-        CNetworkAddr addr(seed, NetProtocol::NODE_NETWORK, GetTime());
-        CNetAddr source;  // Empty source (self-discovered)
+    for (const auto& spec : seeds) {
+        if (discovered >= max_peers) break;
 
-        // Add to address manager
-        if (m_addrman.Add(addr, source)) {
-            m_addrman.Good(seed);  // Mark as good since it's a seed
+        NetProtocol::CAddress seed_addr;
+        seed_addr.SetIPv4(spec.ipv4);
+        seed_addr.port = spec.port;
+        seed_addr.services = NetProtocol::NODE_NETWORK;
+        seed_addr.time = static_cast<uint32_t>(GetTime());
+
+        if (m_addrman.Add(seed_addr, empty_source)) {
+            // Promote to tried (seeds are pre-verified by definition).
+            m_addrman.RecordAttempt(seed_addr,
+                ::dilithion::net::ConnectionOutcome::Success);
             discovered++;
         }
     }

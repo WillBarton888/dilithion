@@ -12,10 +12,14 @@
 #include <net/net.h>
 #include <net/connman.h>
 #include <net/protocol.h>
+#include <net/port/addrman_v2.h>             // Phase 1 port: CAddrMan_v2 (default)
+#include <net/port/legacy_addrman_adapter.h> // Phase 1 port: legacy fallback
 #include <digital_dna/digital_dna.h>  // Digital DNA: Sybil-resistant identity
 #include <util/strencodings.h>
 #include <util/logging.h>
 #include <algorithm>
+#include <cstdlib>  // std::getenv (Phase 1 port: addrman impl selection)
+#include <cstring>  // std::strcmp
 #include <set>
 
 // SSOT: Access to global node context for CBlockTracker
@@ -54,14 +58,35 @@ CPeerManager::CPeerManager(const std::string& datadir)
     : banman(datadir), next_peer_id(1), data_dir(datadir) {
     InitializeSeedNodes();
 
-    // Load persisted peer addresses from peers.dat
+    // Phase 1 port: select address-manager implementation.
+    //
+    // Default: CAddrMan_v2 (new port). Operator escape hatch:
+    //   DILITHION_USE_ADDRMAN_V2=0  -> wrap legacy CAddrMan via the adapter.
+    //
+    // The adapter exposes the same IAddressManager surface, so the rest of
+    // CPeerManager can call addrman-> uniformly regardless of impl. CLI-flag
+    // wiring is deliberately deferred to Phase 6 (PeerManager rewrite); env
+    // var keeps the rollback path operator-accessible without that plumbing.
+    {
+        const char* env = std::getenv("DILITHION_USE_ADDRMAN_V2");
+        const bool use_legacy = (env != nullptr) && (std::strcmp(env, "0") == 0);
+        if (use_legacy) {
+            addrman = std::make_unique<dilithion::net::port::LegacyAddrManAdapter>();
+        } else {
+            addrman = std::make_unique<dilithion::net::port::CAddrMan_v2>();
+        }
+    }
+
+    // Configure persistence path before any Load/Save call. Either impl
+    // silently ignores Save/Load when the path is empty (headless tests).
     if (!data_dir.empty()) {
+        addrman->SetDataPath(data_dir + "/peers.dat");
         LoadPeers();
     }
-    
-    // Network: Initialize enhanced peer discovery
-    peer_discovery = std::make_unique<CPeerDiscovery>(*this, addrman);
-    
+
+    // Network: Initialize enhanced peer discovery against the interface.
+    peer_discovery = std::make_unique<CPeerDiscovery>(*this, *addrman);
+
     // Network: Connection quality tracker is initialized automatically (default constructor)
 }
 
@@ -71,10 +96,14 @@ bool CPeerManager::SavePeers() {
     }
 
     std::string path = data_dir + "/peers.dat";
-    bool result = addrman.SaveToFile(path);
+    // SetDataPath was already configured in the constructor; this just
+    // re-affirms in case the data_dir changed mid-life (unusual). Safe to
+    // call repeatedly.
+    addrman->SetDataPath(path);
+    bool result = addrman->Save();
 
     if (result) {
-        LogPrintf(NET, INFO, "Saved %zu peer addresses to %s", addrman.Size(), path.c_str());
+        LogPrintf(NET, INFO, "Saved %zu peer addresses to %s", addrman->Size(), path.c_str());
     } else {
         LogPrintf(NET, ERROR, "Failed to save peers to %s", path.c_str());
     }
@@ -88,10 +117,11 @@ bool CPeerManager::LoadPeers() {
     }
 
     std::string path = data_dir + "/peers.dat";
-    bool result = addrman.LoadFromFile(path);
+    addrman->SetDataPath(path);
+    bool result = addrman->Load();
 
     if (result) {
-        LogPrintf(NET, INFO, "Loaded %zu peer addresses from %s", addrman.Size(), path.c_str());
+        LogPrintf(NET, INFO, "Loaded %zu peer addresses from %s", addrman->Size(), path.c_str());
     }
     // Silent if no existing peers.dat - normal for new node
 
@@ -285,33 +315,13 @@ void CPeerManager::AddPeerAddress(const NetProtocol::CAddress& addr) {
         return;
     }
 
-    // Convert NetProtocol::CAddress to CService for CAddrMan
-    // Create CNetAddr from IP bytes
-    CNetAddr netaddr;
-
-    // Check if IPv4-mapped address (::ffff:x.x.x.x)
-    // IPv4-mapped prefix: 00 00 00 00 00 00 00 00 00 00 FF FF
-    static const uint8_t ipv4_mapped_prefix[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
-    bool is_ipv4 = (memcmp(addr.ip, ipv4_mapped_prefix, 12) == 0);
-
-    if (is_ipv4) {
-        // IPv4 address - extract from last 4 bytes
-        uint32_t ipv4 = ((uint32_t)addr.ip[12] << 24) |
-                        ((uint32_t)addr.ip[13] << 16) |
-                        ((uint32_t)addr.ip[14] << 8) |
-                        (uint32_t)addr.ip[15];
-        netaddr.SetIPv4(ipv4);
-    } else {
-        // IPv6 address - pass raw bytes directly
-        netaddr.SetIPv6(addr.ip);
-    }
-
-    CService service(netaddr, addr.port);
-
-    // Add to AddrMan - bucket system handles deduplication and limits
-    // Must create CNetworkAddr (which extends CService) for proper Add()
-    CNetworkAddr networkAddr(service, addr.services, addr.time);
-    addrman.Add(networkAddr, CNetAddr());  // No source address for now
+    // Phase 1 port: IAddressManager takes (CAddress, CAddress source). The
+    // pre-port code wrapped the CAddress into a CNetworkAddr + CNetAddr;
+    // the new interface accepts CAddress directly. Source is unknown at
+    // this call site (pre-port behavior was empty CNetAddr) — pass an empty
+    // CAddress placeholder which converts to an empty source group.
+    NetProtocol::CAddress empty_source;  // all-zero source (legacy parity)
+    addrman->Add(addr, empty_source);
 }
 
 std::vector<NetProtocol::CAddress> CPeerManager::QueryDNSSeeds() {
@@ -720,54 +730,22 @@ bool CPeerManager::IsSeedNode(const std::string& ip) const {
 // Address database management (NW-003 - now uses Bitcoin Core CAddrMan)
 
 void CPeerManager::MarkAddressGood(const NetProtocol::CAddress& addr) {
-    // Convert NetProtocol::CAddress to CService
-    CNetAddr netaddr;
-
-    // Check if IPv4-mapped address (::ffff:x.x.x.x)
-    static const uint8_t ipv4_mapped_prefix[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
-    bool is_ipv4 = (memcmp(addr.ip, ipv4_mapped_prefix, 12) == 0);
-
-    if (is_ipv4) {
-        uint32_t ipv4 = ((uint32_t)addr.ip[12] << 24) |
-                        ((uint32_t)addr.ip[13] << 16) |
-                        ((uint32_t)addr.ip[14] << 8) |
-                        (uint32_t)addr.ip[15];
-        netaddr.SetIPv4(ipv4);
-    } else {
-        netaddr.SetIPv6(addr.ip);
-    }
-
-    // NOTE: Since we only call MarkAddressGood for OUTBOUND connections,
-    // addr.port is already the correct P2P port (18444 testnet / 8444 mainnet).
-    // Inbound connections are excluded at the call site (dilithion-node.cpp).
-    CService service(netaddr, addr.port);
-
-    // Mark as good in AddrMan (moves to tried table)
-    addrman.Good(service);
+    // Phase 1 port: IAddressManager dispatches via ConnectionOutcome. Success
+    // performs the equivalent of legacy Good() — promote to tried with
+    // test-before-evict on collision.
+    //
+    // NOTE: this is only called for OUTBOUND connections — addr.port is the
+    // correct P2P port (caller responsibility, not changed by the port).
+    addrman->RecordAttempt(addr, ::dilithion::net::ConnectionOutcome::Success);
 }
 
 void CPeerManager::MarkAddressTried(const NetProtocol::CAddress& addr) {
-    // Convert NetProtocol::CAddress to CService
-    CNetAddr netaddr;
-
-    // Check if IPv4-mapped address (::ffff:x.x.x.x)
-    static const uint8_t ipv4_mapped_prefix[12] = {0,0,0,0,0,0,0,0,0,0,0xff,0xff};
-    bool is_ipv4 = (memcmp(addr.ip, ipv4_mapped_prefix, 12) == 0);
-
-    if (is_ipv4) {
-        uint32_t ipv4 = ((uint32_t)addr.ip[12] << 24) |
-                        ((uint32_t)addr.ip[13] << 16) |
-                        ((uint32_t)addr.ip[14] << 8) |
-                        (uint32_t)addr.ip[15];
-        netaddr.SetIPv4(ipv4);
-    } else {
-        netaddr.SetIPv6(addr.ip);
-    }
-
-    CService service(netaddr, addr.port);
-
-    // Mark connection attempt in AddrMan (true = count as failure if it fails)
-    addrman.Attempt(service, true);
+    // Phase 1 port: legacy Attempt(addr, fCountFailure=true) maps to a
+    // count-failure outcome. Per the IAddressManager dispatch table:
+    // HandshakeFailed/Timeout/PeerMisbehaved all bump n_attempts; pick
+    // Timeout as the closest semantic match for the "we tried, no answer"
+    // flow this method represented in the legacy code.
+    addrman->RecordAttempt(addr, ::dilithion::net::ConnectionOutcome::Timeout);
 }
 
 std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int count) {
@@ -782,34 +760,28 @@ std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int co
     while ((int)result.size() < count && attempts < max_attempts) {
         attempts++;
 
-        // Select returns pair<CAddress, int64_t> where int64_t is last try time
-        auto [selected_addr, last_try] = addrman.Select();
-
-        // Check if valid address was returned
-        if (!selected_addr.IsValid()) {
+        // Phase 1 port: IAddressManager::Select returns optional<CAddress>
+        // directly (no wrapper pair, no CService intermediate). nullopt
+        // means the bucket walk found no candidates this iteration.
+        auto sel = addrman->Select(::dilithion::net::OutboundClass::FullRelay);
+        if (!sel.has_value()) {
             break;  // No more addresses available
         }
+        const NetProtocol::CAddress& selected_addr = *sel;
 
-        // Get IP string for deduplication
+        // Deduplicate by IP string (port-independent — multiple ports per IP
+        // is unusual on this network; single-port-per-host stays in result).
         std::string ip_str = selected_addr.ToStringIP();
         if (seen_ips.count(ip_str)) {
             continue;  // Skip duplicate
         }
         seen_ips.insert(std::move(ip_str));
 
-        // Convert CAddress (which inherits from CService/CNetAddr) back to NetProtocol::CAddress
-        NetProtocol::CAddress addr;
-        addr.services = NetProtocol::NODE_NETWORK;
-        addr.port = selected_addr.GetPort();
-        addr.time = GetTime();
-
-        // CService inherits from CNetAddr, so we can access CNetAddr methods directly
-        if (selected_addr.IsIPv4()) {
-            addr.SetIPv4(selected_addr.GetIPv4());
-        } else {
-            // Copy raw bytes from CNetAddr
-            memcpy(addr.ip, selected_addr.GetAddrBytes(), 16);
-        }
+        // Refresh time stamp to "now" for outbound-relay propagation —
+        // matches legacy behavior at this call site.
+        NetProtocol::CAddress addr = selected_addr;
+        addr.time = static_cast<uint32_t>(GetTime());
+        if (addr.services == 0) addr.services = NetProtocol::NODE_NETWORK;
 
         result.push_back(addr);
     }
@@ -819,7 +791,7 @@ std::vector<NetProtocol::CAddress> CPeerManager::SelectAddressesToConnect(int co
 }
 
 size_t CPeerManager::GetAddressCount() const {
-    return addrman.Size();
+    return addrman->Size();
 }
 
 bool CPeerManager::EvictPeersIfNeeded() {

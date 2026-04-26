@@ -176,10 +176,10 @@ public:
     bool Load() override;
     size_t Size() const override;
 
-    // ---- Configuration (called once at construction by node startup) ----
-
     // Path to peers.dat (default: empty, set by SetDataPath).
-    void SetDataPath(const std::string& path);
+    void SetDataPath(const std::string& path) override;
+
+    // ---- Configuration (called once at construction by node startup) ----
 
     // Per-instance bucket-selection secret. In production, generated on first
     // run via std::random_device and persisted in peers.dat. Tests may inject

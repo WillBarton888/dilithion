@@ -5,7 +5,7 @@
 #define DILITHION_NET_PEERS_H
 
 #include <net/protocol.h>
-#include <net/addrman.h>  // Bitcoin Core-style address manager
+#include <net/iaddress_manager.h>  // Phase 1 port: IAddressManager interface
 #include <net/banman.h>   // Bitcoin Core-style ban manager with persistence
 #include <net/peer_discovery.h>  // Network: Enhanced peer discovery
 #include <net/connection_quality.h>  // Network: Connection quality metrics
@@ -226,9 +226,12 @@ private:
     // Hardcoded seed nodes
     std::vector<NetProtocol::CAddress> seed_nodes;
 
-    // Bitcoin Core-style address manager (replaces simple addr_map)
-    // Provides eclipse attack protection via two-table bucket system
-    CAddrMan addrman;
+    // Phase 1 port: IAddressManager interface owns either CAddrMan_v2 (default
+    // production path; new bucket-secret + tried/new tables) or
+    // LegacyAddrManAdapter (operator escape hatch via DILITHION_USE_ADDRMAN_V2=0).
+    // Either implementation handles eclipse attack protection via the same
+    // two-table bucket invariant.
+    std::unique_ptr<::dilithion::net::IAddressManager> addrman;
     std::string data_dir;  // Path to data directory for peers.dat
     
     // Network: Enhanced peer discovery

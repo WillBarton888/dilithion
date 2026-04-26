@@ -12,7 +12,7 @@
 #define DILITHION_NET_PEER_DISCOVERY_H
 
 #include <net/protocol.h>
-#include <net/addrman.h>
+#include <net/iaddress_manager.h>  // Phase 1 port: IAddressManager interface
 #include <net/netaddress.h>
 #include <string>
 #include <vector>
@@ -26,7 +26,8 @@ class CPeerManager;
  */
 class CPeerDiscovery {
 public:
-    CPeerDiscovery(CPeerManager& peer_mgr, CAddrMan& addrman);
+    CPeerDiscovery(CPeerManager& peer_mgr,
+                   ::dilithion::net::IAddressManager& addrman);
     ~CPeerDiscovery();
 
     /**
@@ -64,7 +65,7 @@ public:
 
 private:
     CPeerManager& m_peer_manager;
-    CAddrMan& m_addrman;
+    ::dilithion::net::IAddressManager& m_addrman;
 
     // Discovery strategies
     size_t DiscoverFromAddrMan(size_t max_peers);

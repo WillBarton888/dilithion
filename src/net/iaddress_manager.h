@@ -15,6 +15,7 @@
 #define DILITHION_NET_IADDRESS_MANAGER_H
 
 #include <cstdint>
+#include <string>
 #include <vector>
 #include <optional>
 
@@ -79,6 +80,15 @@ public:
 
     // Diagnostics — number of addresses tracked.
     virtual size_t Size() const = 0;
+
+    // Set the on-disk persistence path. Called once at startup before Load /
+    // Save are invoked. Implementations may store the path internally and
+    // ignore this if they don't persist (e.g. in-memory test doubles).
+    //
+    // Purely additive to the interface per the freeze contract in
+    // bitcoin_core_port_architecture.md §4 — adding new methods does not
+    // require an interface-version bump.
+    virtual void SetDataPath(const std::string& path) = 0;
 
     // ============================================================
     // Note (2026-04-26): MIK hint extension REMOVED per KISS principle
