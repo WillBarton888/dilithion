@@ -53,6 +53,12 @@ void CChainState::Cleanup() {
     // CRITICAL-1 FIX: Acquire lock before accessing shared state
     std::lock_guard<std::recursive_mutex> lock(cs_main);
 
+    // Phase 5: clear candidate set BEFORE freeing the underlying CBlockIndex
+    // objects in mapBlockIndex. The set holds non-owning raw pointers; if
+    // mapBlockIndex is cleared first, the set's destructor / further accesses
+    // would dereference dangling pointers via the comparator.
+    m_setBlockIndexCandidates.clear();
+
     // HIGH-C001 FIX: Smart pointers automatically destruct when map is cleared
     // No need for manual delete - RAII handles cleanup
     mapBlockIndex.clear();
@@ -1889,49 +1895,175 @@ bool CChainState::VerifyRecentUndoIntegrity(int probeDepth,
 // end-to-end and the interface contract can be unit-tested for trivial
 // getters (GetActiveTip, GetActiveHeight, etc.) before the algorithm goes in.
 
+// ============================================================================
+// Phase 5 Day 3 AM (PR5.3 algorithm core): real impls for the helpers
+// declared in chain.h. Mirrors upstream Bitcoin Core's validation.cpp:
+//   * IsBlockACandidateForActivation — eligibility predicate
+//   * RecomputeCandidates           — full O(N) rebuild of the candidate set
+//   * MarkBlockAsFailed             — set BLOCK_FAILED_VALID + propagate
+//                                     BLOCK_FAILED_CHILD to descendants
+//   * MarkBlockAsValid              — mirror: clear failure flags
+//   * FindMostWorkChainImpl         — pop max-work leaf, skip invalid ancestry
+//
+// ActivateBestChainStep + InvalidateBlockImpl + ReconsiderBlockImpl are
+// Day 3 PM (more interconnected with WAL + DisconnectTip calls).
+// ============================================================================
+
+bool CChainState::IsBlockACandidateForActivation(CBlockIndex* pindex) const
+{
+    if (!pindex) return false;
+    if (pindex->IsInvalid()) return false;
+    const uint32_t validLevel = pindex->nStatus & CBlockIndex::BLOCK_VALID_MASK;
+    // Need at least full block validation to be activatable. Pre-validation
+    // BLOCK_VALID_HEADER entries (PR5.3 prerequisite) are NOT candidates —
+    // they live in mapBlockIndex for fork visibility, not for activation.
+    return validLevel >= CBlockIndex::BLOCK_VALID_TRANSACTIONS;
+}
+
+void CChainState::RecomputeCandidates()
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    // Build set of blocks that have at least one child (i.e., NOT a leaf).
+    std::set<const CBlockIndex*> hasChildren;
+    for (const auto& kv : mapBlockIndex) {
+        if (kv.second->pprev) {
+            hasChildren.insert(kv.second->pprev);
+        }
+    }
+
+    m_setBlockIndexCandidates.clear();
+    for (const auto& kv : mapBlockIndex) {
+        CBlockIndex* p = kv.second.get();
+        if (hasChildren.count(p) > 0) continue;  // not a leaf
+        if (!IsBlockACandidateForActivation(p)) continue;
+        m_setBlockIndexCandidates.insert(p);
+    }
+}
+
+void CChainState::MarkBlockAsFailed(CBlockIndex* pindex)
+{
+    if (!pindex) return;
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+
+    // Propagate BLOCK_FAILED_CHILD to all descendants. Worklist-style
+    // walk over mapBlockIndex; iterates until no new descendants are
+    // added. O(N * D) where D = depth — for mainnet (~50k) the bound is
+    // small and this only runs on operator-triggered InvalidateBlock or
+    // ConnectTip failure, not on every header.
+    std::set<CBlockIndex*> failed{pindex};
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto& kv : mapBlockIndex) {
+            CBlockIndex* p = kv.second.get();
+            if (failed.count(p) > 0) continue;
+            if (!p->pprev) continue;
+            if (failed.count(p->pprev) > 0) {
+                p->nStatus |= CBlockIndex::BLOCK_FAILED_CHILD;
+                failed.insert(p);
+                changed = true;
+            }
+        }
+    }
+
+    // Any failed block must NOT remain a candidate.
+    for (CBlockIndex* f : failed) {
+        m_setBlockIndexCandidates.erase(f);
+    }
+}
+
+void CChainState::MarkBlockAsValid(CBlockIndex* pindex)
+{
+    if (!pindex) return;
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    // Clear failure flags on the target.
+    pindex->nStatus &= ~CBlockIndex::BLOCK_FAILED_MASK;
+
+    // Clear BLOCK_FAILED_CHILD on descendants. NOTE: BLOCK_FAILED_VALID on
+    // a descendant stays — that flag means the descendant ITSELF failed
+    // validation independently, not that an ancestor did. Reconsider only
+    // unblocks the ancestry-implied failure.
+    std::set<CBlockIndex*> reconsidered{pindex};
+    bool changed = true;
+    while (changed) {
+        changed = false;
+        for (const auto& kv : mapBlockIndex) {
+            CBlockIndex* p = kv.second.get();
+            if (reconsidered.count(p) > 0) continue;
+            if (!p->pprev) continue;
+            if (reconsidered.count(p->pprev) > 0) {
+                p->nStatus &= ~CBlockIndex::BLOCK_FAILED_CHILD;
+                reconsidered.insert(p);
+                changed = true;
+            }
+        }
+    }
+
+    // Candidate set must be rebuilt — newly-eligible leaves may now qualify.
+    RecomputeCandidates();
+}
+
 CBlockIndex* CChainState::FindMostWorkChainImpl()
 {
-    assert(false && "CChainState::FindMostWorkChainImpl — real impl in PR5.3");
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    // Pop the max-work leaf and walk its ancestry. If any ancestor is
+    // invalid (BLOCK_FAILED_VALID/CHILD), mark the leaf itself
+    // BLOCK_FAILED_CHILD, drop it from candidates, and retry. Mirrors
+    // upstream `Chainstate::FindMostWorkChain`.
+    while (!m_setBlockIndexCandidates.empty()) {
+        auto it = m_setBlockIndexCandidates.begin();
+        CBlockIndex* pindexNew = *it;
+
+        // Walk ancestry looking for any invalid block.
+        bool fInvalidAncestor = false;
+        for (CBlockIndex* pancestor = pindexNew; pancestor; pancestor = pancestor->pprev) {
+            if (pancestor->IsInvalid()) {
+                fInvalidAncestor = true;
+                break;
+            }
+        }
+
+        if (!fInvalidAncestor) {
+            return pindexNew;
+        }
+
+        // Mark this leaf as BLOCK_FAILED_CHILD (unless it's already
+        // BLOCK_FAILED_VALID itself) and drop it from candidates. Retry
+        // with the next-best candidate.
+        if (!pindexNew->IsInvalid()) {
+            pindexNew->nStatus |= CBlockIndex::BLOCK_FAILED_CHILD;
+        }
+        m_setBlockIndexCandidates.erase(it);
+    }
+
     return nullptr;
 }
+
+// ----- Day 3 PM (still scaffold): ActivateBestChainStep, InvalidateBlockImpl,
+// ReconsiderBlockImpl. These integrate WAL + DisconnectTip + ConnectTip and
+// are landed in the next Day 3 PM commit.
 
 bool CChainState::ActivateBestChainStep(CBlockIndex* /*pindexMostWork*/,
                                         std::shared_ptr<const CBlock> /*pblock_optional*/,
                                         bool& /*fInvalidFound*/)
 {
-    assert(false && "CChainState::ActivateBestChainStep — real impl in PR5.3");
+    assert(false && "CChainState::ActivateBestChainStep — real impl in PR5.3 Day 3 PM");
     return false;
 }
 
 bool CChainState::InvalidateBlockImpl(const uint256& /*hash*/)
 {
-    assert(false && "CChainState::InvalidateBlockImpl — real impl in PR5.3");
+    assert(false && "CChainState::InvalidateBlockImpl — real impl in PR5.3 Day 3 PM");
     return false;
 }
 
 bool CChainState::ReconsiderBlockImpl(const uint256& /*hash*/)
 {
-    assert(false && "CChainState::ReconsiderBlockImpl — real impl in PR5.3");
-    return false;
-}
-
-void CChainState::MarkBlockAsFailed(CBlockIndex* /*pindex*/)
-{
-    assert(false && "CChainState::MarkBlockAsFailed — real impl in PR5.3");
-}
-
-void CChainState::MarkBlockAsValid(CBlockIndex* /*pindex*/)
-{
-    assert(false && "CChainState::MarkBlockAsValid — real impl in PR5.3");
-}
-
-void CChainState::RecomputeCandidates()
-{
-    assert(false && "CChainState::RecomputeCandidates — real impl in PR5.3");
-}
-
-bool CChainState::IsBlockACandidateForActivation(CBlockIndex* /*pindex*/) const
-{
-    assert(false && "CChainState::IsBlockACandidateForActivation — real impl in PR5.3");
+    assert(false && "CChainState::ReconsiderBlockImpl — real impl in PR5.3 Day 3 PM");
     return false;
 }

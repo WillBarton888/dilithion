@@ -371,9 +371,217 @@ void test_g2_pre_validation_entries_are_not_invalid()
     std::cout << " OK\n";
 }
 
+// ============================================================================
+// PR5.3 Day 3 AM: tests for RecomputeCandidates, MarkBlockAsFailed,
+// MarkBlockAsValid, FindMostWorkChainImpl, IsBlockACandidateForActivation.
+// ============================================================================
+
+void test_recompute_candidates_skips_pre_validation_leaves()
+{
+    std::cout << "  test_recompute_candidates_skips_pre_validation_leaves..."
+              << std::flush;
+
+    // A (genesis, BLOCK_VALID_TRANSACTIONS) -> B (BLOCK_VALID_TRANSACTIONS, leaf, candidate)
+    //                                       \-> C (BLOCK_VALID_HEADER only, leaf, NOT candidate)
+    CChainState chainstate;
+    auto pA = MakePreValidationLeaf(0x40, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    chainstate.SetTip(chainstate.GetBlockIndex(hA));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0x41, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pC = MakePreValidationLeaf(0x42, A, 1,
+                                    CBlockIndex::BLOCK_VALID_HEADER, 10, 3);
+    uint256 hC = pC->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hC, std::move(pC)));
+
+    chainstate.RecomputeCandidates();
+
+    // B is a candidate (full validation, leaf). C is not (header-only).
+    // A is not (has children). Direct invariant check via the predicate.
+    assert(chainstate.IsBlockACandidateForActivation(B));
+    assert(!chainstate.IsBlockACandidateForActivation(chainstate.GetBlockIndex(hC)));
+    assert(chainstate.IsBlockACandidateForActivation(A));  // predicate yes; leaf-status no
+    // FindMostWorkChainImpl is the way to OBSERVE the candidate set's contents
+    // without exposing the private member. After RecomputeCandidates with B
+    // having more work than the active tip, FindMostWorkChainImpl returns B.
+    assert(chainstate.FindMostWorkChainImpl() == B);
+
+    std::cout << " OK\n";
+}
+
+void test_recompute_candidates_skips_invalid_blocks()
+{
+    std::cout << "  test_recompute_candidates_skips_invalid_blocks..."
+              << std::flush;
+
+    // A -> B (FAILED_VALID, NOT a candidate)
+    //   -> C (valid leaf, IS a candidate)
+    CChainState chainstate;
+    auto pA = MakePreValidationLeaf(0x50, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    chainstate.SetTip(chainstate.GetBlockIndex(hA));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0x51, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS |
+                                        CBlockIndex::BLOCK_FAILED_VALID,
+                                    20, 2);  // higher work but invalid
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+
+    auto pC = MakePreValidationLeaf(0x52, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 3);
+    uint256 hC = pC->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hC, std::move(pC)));
+    CBlockIndex* C = chainstate.GetBlockIndex(hC);
+
+    chainstate.RecomputeCandidates();
+
+    // FindMostWorkChainImpl should pick C (B is invalid even though heavier).
+    CBlockIndex* picked = chainstate.FindMostWorkChainImpl();
+    assert(picked == C);
+
+    std::cout << " OK\n";
+}
+
+void test_mark_block_as_failed_propagates_to_descendants()
+{
+    std::cout << "  test_mark_block_as_failed_propagates_to_descendants..."
+              << std::flush;
+
+    // A -> B -> D
+    //       \-> E
+    // MarkBlockAsFailed(B) -> B gets FAILED_VALID, D + E get FAILED_CHILD.
+    // A unaffected.
+    CChainState chainstate;
+    auto pA = MakePreValidationLeaf(0x60, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0x61, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pD = MakePreValidationLeaf(0x62, B, 2,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 3);
+    uint256 hD = pD->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hD, std::move(pD)));
+    CBlockIndex* D = chainstate.GetBlockIndex(hD);
+
+    auto pE = MakePreValidationLeaf(0x63, B, 2,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 4);
+    uint256 hE = pE->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hE, std::move(pE)));
+    CBlockIndex* E = chainstate.GetBlockIndex(hE);
+
+    chainstate.MarkBlockAsFailed(B);
+
+    assert(B->IsInvalid());
+    assert(B->nStatus & CBlockIndex::BLOCK_FAILED_VALID);
+    assert(D->IsInvalid());
+    assert(D->nStatus & CBlockIndex::BLOCK_FAILED_CHILD);
+    assert(E->IsInvalid());
+    assert(E->nStatus & CBlockIndex::BLOCK_FAILED_CHILD);
+    // A is NOT affected.
+    assert(!A->IsInvalid());
+
+    std::cout << " OK\n";
+}
+
+void test_mark_block_as_valid_clears_failed_child()
+{
+    std::cout << "  test_mark_block_as_valid_clears_failed_child..."
+              << std::flush;
+
+    // Build A -> B -> D, mark B failed (D inherits FAILED_CHILD), then
+    // ReconsiderBlock(B) clears failure flags on B and FAILED_CHILD on D.
+    CChainState chainstate;
+    auto pA = MakePreValidationLeaf(0x70, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0x71, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pD = MakePreValidationLeaf(0x72, B, 2,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 3);
+    uint256 hD = pD->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hD, std::move(pD)));
+    CBlockIndex* D = chainstate.GetBlockIndex(hD);
+
+    chainstate.MarkBlockAsFailed(B);
+    assert(B->IsInvalid());
+    assert(D->IsInvalid());
+
+    chainstate.MarkBlockAsValid(B);
+    assert(!B->IsInvalid());  // FAILED_VALID cleared
+    assert(!D->IsInvalid());  // FAILED_CHILD cleared
+
+    std::cout << " OK\n";
+}
+
+void test_find_most_work_chain_returns_heaviest_valid_leaf()
+{
+    std::cout << "  test_find_most_work_chain_returns_heaviest_valid_leaf..."
+              << std::flush;
+
+    // A -> B (work=5)
+    //   -> C (work=20, heaviest)
+    //   -> D (work=10)
+    // FindMostWorkChainImpl returns C.
+    CChainState chainstate;
+    auto pA = MakePreValidationLeaf(0x80, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    chainstate.SetTip(chainstate.GetBlockIndex(hA));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0x81, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+
+    auto pC = MakePreValidationLeaf(0x82, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 20, 3);
+    uint256 hC = pC->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hC, std::move(pC)));
+    CBlockIndex* C = chainstate.GetBlockIndex(hC);
+
+    auto pD = MakePreValidationLeaf(0x83, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 4);
+    uint256 hD = pD->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hD, std::move(pD)));
+
+    chainstate.RecomputeCandidates();
+    CBlockIndex* picked = chainstate.FindMostWorkChainImpl();
+    assert(picked == C);
+
+    std::cout << " OK\n";
+}
+
 int main()
 {
-    std::cout << "\n=== Phase 5 PR5.1 + PR5.3-prerequisite: ChainSelectorAdapter Tests ===\n"
+    std::cout << "\n=== Phase 5 PR5.1 + 5.3-prereq + 5.3 Day 3 AM: ChainSelector Tests ===\n"
               << std::endl;
 
     try {
@@ -392,7 +600,14 @@ int main()
         test_g1_pre_validation_siblings_visible_as_competing_tips();
         test_g2_pre_validation_entries_are_not_invalid();
 
-        std::cout << "\n=== All chain_selector_tests passed (9 tests: 4 PR5.1 + 5 prereq) ==="
+        std::cout << "\n--- PR5.3 Day 3 AM: candidate set + selection ---" << std::endl;
+        test_recompute_candidates_skips_pre_validation_leaves();
+        test_recompute_candidates_skips_invalid_blocks();
+        test_mark_block_as_failed_propagates_to_descendants();
+        test_mark_block_as_valid_clears_failed_child();
+        test_find_most_work_chain_returns_heaviest_valid_leaf();
+
+        std::cout << "\n=== All chain_selector_tests passed (14 tests: 4 + 5 + 5) ==="
                   << std::endl;
         return 0;
     } catch (const std::exception& e) {
