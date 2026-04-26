@@ -5215,7 +5215,9 @@ std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
         oss << "\"subver\":\"" << EscapeJSON(peer->user_agent) << "\",";
         oss << "\"startingheight\":" << peer->start_height << ",";
         oss << "\"relaytxes\":" << (peer->relay ? "true" : "false") << ",";
-        oss << "\"misbehavior\":" << peer->misbehavior_score;
+        // Phase 2 port: misbehavior score moved into CPeerScorer; query via
+        // the manager's accessor.
+        oss << "\"misbehavior\":" << g_node_context.peer_manager->GetMisbehaviorScore(peer->id);
         oss << "}";
     }
 

@@ -795,9 +795,12 @@ bool CConnman::ProcessQueuedMessage(const QueuedMessage& msg) {
     // Handle misbehavior tracking on failure
     if (!success && m_peer_manager) {
         auto peer = m_peer_manager->GetPeer(msg.node_id);
-        if (peer && peer->misbehavior_score > 100) {
+        // Phase 2 port: misbehavior_score moved into CPeerScorer; query via
+        // the manager's accessor.
+        const int score = m_peer_manager->GetMisbehaviorScore(msg.node_id);
+        if (peer && score > 100) {
             LogPrintf(NET, INFO, "[CConnman] Disconnecting node %d due to misbehavior (score: %d)\n",
-                      msg.node_id, peer->misbehavior_score);
+                      msg.node_id, score);
             std::lock_guard<std::mutex> lock(cs_vNodes);
             for (auto& node : m_nodes) {
                 if (node->id == msg.node_id) {

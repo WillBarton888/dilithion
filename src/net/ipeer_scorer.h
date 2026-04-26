@@ -72,6 +72,11 @@ public:
     // Configure ban threshold (default 100). Score >= threshold => disconnect+ban.
     virtual void SetBanThreshold(int threshold) = 0;
     virtual int GetBanThreshold() const = 0;
+
+    // Decay every tracked score by 1 (floored at 0). Called on a periodic
+    // tick from CPeerManager (every 30s). Purely additive to the interface
+    // per architecture §4 freeze contract — no version bump required.
+    virtual void DecayAll() = 0;
 };
 
 }  // namespace dilithion::net

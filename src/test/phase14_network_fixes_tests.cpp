@@ -66,7 +66,7 @@ void test_net003_ping_oversized() {
     addr.port = 8444;
     auto peer = peer_manager.AddPeer(addr);
     int peer_id = peer->id;
-    int initial_misbehavior = peer->misbehavior_score;
+    int initial_misbehavior = peer_manager.GetMisbehaviorScore(peer_id);
 
     // Create oversized PING (100 bytes instead of 8)
     CNetMessage msg;
@@ -82,7 +82,7 @@ void test_net003_ping_oversized() {
 
     // Check misbehavior penalty (20 points)
     peer = peer_manager.GetPeer(peer_id);
-    assert(peer->misbehavior_score == initial_misbehavior + 20);
+    assert(peer_manager.GetMisbehaviorScore(peer_id) == initial_misbehavior + 20);
 
     std::cout << "  ✓ Oversized PING rejected, +20 misbehavior penalty applied" << std::endl;
 }
@@ -112,7 +112,7 @@ void test_net003_version_size_range() {
         assert(result == false);
 
         peer = peer_manager.GetPeer(peer_id);
-        assert(peer->misbehavior_score == 20);
+        assert(peer_manager.GetMisbehaviorScore(peer_id) == 20);
 
         std::cout << "  ✓ Undersized VERSION (50 bytes) rejected" << std::endl;
     }
@@ -136,7 +136,7 @@ void test_net003_version_size_range() {
         assert(result == false);
 
         peer = peer_manager.GetPeer(peer_id);
-        assert(peer->misbehavior_score == 20);
+        assert(peer_manager.GetMisbehaviorScore(peer_id) == 20);
 
         std::cout << "  ✓ Oversized VERSION (500 bytes) rejected" << std::endl;
     }
@@ -166,7 +166,7 @@ void test_net003_verack_empty() {
     assert(result == false);
 
     peer = peer_manager.GetPeer(peer_id);
-    assert(peer->misbehavior_score == 20);
+    assert(peer_manager.GetMisbehaviorScore(peer_id) == 20);
 
     std::cout << "  ✓ VERACK with payload rejected" << std::endl;
 }
@@ -224,7 +224,7 @@ void test_net004_misbehavior_accumulation() {
     }
 
     peer = peer_manager.GetPeer(peer_id);
-    assert(peer->misbehavior_score == 100);
+    assert(peer_manager.GetMisbehaviorScore(peer_id) == 100);
     assert(peer->IsBanned());
 
     std::cout << "  ✓ Peer banned after 100 misbehavior points (5 x 20)" << std::endl;
@@ -366,7 +366,7 @@ void test_net001_valid_user_agent() {
     assert(result == true);
 
     peer = peer_manager.GetPeer(peer_id);
-    assert(peer->misbehavior_score == 0);  // No penalty
+    assert(peer_manager.GetMisbehaviorScore(peer_id) == 0);  // No penalty
 
     std::cout << "  ✓ Valid user agent accepted" << std::endl;
 }

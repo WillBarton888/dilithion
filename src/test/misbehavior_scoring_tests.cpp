@@ -37,7 +37,7 @@ BOOST_AUTO_TEST_CASE(test_peer_creation) {
 
     BOOST_CHECK(peer != nullptr);
     if (peer) {
-        BOOST_CHECK_EQUAL(peer->misbehavior_score, 0);
+        BOOST_CHECK_EQUAL(peer_manager.GetMisbehaviorScore(peer->id), 0);
     }
 }
 
@@ -64,7 +64,7 @@ BOOST_AUTO_TEST_CASE(test_misbehavior_accumulation) {
         auto peer_after = peer_manager.GetPeer(peer_id);
         BOOST_CHECK(peer_after != nullptr);
         if (peer_after) {
-            BOOST_CHECK_GE(peer_after->misbehavior_score, 60);
+            BOOST_CHECK_GE(peer_manager.GetMisbehaviorScore(peer_id), 60);
         }
     }
 }
@@ -92,7 +92,7 @@ BOOST_AUTO_TEST_CASE(test_ban_threshold) {
         auto peer_final = peer_manager.GetPeer(peer_id);
         BOOST_CHECK(peer_final != nullptr);
         if (peer_final) {
-            BOOST_CHECK_GE(peer_final->misbehavior_score, ban_threshold);
+            BOOST_CHECK_GE(peer_manager.GetMisbehaviorScore(peer_id), ban_threshold);
         }
     }
 }
@@ -128,8 +128,8 @@ BOOST_AUTO_TEST_CASE(test_multiple_peers) {
         BOOST_CHECK(p2_after != nullptr);
 
         if (p1_after && p2_after) {
-            BOOST_CHECK_GE(p1_after->misbehavior_score, 50);
-            BOOST_CHECK_EQUAL(p2_after->misbehavior_score, 0);
+            BOOST_CHECK_GE(peer_manager.GetMisbehaviorScore(peer1->id), 50);
+            BOOST_CHECK_EQUAL(peer_manager.GetMisbehaviorScore(peer2->id), 0);
         }
     }
 }

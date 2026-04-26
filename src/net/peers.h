@@ -6,6 +6,7 @@
 
 #include <net/protocol.h>
 #include <net/iaddress_manager.h>  // Phase 1 port: IAddressManager interface
+#include <net/ipeer_scorer.h>      // Phase 2 port: IPeerScorer interface
 #include <net/banman.h>   // Bitcoin Core-style ban manager with persistence
 #include <net/peer_discovery.h>  // Network: Enhanced peer discovery
 #include <net/connection_quality.h>  // Network: Connection quality metrics
@@ -59,7 +60,9 @@ public:
     bool relay;                      // Whether peer relays transactions
 
     // DoS protection
-    int misbehavior_score;           // Accumulated misbehavior points
+    // Phase 2 port: misbehavior_score field DELETED (Q3=B). Score lives in
+    // CPeerScorer (CPeerManager::m_scorer) keyed by peer id; query via
+    // CPeerManager::GetMisbehaviorScore(peer_id).
     int64_t ban_time;                // Time when ban expires (0 = not banned)
 
     // === Phase 2: Socket moved from CConnectionManager to CPeer ===
@@ -132,7 +135,7 @@ public:
     CPeer()
         : id(0), state(STATE_DISCONNECTED), connect_time(0),
           last_recv(0), last_send(0), version(0), start_height(0),
-          best_known_height(0), relay(true), misbehavior_score(0), ban_time(0),
+          best_known_height(0), relay(true), ban_time(0),
           m_stalling_since(std::chrono::steady_clock::now()),
           m_downloading_since(std::chrono::steady_clock::now()),
           m_last_block_announcement(std::chrono::steady_clock::now()),
@@ -143,7 +146,7 @@ public:
         : id(id_in), addr(addr_in), state(STATE_DISCONNECTED),
           connect_time(GetTime()), last_recv(0), last_send(0),
           version(0), start_height(0), best_known_height(0), relay(true),
-          misbehavior_score(0), ban_time(0),
+          ban_time(0),
           m_stalling_since(std::chrono::steady_clock::now()),
           m_downloading_since(std::chrono::steady_clock::now()),
           m_last_block_announcement(std::chrono::steady_clock::now()),
@@ -188,7 +191,8 @@ public:
         return state == STATE_BANNED || (ban_time > 0 && GetTime() < ban_time);
     }
 
-    bool Misbehaving(int howmuch);
+    // Phase 2 port: CPeer::Misbehaving DELETED. Use
+    // CPeerManager::Misbehaving(peer_id, ...) which routes through CPeerScorer.
     void Ban(int64_t ban_until);
     void Disconnect();
     std::string ToString() const;
@@ -233,6 +237,13 @@ private:
     // two-table bucket invariant.
     std::unique_ptr<::dilithion::net::IAddressManager> addrman;
     std::string data_dir;  // Path to data directory for peers.dat
+
+    // Phase 2 port: misbehavior scoring lives behind the IPeerScorer interface.
+    // Default: CPeerScorer (operator can opt out via DILITHION_USE_NEW_PEER_SCORER=0,
+    // in which case m_scorer stays null and Misbehaving becomes a tracking-
+    // disabled no-op — manual ban via RPC still works, peer-protocol-level
+    // disconnects still fire). See port_phase_2_implementation_plan.md §10.
+    std::unique_ptr<::dilithion::net::IPeerScorer> m_scorer;
     
     // Network: Enhanced peer discovery
     std::unique_ptr<CPeerDiscovery> peer_discovery;
@@ -297,6 +308,12 @@ public:
     // DoS protection with structured misbehavior tracking
     void Misbehaving(int peer_id, int howmuch, MisbehaviorType type = MisbehaviorType::NONE);
     void DecayMisbehaviorScores();  // BUG #49: Decay scores over time
+
+    // Phase 2 port: cumulative misbehavior score for a peer. Returns 0 if the
+    // peer has no recorded misbehavior or if the scorer is disabled
+    // (DILITHION_USE_NEW_PEER_SCORER=0). Replaces direct reads of the deleted
+    // CPeer::misbehavior_score field at all call sites.
+    int GetMisbehaviorScore(int peer_id) const;
 
     // Access to ban manager for advanced operations
     CBanManager& GetBanManager() { return banman; }

@@ -14,6 +14,7 @@
 #include <net/protocol.h>
 #include <net/port/addrman_v2.h>             // Phase 1 port: CAddrMan_v2 (default)
 #include <net/port/legacy_addrman_adapter.h> // Phase 1 port: legacy fallback
+#include <net/port/peer_scorer.h>             // Phase 2 port: CPeerScorer
 #include <digital_dna/digital_dna.h>  // Digital DNA: Sybil-resistant identity
 #include <util/strencodings.h>
 #include <util/logging.h>
@@ -30,10 +31,11 @@ extern NodeContext g_node_context;
 
 // CPeer implementation
 
-bool CPeer::Misbehaving(int howmuch) {
-    misbehavior_score += howmuch;
-    return misbehavior_score >= CPeerManager::BAN_THRESHOLD;
-}
+// Phase 2 port: CPeer::Misbehaving DELETED (Q3=B). Scoring lives in
+// CPeerScorer; the cumulative-score-and-cross-threshold logic moved to
+// CPeerScorer::Misbehaving. Callers that previously did
+// `peer->Misbehaving(score)` now go through `CPeerManager::Misbehaving(
+// peer_id, score, type)` which forwards to the scorer.
 
 void CPeer::Ban(int64_t ban_until) {
     state = STATE_BANNED;
@@ -47,9 +49,13 @@ void CPeer::Disconnect() {
 }
 
 std::string CPeer::ToString() const {
-    return strprintf("CPeer(id=%d, addr=%s, state=%d, version=%d, height=%d, score=%d)",
+    // Phase 2 port: misbehavior_score field deleted; this string is used
+    // only for debug logging where the score is a nice-to-have, not load-
+    // bearing. Callers wanting the score should query
+    // CPeerManager::GetMisbehaviorScore(peer_id) directly.
+    return strprintf("CPeer(id=%d, addr=%s, state=%d, version=%d, height=%d)",
                     id, addr.ToString().c_str(), state, version,
-                    start_height, misbehavior_score);
+                    start_height);
 }
 
 // CPeerManager implementation
@@ -84,10 +90,38 @@ CPeerManager::CPeerManager(const std::string& datadir)
         LoadPeers();
     }
 
+    // Phase 2 port: select misbehavior scorer.
+    //
+    // Default: CPeerScorer (the new port). Operator escape hatch:
+    //   DILITHION_USE_NEW_PEER_SCORER=0  -> m_scorer stays null; Misbehaving
+    //                                       and DecayMisbehaviorScores become
+    //                                       tracking-disabled no-ops. Manual
+    //                                       ban via RPC still works; protocol-
+    //                                       level disconnects still fire.
+    //
+    // Same env-var pattern as Phase 1's DILITHION_USE_ADDRMAN_V2. CLI-flag
+    // wiring deferred to Phase 6 per plan §10 Q4 / consistency rule.
+    {
+        const char* env = std::getenv("DILITHION_USE_NEW_PEER_SCORER");
+        const bool disabled = (env != nullptr) && (std::strcmp(env, "0") == 0);
+        if (!disabled) {
+            m_scorer = std::make_unique<dilithion::net::port::CPeerScorer>();
+        }
+    }
+
     // Network: Initialize enhanced peer discovery against the interface.
     peer_discovery = std::make_unique<CPeerDiscovery>(*this, *addrman);
 
     // Network: Connection quality tracker is initialized automatically (default constructor)
+}
+
+// Phase 2 port: cumulative misbehavior score for a peer. Replaces direct
+// reads of the deleted CPeer::misbehavior_score field. Returns 0 if the
+// scorer is null (env-var=OFF tracking-disabled mode) or if the peer has
+// no recorded score.
+int CPeerManager::GetMisbehaviorScore(int peer_id) const {
+    if (!m_scorer) return 0;
+    return m_scorer->GetScore(peer_id);
 }
 
 bool CPeerManager::SavePeers() {
@@ -221,6 +255,9 @@ void CPeerManager::RemovePeer(int peer_id) {
         it->second->Disconnect();
         peers.erase(it);
     }
+    // Phase 2 port: reclaim the scorer's map slot for this NodeId. The
+    // map would otherwise grow unbounded over node uptime (slow-leak DoS).
+    if (m_scorer) m_scorer->ResetScore(peer_id);
 }
 
 std::shared_ptr<CPeer> CPeerManager::GetPeer(int peer_id) {
@@ -375,7 +412,7 @@ void CPeerManager::BanPeer(int peer_id, int64_t ban_time_seconds) {
         // Add IP to banned list using CBanManager
         std::string ip = it->second->addr.ToStringIP();
         banman.Ban(ip, ban_time_seconds, BanReason::NodeMisbehaving,
-                   MisbehaviorType::NONE, it->second->misbehavior_score);
+                   MisbehaviorType::NONE, GetMisbehaviorScore(peer_id));
     }
 }
 
@@ -406,13 +443,24 @@ void CPeerManager::ClearBans() {
     banman.ClearBanned();
 }
 
+// Phase 2 port: forwarder. Routes scoring through CPeerScorer (when enabled
+// via DILITHION_USE_NEW_PEER_SCORER, default ON), then performs the
+// post-threshold ban plumbing (Q2=A — caller, not scorer, calls banman.Ban).
+//
+// Signature unchanged from pre-cutover: all ~107 call sites compile as-is.
+// Behavior preserved:
+//   * Seed-node protection (never ban seeds for misbehavior)
+//   * Outdated-protocol-version uses short ban time (10min); other categories
+//     use default (1h)
+//   * CBanEntry populated with correct fields (banReason, misbehaviorType,
+//     score-at-ban-time)
+//   * Immediate CNode disconnect on ban (BUG #246)
 void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
     auto peer = GetPeer(peer_id);
     if (!peer) return;
 
-    // Seed node protection: never ban seed nodes for misbehavior.
-    // Seed nodes are trusted infrastructure - banning them causes total network isolation.
-    // Get peer IP to check against seed list.
+    // Seed-node protection: same logic as pre-cutover. Seed IPs are trusted
+    // infrastructure; banning them isolates the node.
     std::string peer_ip = peer->addr.ToStringIP();
     if (peer->addr.IsNull()) {
         std::lock_guard<std::recursive_mutex> node_lock(cs_nodes);
@@ -427,72 +475,83 @@ void CPeerManager::Misbehaving(int peer_id, int howmuch, MisbehaviorType type) {
         return;
     }
 
-    // Use default score from MisbehaviorType if howmuch is 0
-    int score = howmuch > 0 ? howmuch : GetMisbehaviorScore(type);
+    // Tracking-disabled mode (DILITHION_USE_NEW_PEER_SCORER=0): no scoring,
+    // no ban via misbehavior. Manual ban via RPC still works; protocol-level
+    // disconnects still fire.
+    if (!m_scorer) {
+        return;
+    }
 
-    if (peer->Misbehaving(score)) {
-        // Ban peer if threshold exceeded
-        std::lock_guard<std::recursive_mutex> lock(cs_peers);
+    // Resolve the actual weight: explicit (howmuch>0) overrides type default.
+    // ::GetMisbehaviorScore is the legacy helper from banman.h that maps the
+    // DIAGNOSTIC enum to weights — we keep it for legacy `type` parity. The
+    // scorer also has its own DefaultWeight() table for the FROZEN policy
+    // enum, but that's a different enum (see misbehavior_policy.h DELIBERATE
+    // DIVERGENCE block). Using the legacy helper here preserves call-site
+    // semantics for the ~107 existing callers.
+    const int score = howmuch > 0 ? howmuch : ::GetMisbehaviorScore(type);
 
-        // Use shorter ban time for outdated protocol version (10 min vs 1 hour)
-        // These are legitimate miners who just need to update, not attackers
-        int64_t ban_time = (type == MisbehaviorType::INVALID_PROTOCOL_VERSION)
-                           ? PROTOCOL_VERSION_BAN_TIME : DEFAULT_BAN_TIME;
+    // Score it. Threshold cross is the scorer's call.
+    const bool threshold_crossed = m_scorer->Misbehaving(peer_id, score, "");
+    if (!threshold_crossed) return;
 
-        int64_t ban_until = GetTime() + ban_time;
-        peer->Ban(ban_until);
+    // Threshold crossed — ban the peer. (Q2=A: forwarder, not scorer, owns
+    // banman + immediate disconnect plumbing.)
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
 
-        // BUG FIX: Get IP from peer first, fall back to CNode if peer's addr is null
-        // (race condition can cause peer->addr to be zeroed if AddPeerWithId runs before RegisterNode)
-        std::string ip = peer->addr.ToStringIP();
+    // Outdated protocol version gets a short ban (operator-friendly: legitimate
+    // miners just need to update). All other categories use the default 1h.
+    const int64_t ban_time = (type == MisbehaviorType::INVALID_PROTOCOL_VERSION)
+                              ? PROTOCOL_VERSION_BAN_TIME
+                              : DEFAULT_BAN_TIME;
 
-        // BUG #246 FIX: Immediately disconnect banned peer
-        // Mark the CNode for disconnect so CConnman removes it on next iteration
-        {
-            std::lock_guard<std::recursive_mutex> node_lock(cs_nodes);
-            auto it = node_refs.find(peer_id);
-            if (it != node_refs.end() && it->second) {
-                // BUG FIX: If peer's IP is null/zeroed, get it from CNode
-                if (peer->addr.IsNull() && !it->second->addr.IsNull()) {
-                    ip = it->second->addr.ToStringIP();
-                }
-                it->second->MarkDisconnect();
+    const int64_t ban_until = GetTime() + ban_time;
+    peer->Ban(ban_until);
+
+    // BUG FIX: Get IP from peer first, fall back to CNode if peer's addr is null
+    // (race condition can cause peer->addr to be zeroed if AddPeerWithId runs
+    // before RegisterNode).
+    std::string ip = peer->addr.ToStringIP();
+
+    // BUG #246 FIX: Immediately disconnect banned peer.
+    {
+        std::lock_guard<std::recursive_mutex> node_lock(cs_nodes);
+        auto it = node_refs.find(peer_id);
+        if (it != node_refs.end() && it->second) {
+            if (peer->addr.IsNull() && !it->second->addr.IsNull()) {
+                ip = it->second->addr.ToStringIP();
             }
+            it->second->MarkDisconnect();
         }
+    }
 
-        banman.Ban(ip, ban_time, BanReason::NodeMisbehaving,
-                   type, peer->misbehavior_score);
+    // Cumulative score at ban time — query scorer.
+    const int cumulative = m_scorer->GetScore(peer_id);
 
-        // Format ban duration for display
-        if (ban_time >= 3600) {
-            std::cout << "[BAN] Peer " << peer_id << " (" << ip
-                      << ") banned for " << (ban_time / 3600) << "h - "
-                      << MisbehaviorTypeToString(type)
-                      << " (score: " << peer->misbehavior_score << ")" << std::endl;
-        } else {
-            std::cout << "[BAN] Peer " << peer_id << " (" << ip
-                      << ") banned for " << (ban_time / 60) << "min - "
-                      << MisbehaviorTypeToString(type)
-                      << " (score: " << peer->misbehavior_score << ")" << std::endl;
-        }
+    banman.Ban(ip, ban_time, BanReason::NodeMisbehaving, type, cumulative);
+
+    // Operator-facing log line — one per ban. Matches pre-cutover format.
+    if (ban_time >= 3600) {
+        std::cout << "[BAN] Peer " << peer_id << " (" << ip
+                  << ") banned for " << (ban_time / 3600) << "h - "
+                  << MisbehaviorTypeToString(type)
+                  << " (score: " << cumulative << ")" << std::endl;
+    } else {
+        std::cout << "[BAN] Peer " << peer_id << " (" << ip
+                  << ") banned for " << (ban_time / 60) << "min - "
+                  << MisbehaviorTypeToString(type)
+                  << " (score: " << cumulative << ")" << std::endl;
     }
 }
 
+// Phase 2 port: forwarder. Per-peer score decay lives in CPeerScorer; the
+// banman housekeeping (SweepExpiredBans + CleanupGenesisFailures) stays
+// here. Called every 30 seconds from the existing tick.
 void CPeerManager::DecayMisbehaviorScores() {
-    std::lock_guard<std::recursive_mutex> lock(cs_peers);
-
-    // BUG #49: Decay misbehavior scores over time
-    // Called every 30 seconds, decay by 0.5 points (1 point per minute)
-    for (auto& pair : peers) {
-        if (pair.second->misbehavior_score > 0) {
-            pair.second->misbehavior_score = std::max(0, pair.second->misbehavior_score - 1);
-        }
+    if (m_scorer) {
+        m_scorer->DecayAll();
     }
-
-    // Clean up expired bans using CBanManager
     banman.SweepExpiredBans();
-
-    // Clean up old genesis failure tracking entries
     banman.CleanupGenesisFailures();
 }
 
@@ -830,7 +889,8 @@ bool CPeerManager::EvictPeersIfNeeded() {
         }
 
         // Calculate eviction score (higher = more likely to evict)
-        int score = peer->misbehavior_score;
+        // Phase 2 port: misbehavior score lives in CPeerScorer now.
+        int score = GetMisbehaviorScore(peer_id);
 
         // Prefer to evict peers with no recent activity (no messages in last 5 minutes)
         if (peer->last_recv > 0 && (now - peer->last_recv) > 5 * 60) {
@@ -1603,6 +1663,11 @@ void CPeerManager::RemoveNode(int node_id) {
 
     peers.erase(node_id);
     node_refs.erase(node_id);
+
+    // Phase 2 port: reclaim the scorer's map slot. Same reasoning as
+    // RemovePeer above — bounded by MAX_TOTAL_CONNECTIONS in practice but
+    // unbounded if ResetScore is forgotten on any disconnect path.
+    if (m_scorer) m_scorer->ResetScore(node_id);
 }
 
 CNode* CPeerManager::GetNode(int node_id) {

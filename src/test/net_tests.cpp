@@ -184,7 +184,7 @@ void test_peer_manager() {
     // Test misbehavior
     g_peer_manager->Misbehaving(1, 50);
     peer1_lookup = g_peer_manager->GetPeer(1);
-    assert(peer1_lookup->misbehavior_score == 50);
+    assert(g_peer_manager->GetMisbehaviorScore(1) == 50);
 
     std::cout << "  ✓ Misbehavior tracking works" << std::endl;
 

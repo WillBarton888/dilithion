@@ -209,8 +209,8 @@ BOOST_AUTO_TEST_CASE(test_peer_manager_misbehavior) {
     if (peer) {
         int peer_id = peer->id;
 
-        // Initially no misbehavior
-        BOOST_CHECK_EQUAL(peer->misbehavior_score, 0);
+        // Initially no misbehavior (Phase 2 port: query via manager accessor)
+        BOOST_CHECK_EQUAL(peer_manager.GetMisbehaviorScore(peer_id), 0);
 
         // Apply misbehavior penalty
         peer_manager.Misbehaving(peer_id, 10);
@@ -219,7 +219,7 @@ BOOST_AUTO_TEST_CASE(test_peer_manager_misbehavior) {
         auto peer_after = peer_manager.GetPeer(peer_id);
         BOOST_CHECK(peer_after != nullptr);
         if (peer_after) {
-            BOOST_CHECK_GE(peer_after->misbehavior_score, 10);
+            BOOST_CHECK_GE(peer_manager.GetMisbehaviorScore(peer_id), 10);
         }
     }
 }
@@ -247,7 +247,7 @@ BOOST_AUTO_TEST_CASE(test_ban_threshold_logic) {
         auto peer_final = peer_manager.GetPeer(peer_id);
         BOOST_CHECK(peer_final != nullptr);
         if (peer_final) {
-            BOOST_CHECK_GE(peer_final->misbehavior_score, ban_threshold);
+            BOOST_CHECK_GE(peer_manager.GetMisbehaviorScore(peer_id), ban_threshold);
         }
     }
 }

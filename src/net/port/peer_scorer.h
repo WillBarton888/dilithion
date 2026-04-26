@@ -59,14 +59,12 @@ public:
     void SetBanThreshold(int threshold) override;
     int  GetBanThreshold() const override;
 
-    // ---- Configuration / lifecycle helpers (called by CPeerManager) ----
-
     // Decay every tracked score by 1, floored at 0. Designed to be called on
     // CPeerManager's existing 30-second decay tick. Drift from upstream:
     // Bitcoin Core does NOT decay; it just resets on disconnect. Dilithion's
     // decay matches the existing CPeer.misbehavior_score behaviour pre-Phase 2,
     // so the cutover is behaviour-equivalent to operators.
-    void DecayAll();
+    void DecayAll() override;
 
     // ---- Test diagnostics ----
 
