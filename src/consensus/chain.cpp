@@ -257,18 +257,30 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
     // exactly the pre-Phase-5 behavior. Env-var=1 opt-in lets operators
     // exercise the new path during the burn-in window.
     {
-        // Phase 5: read env-var per call. Red-team flagged this as a
-        // possible perf/thread-safety concern, but block-receive rate is
-        // ~one per 4 minutes (DIL block spacing) — getenv overhead is
-        // negligible.
+        // Phase 5: read env-var per call. Block-receive rate is ~one per 4
+        // minutes (DIL block spacing) — getenv overhead is negligible.
         //
-        // PR5.4 (2026-04-26): default flipped — unset OR any value other than
-        // "0" routes to the new path. Operators wanting the legacy path
-        // (Cases 1/2/2.5/3 without Patch B) must explicitly set =0. The
-        // legacy path is preserved through Phase 7 burn-in window per plan
-        // §12 Q5b.
+        // Red-team audit 2026-04-26 BLOCKER #2: PR5.4's original default flip
+        // (unset → new path) would silently switch every existing seed node
+        // to the new selection logic on next restart with only a 30-second
+        // regtest as evidence. During rolling restart, mainnet would have
+        // heterogeneous selection logic across seeds — partition risk if any
+        // divergence on a real reorg.
+        //
+        // Reverted to OPT-IN: operators must explicitly set "=1" to engage
+        // the new path. Default (unset or any other value) routes to legacy
+        // Cases 1/2/2.5/3 (Patch B retained — see PR5.4 status note below).
+        // The default flip waits for real-network burn-in evidence after V2
+        // proves byte-equivalence at multi-block depth.
+        //
+        // PR5.4 STATUS: with the env-var default REVERTED, the legacy path
+        // is the production path. Patch B was DELETED in PR5.4 — meaning the
+        // legacy path now sets m_chain_needs_rebuild on Case 2.5 ConnectTip
+        // failure rather than re-applying the old tip in place. This is a
+        // stricter failure mode than pre-PR5.4 (operator-consent recovery
+        // via wrapper-restart) but produces the same end-state on success.
         const char* envVar = std::getenv("DILITHION_USE_NEW_CHAIN_SELECTOR");
-        const bool useNewPath = !(envVar && std::string(envVar) == "0");
+        const bool useNewPath = (envVar && std::string(envVar) == "1");
         if (useNewPath) {
             // Make sure pindexNew is in the candidate set if eligible. The
             // new path picks the heaviest leaf via FindMostWorkChainImpl.
@@ -2247,14 +2259,34 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
     }
 
     // 5) Disconnect loop.
+    // Track whether ANY disconnect succeeded — if yes, the chain has been
+    // mutated mid-step and a recovery path is required on subsequent
+    // failure (red-team audit BLOCKER #1, 2026-04-26).
+    bool any_disconnect_committed = false;
     uint32_t disconnectedCount = 0;
     for (CBlockIndex* p : disconnect) {
         if (!DisconnectTip(p, /*force_skip_utxo=*/false)) {
             std::cerr << "[Chain] ActivateBestChainStep: DisconnectTip failed at height "
                       << p->nHeight << std::endl;
             if (m_reorgWAL) m_reorgWAL->AbortReorg();
+            // BLOCKER #1 fix (red-team audit 2026-04-26): if any prior
+            // disconnect succeeded, in-memory tip + on-disk UTXO have
+            // already mutated. We cannot cleanly recover without
+            // re-applying the disconnected blocks, which Patch B used to
+            // do. Without Patch B, the safe failure mode is to surface
+            // m_chain_needs_rebuild so IBDCoordinator writes the
+            // auto_rebuild marker; wrapper wipes datadir + resyncs.
+            //
+            // Even on FIRST-disconnect failure, DisconnectTip may have
+            // partially mutated UTXO/LevelDB before failing internally —
+            // safer to flag rebuild unconditionally.
+            std::cerr << "[CRITICAL] DisconnectTip failure mid-reorg — "
+                      << (any_disconnect_committed ? "chain partially rewound. " : "")
+                      << "Triggering auto_rebuild." << std::endl;
+            m_chain_needs_rebuild.store(true);
             return false;
         }
+        any_disconnect_committed = true;
         // Rewind tip after each successful disconnect (mirrors legacy
         // Case 3's per-step tip update pattern; keeps pindexTip consistent
         // with what's actually on-chain through the loop).
@@ -2283,6 +2315,10 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
             // through to the real pdb->ReadBlock path below.
             if (!m_testReadBlockOverride(p->GetBlockHash(), localBlock)) {
                 if (m_reorgWAL) m_reorgWAL->AbortReorg();
+                if (any_disconnect_committed) {
+                    // BLOCKER #1 fix: disconnects committed; chain truncated.
+                    m_chain_needs_rebuild.store(true);
+                }
                 return false;
             }
             pblock = &localBlock;
@@ -2291,22 +2327,49 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
                 std::cerr << "[Chain] ActivateBestChainStep: ReadBlock failed for "
                           << p->GetBlockHash().GetHex().substr(0, 16) << "..." << std::endl;
                 if (m_reorgWAL) m_reorgWAL->AbortReorg();
+                if (any_disconnect_committed) {
+                    // BLOCKER #1 fix (red-team audit 2026-04-26): ReadBlock
+                    // failure after disconnects committed → chain truncated.
+                    // Surface m_chain_needs_rebuild for operator recovery.
+                    std::cerr << "[CRITICAL] ReadBlock failed after committing "
+                              << disconnectedCount << " disconnect(s). Triggering auto_rebuild."
+                              << std::endl;
+                    m_chain_needs_rebuild.store(true);
+                }
                 return false;
             }
             pblock = &localBlock;
         }
 
         if (!ConnectTip(p, *pblock)) {
-            // Validation failure on a SPECIFIC block: mark it failed and
-            // signal the caller to retry with FindMostWorkChain. The set
-            // membership maintenance happens inside MarkBlockAsFailed.
+            // Validation failure on a SPECIFIC block: mark it failed.
             std::cerr << "[Chain] ActivateBestChainStep: ConnectTip failed at height "
                       << p->nHeight << " — marking block failed" << std::endl;
             MarkBlockAsFailed(p);
             fInvalidFound = true;
             if (m_reorgWAL) m_reorgWAL->AbortReorg();
-            // Return TRUE: the step itself completed (cleanly aborted); caller
-            // re-enters FindMostWorkChain to pick the next-best leaf.
+
+            // BLOCKER #1 fix (red-team audit 2026-04-26): if we already
+            // disconnected blocks before this failure, the chain has been
+            // truncated and there is no way to recover without re-fetching
+            // the disconnected blocks (Patch B's job). The plain
+            // MarkBlockAsFailed + retry pattern works ONLY when the failure
+            // was on a sibling/forked candidate — when it was on a block
+            // that REQUIRED prior disconnects, retry via FindMostWorkChain
+            // returns to the same candidate (or no candidate) and the chain
+            // is left silently shortened. Surface m_chain_needs_rebuild so
+            // the operator-consent recovery path (auto_rebuild marker →
+            // wrapper wipes datadir → resync) takes over.
+            if (any_disconnect_committed) {
+                std::cerr << "[CRITICAL] ConnectTip failed after committing "
+                          << disconnectedCount << " disconnect(s). Chain truncated; "
+                          << "triggering auto_rebuild." << std::endl;
+                m_chain_needs_rebuild.store(true);
+                return false;
+            }
+            // Pure no-disconnect-yet failure (e.g., genesis activation
+            // failure or reconnect from current tip): caller can safely
+            // re-enter FindMostWorkChain.
             return true;
         }
         // Advance tip after each successful connect.
