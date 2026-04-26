@@ -48,7 +48,7 @@
 #include <amount.h>
 #include <net/peers.h>  // For CPeerManager
 #include <core/node_context.h>  // For g_node_context
-#include <node/ibd_coordinator.h>  // For CIbdCoordinator::IsInitialBlockDownload
+#include <net/port/sync_coordinator.h>  // Phase 6 PR6.5a: IsInitialBlockDownload via adapter
 #include <node/peer_mik_tracker.h>  // Sybil defense Phase 1
 #include <vdf/cooldown_tracker.h>   // Sybil defense Phase 4
 #include <net/net.h>  // For CNetMessageProcessor and other networking types
@@ -4460,8 +4460,8 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
         }
 
         // BUG FIX: Prevent mining during IBD (Initial Block Download)
-        if (g_node_context.ibd_coordinator &&
-            g_node_context.ibd_coordinator->IsInitialBlockDownload()) {
+        if (g_node_context.sync_coordinator &&
+            g_node_context.sync_coordinator->IsInitialBlockDownload()) {
             g_node_state.mining_enabled = true;
             throw std::runtime_error("Node is still syncing (Initial Block Download). Mining will start automatically once sync completes.");
         }
@@ -4514,8 +4514,8 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
     }
 
     // Prevent mining during IBD (same fix as VDF path above)
-    if (g_node_context.ibd_coordinator &&
-        g_node_context.ibd_coordinator->IsInitialBlockDownload()) {
+    if (g_node_context.sync_coordinator &&
+        g_node_context.sync_coordinator->IsInitialBlockDownload()) {
         g_node_state.mining_enabled = true;
         throw std::runtime_error("Node is still syncing (Initial Block Download). Mining will start automatically once sync completes.");
     }
@@ -6893,7 +6893,7 @@ std::string CRPCServer::RPC_InvalidateBlock(const std::string& params) {
             g_node_context.block_tracker->ClearAboveHeight(disconnectTo);
 
         // Reset fork detection state so IBD can re-sync
-        if (g_node_context.ibd_coordinator) {
+        if (g_node_context.sync_coordinator) {
             g_node_context.fork_detected.store(false);
         }
 
@@ -6943,7 +6943,7 @@ std::string CRPCServer::RPC_InvalidateBlock(const std::string& params) {
     if (g_node_context.block_tracker)
         g_node_context.block_tracker->ClearAboveHeight(disconnectTo);
 
-    if (g_node_context.ibd_coordinator) {
+    if (g_node_context.sync_coordinator) {
         g_node_context.fork_detected.store(false);
     }
 
@@ -6963,7 +6963,7 @@ std::string CRPCServer::RPC_ReconsiderBlock(const std::string& params) {
     g_node_context.fork_detected.store(false);
 
     // Reset IBD coordinator fork state
-    if (g_node_context.ibd_coordinator) {
+    if (g_node_context.sync_coordinator) {
         // Trigger fresh fork detection by clearing the detected flag
         std::cout << "[RPC] reconsiderblock: clearing fork detection state" << std::endl;
     }

@@ -746,6 +746,34 @@ private:
     // Bug #46 Fix: Track multiple chain tips for competing chains
     std::set<uint256> setChainTips;         ///< All known chain tips (leaves in tree)
 
+    // Phase 6 PR6.2: Per-tip last-seen timestamp for TTL aging.
+    // Keyed by tip hash; value = unix-seconds when this tip was most recently
+    // re-announced via UpdateChainTips(). Used by TTL-eviction to drop
+    // stale tips that haven't been re-seen, regardless of chainWork.
+    // Per-chain TTL: see ChainParams::ChainTipTTLSeconds().
+    std::map<uint256, int64_t> m_chainTipsLastSeen;
+
+    // Phase 6 PR6.1 (v1.5 §4 PR6.1): per-peer header rate limit.
+    // Sliding 60-second window tracking pre-validation headers received
+    // per peer. Caps an attacker from filling chain_selector's
+    // mapBlockIndex (capped at 500K for DIL / 5M for DilV) faster than
+    // a sustainable rate. At 1000 headers/min/peer (default), filling
+    // the DIL cap takes ~8.3 hours from one peer — plenty of time for
+    // peer-misbehavior detection to fire.
+    struct PeerHeaderRate {
+        int64_t window_start_unix_sec = 0;
+        int     headers_in_window      = 0;
+    };
+    std::map<NodeId, PeerHeaderRate> m_peerHeaderRate;
+    static constexpr int    HEADER_RATE_WINDOW_SEC          = 60;
+    static constexpr int    HEADER_RATE_LIMIT_PER_WINDOW    = 1000;
+
+    // Returns true if peer is within rate limit (header batch may proceed).
+    // Returns false if peer has exceeded the rate limit; caller MUST drop
+    // the batch and SHOULD report misbehavior via IPeerScorer.
+    // Caller already holds cs_headers.
+    bool CheckPeerHeaderRateLimit(NodeId peer, size_t batchSize);
+
     // Bug #46 Fix: Minimum chain work for DoS protection
     uint256 nMinimumChainWork;              ///< Reject chains below this work threshold
 

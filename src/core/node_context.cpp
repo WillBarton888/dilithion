@@ -14,6 +14,7 @@
 #include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
 #include <consensus/ichain_selector.h>             // Phase 5: frozen interface
 #include <consensus/port/chain_selector_impl.h>    // Phase 5: ChainSelectorAdapter
+#include <net/port/sync_coordinator.h>             // Phase 6 PR6.5a: ISyncCoordinator complete type for unique_ptr destructor
 #include <util/logging.h>
 
 // Global node context instance

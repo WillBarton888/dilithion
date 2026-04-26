@@ -321,6 +321,15 @@ public:
     bool HasBlockIndex(const uint256& hash) const;
 
     /**
+     * Phase 6 PR6.1: number of entries in mapBlockIndex.
+     * Used by ChainSelectorAdapter::ProcessNewHeader for cap fail-closed
+     * (chainparams.nMapBlockIndexCap). Read is racy without cs_main but
+     * the cap is sized for sustained-attack-rate so race-window overshoot
+     * is irrelevant.
+     */
+    size_t GetBlockIndexSize() const { return mapBlockIndex.size(); }
+
+    /**
      * Find the last common ancestor between two chains
      * Used to determine fork point during reorganization
      *

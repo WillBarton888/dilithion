@@ -8,7 +8,7 @@
 #include <core/chainparams.h>
 #include <node/block_index.h>
 #include <node/mempool.h>
-#include <node/ibd_coordinator.h>
+#include <net/port/sync_coordinator.h>  // Phase 6 PR6.5a: routes via ISyncCoordinator
 #include <net/net.h>
 #include <net/connman.h>
 #include <net/protocol.h>
@@ -949,8 +949,8 @@ bool CPeerManager::EvictPeersIfNeeded() {
         int current_height = static_cast<int>(g_chain_height.load());
         bool trust_active = Dilithion::g_chainParams &&
                             current_height >= Dilithion::g_chainParams->trustWeightedNetworkHeight;
-        bool in_ibd = g_node_context.ibd_coordinator &&
-                      g_node_context.ibd_coordinator->IsInitialBlockDownload();
+        bool in_ibd = g_node_context.sync_coordinator &&
+                      g_node_context.sync_coordinator->IsInitialBlockDownload();
 
         if (trust_active && !in_ibd && g_node_context.GetPeerTrustScore) {
             for (auto& [pid, score] : eviction_candidates) {

@@ -157,6 +157,19 @@ public:
     int nOutboundFullRelayTarget;
     int nOutboundBlockRelayTarget;
 
+    // Phase 6 PR6.1 (v1.5 §3.2 + Cursor CONCERN 1 fix): per-chain cap on
+    // chain_selector's mapBlockIndex (pre-validation block index entries).
+    // Without this cap, an attacker that floods rejected-parent descendant
+    // headers can grow mapBlockIndex monotonically. Cap is enforced in
+    // chain_selector_impl::ProcessNewHeader; eviction is by lowest-work-
+    // not-on-best-chain (mirrors setChainTips eviction discipline).
+    //
+    // Values sized to ~one week of attacker headers at maximum sustained
+    // rate. DIL (240s blocks): 500K = ~14 weeks at 1 header/sec attack.
+    // DilV (60s blocks): 5M ≈ same window scaled to faster blocks.
+    // Regtest: 1000 (small enough to test cap-saturation in unit tests).
+    int nMapBlockIndexCap;
+
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)
     // vdfExclusiveHeight:  VDF-only period (reject RandomX blocks after this)

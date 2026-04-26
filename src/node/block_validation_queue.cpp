@@ -7,7 +7,7 @@
 #include <consensus/pow.h>
 #include <consensus/validation.h>  // For CheckCoinbase
 #include <node/blockchain_storage.h>
-#include <node/ibd_coordinator.h>  // A1 FIX: For OnBlockConnected()
+#include <net/port/sync_coordinator.h>  // Phase 6 PR6.5a: OnBlockConnected via adapter
 #include <net/net.h>               // A5: For SendRejectMessage()
 #include <core/node_context.h>
 #include <core/chainparams.h>
@@ -408,8 +408,8 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
 
     // A1 FIX: Notify IBD coordinator that a block connected successfully
     // Resets orphan streak counter (Layer 2 fork detection) and updates block-flow timestamp
-    if (g_node_context.ibd_coordinator) {
-        g_node_context.ibd_coordinator->OnBlockConnected();
+    if (g_node_context.sync_coordinator) {
+        g_node_context.sync_coordinator->OnBlockConnected();
     }
 
     // DEAD CODE REMOVED: OnChunkBlockReceived and OnWindowBlockConnected

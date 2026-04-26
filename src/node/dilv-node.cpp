@@ -257,6 +257,7 @@ extern CChainState g_chainstate;
 // Phase 1.2: NodeContext for centralized global state management (Bitcoin Core pattern)
 #include <core/node_context.h>
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
+#include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
 extern NodeContext g_node_context;
 
 // Phase 5: Helper function to connect to a peer (for outbound connections)
@@ -295,6 +296,7 @@ extern NodeState g_node_state;
 // Phase 1.2: NodeContext for centralized global state management (Bitcoin Core pattern)
 #include <core/node_context.h>
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
+#include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
 extern NodeContext g_node_context;
 
 // Global flag for UTXO sync optimization (defined in utxo_set.cpp)
@@ -6674,6 +6676,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Phase 5.1: Initialize IBD Coordinator (must be after all components are ready)
         CIbdCoordinator ibd_coordinator(g_chainstate, g_node_context);
         g_node_context.ibd_coordinator = &ibd_coordinator;  // Register for IsSynced() access
+        // Phase 6 PR6.5a: wrap IBDCoordinator in the ISyncCoordinator adapter.
+        g_node_context.sync_coordinator =
+            std::make_unique<dilithion::net::port::CIbdCoordinatorAdapter>(ibd_coordinator);
         LogPrintf(IBD, INFO, "IBD Coordinator initialized");
 
         // Solo mining prevention state - declared before new_block_found handler
@@ -6849,7 +6854,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                             if (stuck_mins >= 10 && since_warning >= 5) {
                                 last_warning = now;
                                 int hdrHeight = g_node_context.headers_manager ? g_node_context.headers_manager->GetBestHeight() : -1;
-                                int syncPeer = g_node_context.ibd_coordinator ? g_node_context.ibd_coordinator->GetHeadersSyncPeer() : -1;
+                                int syncPeer = g_node_context.sync_coordinator ? g_node_context.sync_coordinator->GetHeadersSyncPeer() : -1;
                                 std::cout << "\n  [WARN] Node stuck at height 0 for " << stuck_mins << " minutes despite having peers." << std::endl;
                                 std::cout << "  [WARN] Headers height: " << hdrHeight << ", sync peer: " << syncPeer << std::endl;
                                 std::cout << "  [WARN] If headers=0, the seed may not be responding to GETHEADERS." << std::endl;
@@ -6877,9 +6882,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // ========================================
             // BLOCK DOWNLOAD COORDINATION (IBD)
             // ========================================
-            // Phase 5.1: Use IBD Coordinator instead of inline logic
-            // This encapsulates all IBD logic (backoff, queueing, fetching, retries)
-            ibd_coordinator.Tick();
+            // Phase 5.1: Use IBD Coordinator instead of inline logic.
+            // Phase 6 PR6.5a fix-up 2026-04-27 (per dual-validation): route
+            // Tick() through ISyncCoordinator so the --usenewpeerman=1 flag
+            // (added in PR6.5b) flips this to CPeerManager::Tick() without
+            // a code change. Behavior under flag=0 is identical.
+            if (g_node_context.sync_coordinator) {
+                g_node_context.sync_coordinator->Tick();
+            }
 
             // IBD DEBUG: Log that Tick() returned and main loop continues
             static int main_loop_count = 0;
@@ -7254,6 +7264,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Clear ibd_coordinator pointer before local variable goes out of scope
         g_node_context.ibd_coordinator = nullptr;
+        // Phase 6 PR6.5a: also reset the sync_coordinator adapter.
+        g_node_context.sync_coordinator.reset();
 
         if (vdf_miner.IsRunning()) {
             std::cout << "[Shutdown] Stopping VDF miner..." << std::flush;

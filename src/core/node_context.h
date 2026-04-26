@@ -41,6 +41,11 @@ namespace dilithion::consensus {
     class IChainSelector;
 }
 
+// Phase 6 PR6.5a: ISyncCoordinator adapter (Bitcoin Core PeerManager port).
+namespace dilithion::net::port {
+    class ISyncCoordinator;
+}
+
 // Digital DNA: Sybil-resistant identity system
 // Full include required because unique_ptr needs the complete type for default_delete
 #include <digital_dna/dna_registry_db.h>
@@ -80,6 +85,15 @@ struct NodeContext {
     std::unique_ptr<CBlockValidationQueue> validation_queue;  // Phase 2: Async block validation
     std::unique_ptr<CBlockTracker> block_tracker;  // IBD Redesign: Single source of truth for block state
     CIbdCoordinator* ibd_coordinator{nullptr};  // Phase 5.1: IBD state machine (raw ptr, owned by main)
+
+    // Phase 6 PR6.5a: ISyncCoordinator adapter — stable surface used by
+    // ~37 production touch sites that previously called ibd_coordinator
+    // directly. Backed by CIbdCoordinatorAdapter (legacy) under
+    // --usenewpeerman=0 OR by CPeerManager (PR6.5b) under
+    // --usenewpeerman=1. PR6.5a wires legacy backing for both flag
+    // values (compile-safe migration only). Lifetime: owned by main()
+    // alongside ibd_coordinator.
+    std::unique_ptr<dilithion::net::port::ISyncCoordinator> sync_coordinator;
 
     // Transaction relay
     CAsyncBroadcaster* async_broadcaster{nullptr};

@@ -14,9 +14,11 @@
 
 #include <consensus/chain.h>
 #include <consensus/chain_work.h>
-#include <core/node_context.h>           // g_node_context.ibd_coordinator
+#include <core/chainparams.h>             // Phase 6 PR6.1: nMapBlockIndexCap
+#include <core/node_context.h>           // g_node_context.sync_coordinator
 #include <node/block_index.h>
-#include <node/ibd_coordinator.h>         // IsInitialBlockDownload
+#include <node/ibd_coordinator.h>         // IsInitialBlockDownload (legacy backing kept through Phase 9+)
+#include <net/port/sync_coordinator.h>    // Phase 6 PR6.5a: ISyncCoordinator surface
 #include <primitives/block.h>
 
 #include <atomic>
@@ -124,6 +126,33 @@ bool ChainSelectorAdapter::ProcessNewHeader(const CBlockHeader& header)
         return true;
     }
 
+    // Phase 6 PR6.1 (v1.5 §3.2 + Cursor CONCERN 1): mapBlockIndex cap.
+    // Fail-closed when at cap — REJECT new pre-validation header rather
+    // than evict an existing entry. Rationale per KISS + world-class:
+    //   * Eviction risks use-after-free (chain_selector may hold pointers
+    //     into mapBlockIndex via m_setBlockIndexCandidates).
+    //   * Fail-closed under sustained attack matches Bitcoin Core's
+    //     "drop misbehaving peer" pattern; the rate-limit in HeadersManager
+    //     bounds aggregate growth.
+    //   * Cap is sized for one-week-worth of attacker headers at max
+    //     sustained rate — exceeding it means we're under attack, not
+    //     legitimate IBD.
+    // If telemetry ever shows legitimate headers being rejected, upgrade
+    // to lowest-work-orphan eviction (v1.5 §3.2 alternate policy).
+    //
+    // mapBlockIndex is a public field of CChainState protected by cs_main
+    // (recursive_mutex per chain.h:87). The size() read is racy without the
+    // lock, but: (a) cap is sized for sustained-attack-rate, race-window
+    // overshoot is irrelevant; (b) AddBlockIndex below acquires cs_main
+    // properly. Reading size() here is a hot-path optimization; the
+    // ground-truth check is at AddBlockIndex.
+    if (Dilithion::g_chainParams) {
+        const int cap = Dilithion::g_chainParams->nMapBlockIndexCap;
+        if (cap > 0 && m_chainstate.GetBlockIndexSize() >= static_cast<size_t>(cap)) {
+            return false;
+        }
+    }
+
     // Locate parent. A null hashPrevBlock means genesis (height 0, no parent).
     CBlockIndex* pprev = nullptr;
     int nHeight = 0;
@@ -222,13 +251,13 @@ bool ChainSelectorAdapter::ReconsiderBlock(const uint256& hash)
     return m_chainstate.ReconsiderBlockImpl(hash);
 }
 
-// PR5.3: route through IBDCoordinator if wired (production), otherwise
+// PR5.3: route through ISyncCoordinator if wired (production), otherwise
 // return false (fresh-test default — no IBD context). g_node_context.
-// ibd_coordinator is the canonical authority on IBD state.
+// sync_coordinator is the canonical authority on IBD state.
 bool ChainSelectorAdapter::IsInitialBlockDownload() const
 {
-    if (g_node_context.ibd_coordinator) {
-        return g_node_context.ibd_coordinator->IsInitialBlockDownload();
+    if (g_node_context.sync_coordinator) {
+        return g_node_context.sync_coordinator->IsInitialBlockDownload();
     }
     return false;
 }

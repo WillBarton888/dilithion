@@ -111,6 +111,11 @@ ChainParams ChainParams::Mainnet() {
     params.nOutboundFullRelayTarget = 8;
     params.nOutboundBlockRelayTarget = 2;
 
+    // Phase 6 PR6.1 (v1.5 §3.2 + Cursor CONCERN 1): mapBlockIndex cap.
+    // 500K covers ~14 weeks at one attacker-header-per-second sustained
+    // rate — well past the IBD horizon for 240s-block DIL.
+    params.nMapBlockIndexCap = 500000;
+
     // ASERT difficulty algorithm activation
     // Replaces periodic retarget + EDA with per-block exponential adjustment.
     // Anchor block: height 23039 (the block at activationHeight - 1).
@@ -319,6 +324,9 @@ ChainParams ChainParams::Testnet() {
     params.nOutboundFullRelayTarget = 8;
     params.nOutboundBlockRelayTarget = 2;
 
+    // Phase 6 PR6.1: mapBlockIndex cap — testnet matches mainnet semantics.
+    params.nMapBlockIndexCap = 500000;
+
     // VDF Fair Mining — VDF-only from genesis for MVP testing
     params.vdfActivationHeight = 0;
     params.vdfExclusiveHeight  = 0;            // VDF-only from genesis (like DilV)
@@ -469,6 +477,10 @@ ChainParams ChainParams::DilV() {
     // from faster propagation, so bump BlockRelay to 4 (Q4 recommendation).
     params.nOutboundFullRelayTarget = 8;
     params.nOutboundBlockRelayTarget = 4;
+
+    // Phase 6 PR6.1: mapBlockIndex cap — DilV is 5M (10× DIL) because
+    // its 60s blocks produce headers ~4× faster than DIL's 240s.
+    params.nMapBlockIndexCap = 5000000;
 
     // VDF: active from genesis — DilV is a VDF-only chain
     params.vdfActivationHeight = 0;
@@ -661,6 +673,11 @@ ChainParams ChainParams::Regtest() {
     params.vdfIterations = 50000;
     params.vdfLotteryGracePeriod = 3;  // 3s grace
     params.blockTime = 3;              // 3s target
+
+    // Phase 6 PR6.1: mapBlockIndex cap — regtest uses a SMALL cap (1000)
+    // so cap-saturation tests can exercise eviction without flooding 500K+
+    // headers. Override of inherited Testnet value.
+    params.nMapBlockIndexCap = 1000;
 
     return params;
 }
