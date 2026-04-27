@@ -579,6 +579,16 @@ peer_manager_wiring_prep_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_wir
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_wiring_prep_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.1a: lifecycle tests for port-CPeerManager (4 cases).
+# Verifies polymorphic ISyncCoordinator usage, vacuous defaults, lifecycle
+# idempotency, and observable-state stability across hook calls. Out of
+# unit-test scope (covered by diff subagent + manual smoke): flag parsing,
+# runtime-selection logic in main(), legacy CIbdCoordinator path.
+peer_manager_lifecycle_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_lifecycle_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_manager_lifecycle_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)

@@ -259,6 +259,7 @@ extern CChainState g_chainstate;
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 #include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
 #include <net/port/connman_adapter.h>           // Phase 6 PR6.5b.0: IConnectionManager adapter
+#include <net/port/peer_manager.h>              // Phase 6 PR6.5b.1a: port-CPeerManager (flag=1 backing)
 extern NodeContext g_node_context;
 
 // Phase 5: Helper function to connect to a peer (for outbound connections)
@@ -299,6 +300,7 @@ extern NodeState g_node_state;
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 #include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
 #include <net/port/connman_adapter.h>           // Phase 6 PR6.5b.0: IConnectionManager adapter
+#include <net/port/peer_manager.h>              // Phase 6 PR6.5b.1a: port-CPeerManager (flag=1 backing)
 extern NodeContext g_node_context;
 
 // Global flag for UTXO sync optimization (defined in utxo_set.cpp)
@@ -541,6 +543,7 @@ struct NodeConfig {
     int max_connections = 0;         // --maxconnections: Maximum peer connections (0 = default 125)
     int max_connections_per_ip = 2;  // --max-connections-per-ip: Max inbound per IP (default 2, range 1-64)
     int attestation_rate_limit = 1;  // --attestation-rate-limit: Max attestations per /24 subnet per day (Sybil defense)
+    bool use_new_peerman = false;    // Phase 6 PR6.5b.1a: --usenewpeerman opt-in to port-CPeerManager (experimental / developer-only; default OFF)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -745,6 +748,14 @@ struct NodeConfig {
                     return false;
                 }
             }
+            else if (arg == "--usenewpeerman" || arg == "--usenewpeerman=1") {
+                // Phase 6 PR6.5b.1a: opt-in to port-CPeerManager (experimental).
+                // See dilithion-node.cpp parsing for full context. Default OFF.
+                use_new_peerman = true;
+            }
+            else if (arg == "--usenewpeerman=0") {
+                use_new_peerman = false;
+            }
             else if (arg == "--help" || arg == "-h") {
                 return false;
             }
@@ -791,6 +802,10 @@ struct NodeConfig {
         std::cout << "  --maxconnections=<n>  Maximum peer connections (default: 125)" << std::endl;
         std::cout << "  --max-connections-per-ip=<n>" << std::endl;
         std::cout << "                        Max inbound connections per IP (default: 2, range: 1-64)" << std::endl;
+        std::cout << "  --usenewpeerman       [EXPERIMENTAL / DEV-ONLY] Opt in to the Bitcoin Core" << std::endl;
+        std::cout << "                        port PeerManager (Phase 6 PR6.5b). Default OFF." << std::endl;
+        std::cout << "                        Production should leave this disabled until the" << std::endl;
+        std::cout << "                        port body work (PR6.5b.5/6) completes." << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
@@ -6688,9 +6703,40 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Phase 5.1: Initialize IBD Coordinator (must be after all components are ready)
         CIbdCoordinator ibd_coordinator(g_chainstate, g_node_context);
         g_node_context.ibd_coordinator = &ibd_coordinator;  // Register for IsSynced() access
-        // Phase 6 PR6.5a: wrap IBDCoordinator in the ISyncCoordinator adapter.
-        g_node_context.sync_coordinator =
-            std::make_unique<dilithion::net::port::CIbdCoordinatorAdapter>(ibd_coordinator);
+
+        // Phase 6 PR6.5b.1a: select sync_coordinator backing based on --usenewpeerman.
+        // See dilithion-node.cpp for full context. Default OFF; flag is
+        // EXPERIMENTAL / DEVELOPER-ONLY through PR6.5b.6.
+        const bool use_port_pm = config.use_new_peerman
+                              && g_node_context.connman_adapter
+                              && g_node_context.addrman
+                              && g_node_context.peer_scorer
+                              && g_node_context.chain_selector
+                              && Dilithion::g_chainParams;
+        if (config.use_new_peerman && !use_port_pm) {
+            LogPrintf(NET, ERROR,
+                "PR6.5b.1a: --usenewpeerman=1 requested but a prerequisite ref is null "
+                "(connman_adapter=%p addrman=%p peer_scorer=%p chain_selector=%p chainparams=%p). "
+                "Falling back to legacy CIbdCoordinator path.",
+                (void*)g_node_context.connman_adapter.get(),
+                (void*)g_node_context.addrman.get(),
+                (void*)g_node_context.peer_scorer.get(),
+                (void*)g_node_context.chain_selector.get(),
+                (void*)Dilithion::g_chainParams);
+        }
+        if (use_port_pm) {
+            g_node_context.sync_coordinator = std::make_unique<dilithion::net::port::CPeerManager>(
+                *g_node_context.connman_adapter,
+                *g_node_context.addrman,
+                *g_node_context.peer_scorer,
+                *g_node_context.chain_selector,
+                *Dilithion::g_chainParams);
+            LogPrintf(NET, INFO,
+                "Phase 6 PR6.5b.1a: sync_coordinator backed by port-CPeerManager (--usenewpeerman=1)");
+        } else {
+            g_node_context.sync_coordinator =
+                std::make_unique<dilithion::net::port::CIbdCoordinatorAdapter>(ibd_coordinator);
+        }
         LogPrintf(IBD, INFO, "IBD Coordinator initialized");
 
         // Solo mining prevention state - declared before new_block_found handler
