@@ -258,6 +258,7 @@ extern CChainState g_chainstate;
 #include <core/node_context.h>
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 #include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
+#include <net/port/connman_adapter.h>           // Phase 6 PR6.5b.0: IConnectionManager adapter
 extern NodeContext g_node_context;
 
 // Phase 5: Helper function to connect to a peer (for outbound connections)
@@ -297,6 +298,7 @@ extern NodeState g_node_state;
 #include <core/node_context.h>
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 #include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
+#include <net/port/connman_adapter.h>           // Phase 6 PR6.5b.0: IConnectionManager adapter
 extern NodeContext g_node_context;
 
 // Global flag for UTXO sync optimization (defined in utxo_set.cpp)
@@ -3149,7 +3151,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Phase 1.2: Store in NodeContext (Bitcoin Core pattern)
         g_node_context.connman = std::move(connman);
         g_node_context.message_processor = &message_processor;
-        
+
+        // Phase 6 PR6.5b.0: construct CConnmanAdapter wrapping the now-registered
+        // CConnman. Inert under --usenewpeerman=0 (legacy path doesn't route
+        // through it). PR6.5b.1a will pass this adapter as one of port-CPeerManager's
+        // 5 constructor refs when the flag is added (default OFF). NodeContext
+        // shutdown resets this BEFORE connman to honor non-owning-ref ordering.
+        if (g_node_context.connman) {
+            g_node_context.connman_adapter =
+                std::make_unique<dilithion::net::port::CConnmanAdapter>(*g_node_context.connman);
+        }
+
         // Phase 5: Create and start async broadcaster for non-blocking message broadcasting
         // Now uses CConnman instead of CConnectionManager
         CAsyncBroadcaster async_broadcaster(g_node_context.connman.get());

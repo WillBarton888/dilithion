@@ -46,6 +46,19 @@ namespace dilithion::net::port {
     class ISyncCoordinator;
 }
 
+// Phase 6 PR6.5b.0: port-namespace wiring prep — instances exist solely so
+// port-CPeerManager (under --usenewpeerman=1, PR6.5b.1a) can be constructed.
+// These coexist with legacy ::CPeerManager's private addrman/m_scorer
+// instances (peers.cpp:80,82,108) — both sets exist through Phase 9+.
+// Legacy peer-discovery paths unchanged.
+namespace dilithion::net {
+    class IAddressManager;
+    class IPeerScorer;
+}
+namespace dilithion::net::port {
+    class CConnmanAdapter;
+}
+
 // Digital DNA: Sybil-resistant identity system
 // Full include required because unique_ptr needs the complete type for default_delete
 #include <digital_dna/dna_registry_db.h>
@@ -94,6 +107,21 @@ struct NodeContext {
     // values (compile-safe migration only). Lifetime: owned by main()
     // alongside ibd_coordinator.
     std::unique_ptr<dilithion::net::port::ISyncCoordinator> sync_coordinator;
+
+    // Phase 6 PR6.5b.0: NodeContext-level port-namespace wiring prep instances.
+    // See forward-decl block above for rationale. Constructed in
+    // NodeContext::Init (addrman, peer_scorer — same env-var selection as
+    // legacy ::CPeerManager); connman_adapter constructed by node startup
+    // (dilithion-node.cpp / dilv-node.cpp main()) AFTER g_node_context.connman
+    // is registered, because the adapter holds a non-owning CConnman&.
+    // Lifetime: owned here; Shutdown resets connman_adapter BEFORE connman
+    // and BEFORE peer_manager (legacy) to honor non-owning-ref ordering.
+    // Inert under --usenewpeerman=0 — these instances exist but no caller
+    // routes through them. PR6.5b.1a wires port-CPeerManager to construct
+    // against them when flag=1.
+    std::unique_ptr<dilithion::net::IAddressManager> addrman;
+    std::unique_ptr<dilithion::net::IPeerScorer> peer_scorer;
+    std::unique_ptr<dilithion::net::port::CConnmanAdapter> connman_adapter;
 
     // Transaction relay
     CAsyncBroadcaster* async_broadcaster{nullptr};

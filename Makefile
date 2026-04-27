@@ -220,6 +220,7 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/port/addrman_migrator.cpp \
                src/net/port/peer_scorer.cpp \
                src/net/port/sync_coordinator_adapter.cpp \
+               src/net/port/connman_adapter.cpp \
                src/net/port/peer_manager.cpp \
                src/net/banman.cpp \
                src/net/headerssync.cpp \
@@ -567,6 +568,16 @@ headers_manager_to_chain_selector_wiring_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ headers_manager_to_chain_selector_wiring_tests built successfully$(COLOR_RESET)"
+
+# Phase 6 PR6.5b.0: wiring prep tests (4 cases). Verifies CAddrMan_v2 +
+# CPeerScorer + CConnmanAdapter construct cleanly AND port-CPeerManager
+# can be instantiated with all 5 constructor refs. Closes the wiring gap
+# discovered during PR6.5b.1a contract authoring (D-then-B per active
+# contract methodology).
+peer_manager_wiring_prep_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_wiring_prep_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_manager_wiring_prep_tests built successfully$(COLOR_RESET)"
 
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
