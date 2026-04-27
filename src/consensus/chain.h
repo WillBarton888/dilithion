@@ -322,12 +322,31 @@ public:
 
     /**
      * Phase 6 PR6.1: number of entries in mapBlockIndex.
-     * Used by ChainSelectorAdapter::ProcessNewHeader for cap fail-closed
+     * Used by ChainSelectorAdapter::ProcessNewHeader for cap eviction
      * (chainparams.nMapBlockIndexCap). Read is racy without cs_main but
      * the cap is sized for sustained-attack-rate so race-window overshoot
      * is irrelevant.
      */
     size_t GetBlockIndexSize() const { return mapBlockIndex.size(); }
+
+    /**
+     * Phase 6 PR6.1 (v1.5 §3.2 + Cursor v1.5+ A1): evict lowest-work
+     * entry NOT on the active chain. Called by ChainSelectorAdapter when
+     * mapBlockIndex hits chainparams.nMapBlockIndexCap to make room for
+     * a new pre-validation header.
+     *
+     * Eviction policy: walk mapBlockIndex, find the entry with minimum
+     * nChainWork that is NOT an ancestor of pindexTip; remove from
+     * m_setBlockIndexCandidates if present, then erase from
+     * mapBlockIndex. Holds cs_main for the duration to avoid use-after-
+     * free against chain_selector pointers in m_setBlockIndexCandidates.
+     *
+     * Returns true on successful eviction. Returns false if the only
+     * remaining entries are on the active chain (caller should fall back
+     * to fail-closed, but this case is essentially unreachable at
+     * production cap sizes — DIL=500K cap vs ~24K active chain height).
+     */
+    bool EvictLowestWorkNotOnBestChain();
 
     /**
      * Find the last common ancestor between two chains

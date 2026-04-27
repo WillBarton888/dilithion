@@ -133,6 +133,60 @@ bool CChainState::HasBlockIndex(const uint256& hash) const {
     return mapBlockIndex.count(hash) > 0;
 }
 
+// Phase 6 PR6.1 (v1.5 §3.2 + Cursor v1.5+ A1): cap-eviction policy.
+// Evicts lowest-work entry NOT on the active chain.
+bool CChainState::EvictLowestWorkNotOnBestChain() {
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    if (mapBlockIndex.empty()) return false;
+
+    // Build a set of active-chain hashes by walking pindexTip → genesis.
+    // O(active_chain_height); cheap relative to map walk below.
+    std::set<uint256> active_chain_hashes;
+    for (CBlockIndex* p = pindexTip; p != nullptr; p = p->pprev) {
+        active_chain_hashes.insert(p->GetBlockHash());
+    }
+
+    // Find the entry with minimum nChainWork that is NOT on the active
+    // chain. Use ChainWorkGreaterThan (from consensus/pow.h) — chainWork
+    // stored in uint256 doesn't have a memcmp-compatible byte ordering;
+    // raw memcmp gives wrong magnitude comparison.
+    CBlockIndex* worst = nullptr;
+    uint256      worst_work;
+    bool         worst_set = false;
+    for (auto& kv : mapBlockIndex) {
+        CBlockIndex* p = kv.second.get();
+        if (!p) continue;
+        if (active_chain_hashes.count(kv.first) > 0) continue;  // skip active
+        // We want minimum: p < worst means p has LESS work than current worst.
+        // ChainWorkGreaterThan(a, b) = a > b. So p has less work iff
+        // ChainWorkGreaterThan(worst_work, p->nChainWork) is true
+        // (worst_work > p means p < worst_work, so p is lower-work).
+        if (!worst_set || ChainWorkGreaterThan(worst_work, p->nChainWork)) {
+            worst = p;
+            worst_work = p->nChainWork;
+            worst_set = true;
+        }
+    }
+
+    if (!worst_set) {
+        // All entries are on the active chain. At production cap sizes
+        // (DIL=500K vs ~24K chain height) this is unreachable; if it
+        // happens, caller falls back to fail-closed.
+        return false;
+    }
+
+    // Remove from m_setBlockIndexCandidates if present (avoid dangling
+    // pointer in the candidate set).
+    m_setBlockIndexCandidates.erase(worst);
+
+    // Erase from mapBlockIndex. unique_ptr cleanup destroys CBlockIndex.
+    uint256 worst_hash = worst->GetBlockHash();
+    mapBlockIndex.erase(worst_hash);
+
+    return true;
+}
+
 CBlockIndex* CChainState::FindFork(CBlockIndex* pindex1, CBlockIndex* pindex2) {
     // Find the last common ancestor between two chains
     // This is used to determine where chains diverge

@@ -121,20 +121,38 @@ CHeadersManager::~CHeadersManager()
 // ============================================================================
 
 // Phase 6 PR6.1 (v1.5 §4 PR6.1 + DoS guards): per-peer header rate limit.
-// Sliding-by-reset 60s window. Caller MUST already hold cs_headers.
+// Sliding-by-reset window. Caller MUST already hold cs_headers.
+//
+// Window + limit pulled from chainparams (Cursor v1.5+ per-spec fix B1):
+//   * ChainParams.nHeaderRateWindowSec
+//   * ChainParams.nHeaderRateLimitPerWindow
+// Defaults (60s / 1000 headers) match the prior hardcoded values, so
+// behavior is unchanged unless a factory overrides. If g_chainParams
+// is null (test fixtures without setup), fall back to the same defaults.
 bool CHeadersManager::CheckPeerHeaderRateLimit(NodeId peer, size_t batchSize)
 {
     const int64_t now_sec = std::chrono::duration_cast<std::chrono::seconds>(
         std::chrono::system_clock::now().time_since_epoch()).count();
 
+    int window_sec = 60;
+    int limit      = 1000;
+    if (Dilithion::g_chainParams) {
+        if (Dilithion::g_chainParams->nHeaderRateWindowSec > 0) {
+            window_sec = Dilithion::g_chainParams->nHeaderRateWindowSec;
+        }
+        if (Dilithion::g_chainParams->nHeaderRateLimitPerWindow > 0) {
+            limit = Dilithion::g_chainParams->nHeaderRateLimitPerWindow;
+        }
+    }
+
     auto& rate = m_peerHeaderRate[peer];
-    if (now_sec - rate.window_start_unix_sec >= HEADER_RATE_WINDOW_SEC) {
+    if (now_sec - rate.window_start_unix_sec >= window_sec) {
         // Window expired — start a fresh window.
         rate.window_start_unix_sec = now_sec;
         rate.headers_in_window = 0;
     }
     rate.headers_in_window += static_cast<int>(batchSize);
-    return rate.headers_in_window <= HEADER_RATE_LIMIT_PER_WINDOW;
+    return rate.headers_in_window <= limit;
 }
 
 bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader>& headers)
@@ -1291,7 +1309,8 @@ void CHeadersManager::OnPeerDisconnected(NodeId peer)
     mapPeerStates.erase(peer);
     mapPeerStartHeight.erase(peer);  // BUG #62: Clean up peer height tracking
     mapHeadersSyncStates.erase(peer);  // Clean up DoS protection state
-
+    m_peerHeaderRate.erase(peer);  // Phase 6 PR6.1 fix-up (subagent v1.5+ BLOCKER): prevent monotonic
+                                   // memory leak under Bitcoin-level peer churn
 }
 
 void CHeadersManager::SetPeerStartHeight(NodeId peer, int height)

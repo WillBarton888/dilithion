@@ -70,15 +70,18 @@ uint256 NullHash()
 }  // anonymous
 
 // ============================================================================
-// Test 1 — Sibling whose ancestry crosses the checkpoint boundary.
-// Topology: genesis -> A0 -> A1 -> ... -> A(checkpoint+1)
-//                        \-> B1 (sibling) -> B2 (extends across boundary)
-// Both A and B siblings must be in mapBlockIndex; chain_selector picks
-// the heavier (or deterministic via nSequenceId).
+// Test 1 — Sibling fork extends across a multi-block boundary.
+// Topology: genesis -> A1 -> A2 -> A3
+//                        \-> B1 (sibling at h=1) -> B2 -> B3
+// Both branches must coexist in mapBlockIndex regardless of where the
+// (conceptual) checkpoint sits — chain_selector enforces no runtime
+// checkpoint check in ProcessNewHeader; this test verifies structural
+// coverage of the multi-block-boundary case. Renamed v1.5+ per subagent
+// (prior name "crosses checkpoint boundary" oversold the test scope).
 // ============================================================================
-void test_pr64_sibling_ancestry_crosses_checkpoint_boundary()
+void test_pr64_sibling_fork_extends_across_multi_block_boundary()
 {
-    std::cout << "  test_pr64_sibling_ancestry_crosses_checkpoint_boundary..." << std::flush;
+    std::cout << "  test_pr64_sibling_fork_extends_across_multi_block_boundary..." << std::flush;
 
     CChainState cs;
     ::dilithion::consensus::port::ChainSelectorAdapter adapter(cs);
@@ -155,13 +158,15 @@ void test_pr64_fast_path_2_replay_second_sibling_not_dropped()
 }
 
 // ============================================================================
-// Test 3 — Off-by-one at checkpoint boundary.
-// Block exactly at checkpoint height; block at checkpoint height ± 1.
-// Each must route through chain_selector cleanly without dropping.
+// Test 3 — Off-by-one boundary: siblings at h=N, h=N-1, h=N+1.
+// Verifies chain_selector accepts siblings at adjacent heights without
+// drops or off-by-one errors. ("Checkpoint" remains conceptual — the
+// chain_selector path has no runtime checkpoint enforcement; renamed
+// v1.5+ per subagent.)
 // ============================================================================
-void test_pr64_off_by_one_at_checkpoint_boundary()
+void test_pr64_off_by_one_boundary_siblings()
 {
-    std::cout << "  test_pr64_off_by_one_at_checkpoint_boundary..." << std::flush;
+    std::cout << "  test_pr64_off_by_one_boundary_siblings..." << std::flush;
 
     CChainState cs;
     ::dilithion::consensus::port::ChainSelectorAdapter adapter(cs);
@@ -258,9 +263,14 @@ void test_pr64_concurrent_header_arrival_at_boundary()
 }
 
 // ============================================================================
-// Test 5 — Parent invalidation after initial acceptance (Cursor v1.2).
-// Descendant chain crosses boundary, initially accepted; parent later
-// marked BLOCK_FAILED_VALID. Assert no stale reachable tip survives.
+// Test 5 — Parent invalidation after initial acceptance (Cursor v1.2;
+// HARDENED v1.5+ per subagent: use InvalidateBlock for cascade, assert
+// single-outcome rejection).
+//
+// Descendant chain initially accepted; parent later invalidated via
+// adapter.InvalidateBlock (which cascades BLOCK_FAILED_CHILD to all
+// descendants). New descendant arriving AFTER invalidation must be
+// rejected (single-outcome contract).
 // ============================================================================
 void test_pr64_parent_invalidation_after_acceptance()
 {
@@ -285,42 +295,22 @@ void test_pr64_parent_invalidation_after_acceptance()
     // All 4 entries pre-invalidation.
     assert(cs.GetBlockIndexSize() == 4);
 
-    // Mark P as failed AFTER its descendants were accepted.
-    CBlockIndex* pP = cs.GetBlockIndex(h_P.GetHash());
-    pP->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+    // HARDENED v1.5+ per subagent: use adapter.InvalidateBlock to mark P
+    // failed AND cascade BLOCK_FAILED_CHILD to C1 + C2. Direct nStatus
+    // mutation (the prior version) skipped the cascade, so C3's parent
+    // C2 was never marked invalid and the test had to allow either
+    // outcome. With proper cascade, the contract is single-valued.
+    bool inv_ok = adapter.InvalidateBlock(h_P.GetHash());
+    assert(inv_ok);
 
-    // New descendant arriving NOW must be rejected (extends invalid chain).
+    // New descendant arriving NOW MUST be rejected — its parent (C2) is
+    // now marked BLOCK_FAILED_CHILD via cascade from P.
     auto h_C3 = MakeHeader(h_C2.GetHash(), 0x1d00ffff, 1700000240, 0xC3);
     bool ok = adapter.ProcessNewHeader(h_C3);
 
-    // PR6.1 BLOCKER 1 fix says: descendants of invalid parent are rejected.
-    // For C3 to be rejected: its parent C2 must be marked invalid via
-    // BLOCK_FAILED_CHILD propagation. That's a chain-state-level concern;
-    // chain_selector::ProcessNewHeader checks pprev->IsInvalid() which
-    // includes BLOCK_FAILED_CHILD only if InvalidateBlock was called.
-    // Without InvalidateBlock, C2 is NOT marked invalid yet — so the test
-    // exercises the SECOND invariant: chain_selector still has the
-    // structural property even when invalidation propagation is not triggered.
-
-    // Either C3 was rejected (because C2 was eagerly marked invalid) OR
-    // C3 was accepted but won't be selectable as best (because P is invalid
-    // and chain_selector's FindMostWorkChain skips invalid-ancestor leaves).
-    if (!ok) {
-        // C3 rejected — invalidation propagated. Best case.
-        assert(cs.GetBlockIndexSize() == 4);
-    } else {
-        // C3 accepted but the FindMostWorkChain path must still skip
-        // P-rooted candidates due to BLOCK_FAILED_VALID on P.
-        assert(cs.GetBlockIndexSize() == 5);
-        // The best chain should NOT include any P-descendant.
-        CBlockIndex* best = adapter.FindMostWorkChain();
-        if (best != nullptr) {
-            // Walk back to genesis; verify P is not on the path.
-            for (CBlockIndex* p = best; p != nullptr; p = p->pprev) {
-                assert(p != pP && "Best-work chain must not include invalid P");
-            }
-        }
-    }
+    // SINGLE-OUTCOME contract: C3 rejected; mapBlockIndex unchanged.
+    assert(!ok && "C3 must be rejected: parent C2 has BLOCK_FAILED_CHILD via cascade from invalid P");
+    assert(cs.GetBlockIndexSize() == 4);
 
     std::cout << " OK\n";
 }
@@ -332,9 +322,9 @@ int main()
     std::cout << "  (5-case suite per v1.5 plan §4 PR6.4; gates Patch H deletion)\n\n";
 
     try {
-        test_pr64_sibling_ancestry_crosses_checkpoint_boundary();
+        test_pr64_sibling_fork_extends_across_multi_block_boundary();
         test_pr64_fast_path_2_replay_second_sibling_not_dropped();
-        test_pr64_off_by_one_at_checkpoint_boundary();
+        test_pr64_off_by_one_boundary_siblings();
         test_pr64_concurrent_header_arrival_at_boundary();
         test_pr64_parent_invalidation_after_acceptance();
     } catch (const std::exception& e) {

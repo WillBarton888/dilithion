@@ -126,30 +126,28 @@ bool ChainSelectorAdapter::ProcessNewHeader(const CBlockHeader& header)
         return true;
     }
 
-    // Phase 6 PR6.1 (v1.5 §3.2 + Cursor CONCERN 1): mapBlockIndex cap.
-    // Fail-closed when at cap — REJECT new pre-validation header rather
-    // than evict an existing entry. Rationale per KISS + world-class:
-    //   * Eviction risks use-after-free (chain_selector may hold pointers
-    //     into mapBlockIndex via m_setBlockIndexCandidates).
-    //   * Fail-closed under sustained attack matches Bitcoin Core's
-    //     "drop misbehaving peer" pattern; the rate-limit in HeadersManager
-    //     bounds aggregate growth.
-    //   * Cap is sized for one-week-worth of attacker headers at max
-    //     sustained rate — exceeding it means we're under attack, not
-    //     legitimate IBD.
-    // If telemetry ever shows legitimate headers being rejected, upgrade
-    // to lowest-work-orphan eviction (v1.5 §3.2 alternate policy).
+    // Phase 6 PR6.1 (v1.5 §3.2 + Cursor v1.5+ A1): mapBlockIndex cap with
+    // eviction-by-lowest-work-not-on-best-chain. Per v1.5 contract:
+    // when cap is reached, evict the lowest-work entry that is NOT an
+    // ancestor of the active chain. This makes room for the new header
+    // without rejecting it.
     //
-    // mapBlockIndex is a public field of CChainState protected by cs_main
-    // (recursive_mutex per chain.h:87). The size() read is racy without the
-    // lock, but: (a) cap is sized for sustained-attack-rate, race-window
-    // overshoot is irrelevant; (b) AddBlockIndex below acquires cs_main
-    // properly. Reading size() here is a hot-path optimization; the
-    // ground-truth check is at AddBlockIndex.
+    // Eviction safety: CChainState::EvictLowestWorkNotOnBestChain holds
+    // cs_main and removes the evicted entry from m_setBlockIndexCandidates
+    // before erasing it from mapBlockIndex (no UAF on chain_selector
+    // pointers).
+    //
+    // Fail-closed fallback: at extreme cap saturation where ALL entries
+    // are on the active chain (cap < active chain height — unreachable
+    // at production sizes: DIL=500K cap vs ~24K chain height), eviction
+    // returns false and we reject the new header. This is a safety net
+    // for misconfigured caps, not the primary path.
     if (Dilithion::g_chainParams) {
         const int cap = Dilithion::g_chainParams->nMapBlockIndexCap;
         if (cap > 0 && m_chainstate.GetBlockIndexSize() >= static_cast<size_t>(cap)) {
-            return false;
+            if (!m_chainstate.EvictLowestWorkNotOnBestChain()) {
+                return false;
+            }
         }
     }
 

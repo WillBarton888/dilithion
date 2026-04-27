@@ -168,7 +168,21 @@ public:
     // rate. DIL (240s blocks): 500K = ~14 weeks at 1 header/sec attack.
     // DilV (60s blocks): 5M ≈ same window scaled to faster blocks.
     // Regtest: 1000 (small enough to test cap-saturation in unit tests).
-    int nMapBlockIndexCap;
+    // Default-init to 0 = "no cap" — chain_selector treats cap<=0 as
+    // disabled (per `if (cap > 0 && ...)` guard in ProcessNewHeader).
+    // Subagent v1.5+ MINOR fix: prevent UB if ChainParams ever
+    // default-constructed without going through a factory.
+    int nMapBlockIndexCap{0};
+
+    // Phase 6 PR6.1 (v1.5 §4 PR6.1 + Cursor v1.5+ per-spec fix B1):
+    // per-peer header rate limit. Prior implementation hardcoded these
+    // constants in headers_manager.h. SSOT discipline + per-chain
+    // tunability says they belong here. Defaults match the prior
+    // hardcoded values (1000 headers / 60s window) so behavior is
+    // unchanged across DIL/Testnet/DilV/Regtest unless a factory
+    // overrides.
+    int nHeaderRateWindowSec{60};
+    int nHeaderRateLimitPerWindow{1000};
 
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)

@@ -754,19 +754,20 @@ private:
     std::map<uint256, int64_t> m_chainTipsLastSeen;
 
     // Phase 6 PR6.1 (v1.5 §4 PR6.1): per-peer header rate limit.
-    // Sliding 60-second window tracking pre-validation headers received
-    // per peer. Caps an attacker from filling chain_selector's
-    // mapBlockIndex (capped at 500K for DIL / 5M for DilV) faster than
-    // a sustainable rate. At 1000 headers/min/peer (default), filling
-    // the DIL cap takes ~8.3 hours from one peer — plenty of time for
-    // peer-misbehavior detection to fire.
+    // Sliding window tracking pre-validation headers received per peer.
+    // Caps an attacker from filling chain_selector's mapBlockIndex
+    // (capped at 500K for DIL / 5M for DilV) faster than a sustainable
+    // rate.
+    //
+    // Window + limit live in chainparams (Cursor v1.5+ per-spec fix B1):
+    //   * ChainParams.nHeaderRateWindowSec       (default 60)
+    //   * ChainParams.nHeaderRateLimitPerWindow  (default 1000)
+    // SSOT: per-chain tunable, no longer hardcoded here.
     struct PeerHeaderRate {
         int64_t window_start_unix_sec = 0;
         int     headers_in_window      = 0;
     };
     std::map<NodeId, PeerHeaderRate> m_peerHeaderRate;
-    static constexpr int    HEADER_RATE_WINDOW_SEC          = 60;
-    static constexpr int    HEADER_RATE_LIMIT_PER_WINDOW    = 1000;
 
     // Returns true if peer is within rate limit (header batch may proceed).
     // Returns false if peer has exceeded the rate limit; caller MUST drop

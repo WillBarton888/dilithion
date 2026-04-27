@@ -196,13 +196,15 @@ void test_pr61_rejected_parent_flood_does_not_grow_mapBlockIndex()
 }
 
 // ============================================================================
-// Test 5 — Cap-saturation: fail-closed when mapBlockIndex hits the cap.
-// Sets a small cap via chainparams; floods headers; verifies cap-reached
-// causes ProcessNewHeader to return false WITHOUT eviction (no UAF risk).
+// Test 5 — Cap-saturation with eviction (v1.5+ A1 update).
+// Sets a small cap via chainparams; floods headers beyond cap; verifies
+// (a) ProcessNewHeader continues to accept new headers via eviction,
+// (b) mapBlockIndex stays at cap, (c) the active chain (best-work) is
+// never evicted. Replaces the prior fail-closed test design.
 // ============================================================================
-void test_pr61_cap_saturation_fails_closed()
+void test_pr61_cap_saturation_evicts_lowest_work_not_on_best_chain()
 {
-    std::cout << "  test_pr61_cap_saturation_fails_closed..." << std::flush;
+    std::cout << "  test_pr61_cap_saturation_evicts_lowest_work_not_on_best_chain..." << std::flush;
 
     // Set a small cap via Regtest chainparams (cap=1000).
     static Dilithion::ChainParams regtest_params = Dilithion::ChainParams::Regtest();
@@ -212,14 +214,23 @@ void test_pr61_cap_saturation_fails_closed()
     CChainState chainstate;
     ::dilithion::consensus::port::ChainSelectorAdapter adapter(chainstate);
 
-    // Build a long valid chain. Cap should kick in around entry #1000.
+    // Build a long valid chain. Cap kicks in around entry #1000 and
+    // eviction makes room for each subsequent header.
     uint256 null_hash;
     std::memset(null_hash.data, 0, 32);
     auto genesis = MakeHeader(null_hash, 0x1d00ffff, 1700000000, 0);
     assert(adapter.ProcessNewHeader(genesis));
 
+    // Seed pindexTip via SetTip so eviction's "active chain" walk has a
+    // basis. Without this, all entries are non-active-chain and eviction
+    // happily evicts even high-work entries; we want to verify the
+    // active-chain protection.
+    CBlockIndex* genesis_idx = chainstate.GetBlockIndex(genesis.GetHash());
+    assert(genesis_idx != nullptr);
+    chainstate.SetTip(genesis_idx);
+
     uint256 prev_hash = genesis.GetHash();
-    int accepted = 1;  // genesis already counted
+    int accepted = 1;
     int rejected = 0;
     for (int i = 1; i <= 1500; ++i) {
         auto h = MakeHeader(prev_hash, 0x1d00ffff, 1700000000 + i, static_cast<uint8_t>(i & 0xFF));
@@ -232,21 +243,28 @@ void test_pr61_cap_saturation_fails_closed()
         }
     }
 
-    // Cap is 1000 in regtest. ProcessNewHeader should fail-closed at cap.
-    // Allow some slack for race-window-overshoot per the implementation's
-    // documented hot-path optimization (the size() read isn't strictly
-    // synchronous with the AddBlockIndex below it).
-    assert(accepted <= 1000 + 5);
-    assert(rejected >= 500 - 5);
-    // Ground-truth: mapBlockIndex never exceeds cap by more than the
-    // race-window. The exact size depends on race-timing; just assert it
-    // didn't grow unbounded.
-    assert(chainstate.GetBlockIndexSize() <= 1000 + 5);
+    // Cap=1000. Under eviction policy: all 1500 should be accepted (each
+    // over-cap insert evicts the lowest-work non-active-chain entry).
+    // The active-chain protection means genesis (only entry on active
+    // chain via SetTip above) survives.
+    // Final mapBlockIndex.size() should equal cap.
+    const size_t final_size = chainstate.GetBlockIndexSize();
+    assert(final_size == 1000);
+
+    // Genesis (active chain) MUST still be in the index.
+    assert(chainstate.GetBlockIndex(genesis.GetHash()) != nullptr);
+
+    // All 1500 inserts should have succeeded under eviction (none rejected).
+    // If eviction ever returned false (everything-on-active-chain edge case),
+    // some would be rejected. With genesis as the only active-chain entry,
+    // 999 non-active entries exist at cap and eviction always finds a target.
+    assert(accepted == 1501);  // genesis + 1500
+    assert(rejected == 0);
 
     Dilithion::g_chainParams = prev_chainparams;
 
     std::cout << " OK (accepted=" << accepted << " rejected=" << rejected
-              << " final size=" << chainstate.GetBlockIndexSize() << ")\n";
+              << " final size=" << final_size << " — eviction working)\n";
 }
 
 // ============================================================================
@@ -260,7 +278,7 @@ int main()
         test_pr61_idempotency_same_header_no_duplicate();
         test_pr61_orphan_header_rejected();
         test_pr61_rejected_parent_flood_does_not_grow_mapBlockIndex();
-        test_pr61_cap_saturation_fails_closed();
+        test_pr61_cap_saturation_evicts_lowest_work_not_on_best_chain();
     } catch (const std::exception& e) {
         std::cerr << "\nFAILED: " << e.what() << "\n";
         return 1;
