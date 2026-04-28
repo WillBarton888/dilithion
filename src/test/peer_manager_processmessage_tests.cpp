@@ -3,6 +3,14 @@
 //
 // Phase 6 PR6.5b.2 — ProcessMessage dispatch + version/verack/ping/pong tests.
 //
+// PR6.5b.3 IN-PLACE UPDATE: the deferred-handlers-still-stubbed pin
+// previously asserted 4 commands {headers, block, getdata, inv} routed to
+// UnknownMessage. PR6.5b.3 releases `headers` from the pin (it now has a
+// real handler delegating to CHeadersManager). The remaining 3 deferred
+// commands (block, getdata, inv) stay pinned for PR6.5b.4. Per contract
+// "in-place pinned-test regression authorized by this PR" — total stubbed
+// route count drops from 4 to 3; total test cases stay at 9.
+//
 // Per active_contract.md "Acceptance criteria" + decomposition §"PR6.5b.2",
 // this 9-case suite verifies:
 //   1. dispatch-table-version            — version handler populates nVersion /
@@ -23,10 +31,13 @@
 //                                          disconnect).
 //   8. double-version-misbehavior        — second version on same peer returns
 //                                          false + DuplicateVersion tick once.
-//   9. deferred-handlers-still-stubbed   — headers/block/getdata/inv all return
-//                                          false and route to UnknownMessage,
+//   9. deferred-handlers-still-stubbed   — block/getdata/inv all return false
+//                                          and route to UnknownMessage,
 //                                          pinning current behavior so a
-//                                          regression in PR6.5b.3 is loud.
+//                                          regression in PR6.5b.4 is loud.
+//                                          (PR6.5b.3 released `headers` from
+//                                          this pin — it now has a real
+//                                          handler.)
 //
 // Test pattern: void test_*() functions + custom main(). No Boost framework.
 // IPeerScorer test stub records every call so assertions can verify both the
@@ -405,10 +416,12 @@ void test_double_version_misbehavior()
 }
 
 // ============================================================================
-// Test 9 — deferred-handlers-still-stubbed: headers/block/getdata/inv each
-// return false and route through UnknownMessage. PR6.5b.3 will replace
-// these with real handlers; this test pins the current stub-routes-to-
-// unknown behavior so a regression in 6b.3 surfaces loudly.
+// Test 9 — deferred-handlers-still-stubbed: block/getdata/inv each return
+// false and route through UnknownMessage. PR6.5b.3 released `headers` from
+// this pin (it now has a real handler delegating to CHeadersManager).
+// PR6.5b.4 will replace block/getdata/inv with real handlers; this test
+// pins the current stub-routes-to-unknown behavior so a regression in
+// 6b.4 surfaces loudly.
 // ============================================================================
 void test_deferred_handlers_still_stubbed()
 {
@@ -418,7 +431,7 @@ void test_deferred_handlers_still_stubbed()
     fix.pm.OnPeerConnected(kPeerId);
 
     const std::vector<std::string> deferred_cmds = {
-        "headers", "block", "getdata", "inv"
+        "block", "getdata", "inv"
     };
 
     for (const auto& cmd : deferred_cmds) {

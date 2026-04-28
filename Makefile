@@ -608,6 +608,16 @@ peer_manager_processmessage_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_processmessage_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.3: headers-sync delegation + GetHeadersSyncPeer body tests
+# (7 cases). Verifies the dispatch arm for `headers`, GetHeadersSyncPeer
+# happy/empty paths, sync-peer election by best known height, rotation on
+# stall, pool-exhausted safety valve, and the SSOT split between
+# CPeerManager (sync-peer election) and CHeadersManager (sync state).
+peer_manager_headers_sync_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_headers_sync_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_manager_headers_sync_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)

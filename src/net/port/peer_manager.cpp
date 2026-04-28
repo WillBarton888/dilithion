@@ -22,9 +22,12 @@
 #include <net/port/peer_manager.h>
 
 #include <consensus/ichain_selector.h>
+#include <core/node_context.h>
+#include <net/headers_manager.h>
 #include <net/ipeer_scorer.h>
 #include <net/serialize.h>
 
+#include <chrono>
 #include <ctime>
 #include <stdexcept>
 
@@ -60,8 +63,12 @@ bool CPeerManager::IsSynced() const {
 }
 
 int CPeerManager::GetHeadersSyncPeer() const {
-    // STUB: -1 sentinel = "no peer selected".
-    return -1;
+    // PR6.5b.3: return the currently-elected sync-peer NodeId, or -1 if
+    // none. CPeerManager is authoritative for "is this peer the chosen
+    // sync-peer." (CHeadersManager remains authoritative for "have I
+    // started syncing from this peer" — SSOT split per decomposition.)
+    std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+    return m_headers_sync_peer;
 }
 
 void CPeerManager::OnOrphanBlockReceived() {
@@ -74,9 +81,33 @@ void CPeerManager::OnBlockConnected() {
     // last-block-arrival timestamps in per-peer state.
 }
 
+// PR6.5b.3: Tick body — headers-sync stall detection + peer rotation.
+// Mirrors the (CheckHeadersSyncProgress → SwitchHeadersSyncPeer)
+// rhythm from CIbdCoordinator::Tick. IsIBD/IsSynced + RequestNextBlocks
+// dispatch + outbound message issuance remain stubbed (PR6.5b.4 / 6b.5 / 6b.6).
+//
+// SAFE: copy-state-out — every helper drops m_peers_mutex /
+// m_sync_state_mutex before any callout. No m_connman / outbound
+// network primitive is invoked here (PR6.5b.6 owns that path).
 void CPeerManager::Tick() {
-    // STUB: no-op. PR6.5b body will run sync-peer rotation, stall
-    // detection, in-flight cleanup, and RequestNextBlocks dispatch.
+    NodeId current = -1;
+    {
+        std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+        current = m_headers_sync_peer;
+    }
+
+    if (current == -1) {
+        // No current sync-peer: try to elect one.
+        SelectHeadersSyncPeerLocked();
+        return;
+    }
+
+    // Have a current sync-peer: check progress; rotate (with penalize=true)
+    // on stall.
+    const bool progressing = CheckHeadersSyncProgressLocked();
+    if (!progressing) {
+        SwitchHeadersSyncPeerLocked(/*penalize=*/true);
+    }
 }
 
 // ===== PeerManager-specific API =====
@@ -115,6 +146,8 @@ bool CPeerManager::ProcessMessage(NodeId peer,
             return HandlePing(peer, vRecv);
         } else if (strCommand == "pong") {
             return HandlePong(peer, vRecv);
+        } else if (strCommand == "headers") {
+            return HandleHeaders(peer, vRecv);
         }
     } catch (const std::exception&) {
         // Malformed message — scorer tick on UnknownMessage weight=1, then
@@ -241,6 +274,318 @@ bool CPeerManager::HandlePong(NodeId peer, CDataStream& vRecv) {
     return true;
 }
 
+// PR6.5b.3: headers handler. Deserializes the wire-format header vector
+// (matches CNetMessageProcessor::ProcessHeadersMessage in net.cpp:1529),
+// delegates to CHeadersManager::ProcessHeadersWithDoSProtection via the
+// g_node_context.headers_manager raw-pointer pattern locked in PR6.5b.0
+// (5-param constructor stays frozen), then updates per-peer
+// BlockDownloadState::n_best_known_height to the height implied by the
+// last header in the batch (best-effort tip tracking; CHeadersManager
+// remains authoritative for actual sync-state).
+//
+// Returns:
+//   * true on a structurally-valid header vector (regardless of whether
+//     CHeadersManager::ProcessHeadersWithDoSProtection returns true or
+//     false — handler success means "we delegated").
+//   * false if g_node_context.headers_manager is null (delegate not
+//     available — node-side configuration issue, NOT peer misbehavior;
+//     does NOT score the peer).
+//   * false (via ProcessMessage's try/catch) on under-length read
+//     (CDataStream throws → caught by ProcessMessage → routes to
+//     UnknownMessage weight=1).
+//
+// SAFE: copy-state-out — m_peers_mutex / m_sync_state_mutex are NEVER
+// held across the g_node_context.headers_manager callout. Per-peer
+// n_best_known_height mutation happens in a separate scoped lock AFTER
+// the delegate call returns.
+bool CPeerManager::HandleHeaders(NodeId peer, CDataStream& vRecv) {
+    // Read header count (compact-size). Throws on under-length —
+    // ProcessMessage's try/catch routes throw to UnknownMessage weight=1.
+    const uint64_t header_count = vRecv.ReadCompactSize();
+
+    // Bound header count at upstream Bitcoin Core's MAX_HEADERS_RESULTS
+    // (2000). This guards against pre-allocation DoS before the real
+    // CHeadersManager::ProcessHeadersWithDoSProtection two-phase guard
+    // kicks in. Mirrors net.cpp:1571 cap.
+    if (header_count > 2000) {
+        // Throw rather than reach for a new MisbehaviorType enum value
+        // (interface bump deferred). ProcessMessage's catch then ticks
+        // UnknownMessage. Functionally equivalent for this PR — the real
+        // misbehavior path comes online with PR6.5b.6.
+        throw std::runtime_error("HEADERS count exceeds MAX_HEADERS_RESULTS");
+    }
+
+    std::vector<CBlockHeader> headers;
+    headers.reserve(header_count);
+    for (uint64_t i = 0; i < header_count; ++i) {
+        CBlockHeader header;
+        header.nVersion      = vRecv.ReadInt32();
+        header.hashPrevBlock = vRecv.ReadUint256();
+        header.hashMerkleRoot = vRecv.ReadUint256();
+        header.nTime         = vRecv.ReadUint32();
+        header.nBits         = vRecv.ReadUint32();
+        header.nNonce        = vRecv.ReadUint32();
+
+        // VDF extension fields (version >= 4). Mirrors net.cpp:1597.
+        if (header.IsVDFBlock()) {
+            header.vdfOutput     = vRecv.ReadUint256();
+            header.vdfProofHash  = vRecv.ReadUint256();
+        }
+
+        // Skip transaction count (headers message has 0 txs per header).
+        // Throws on under-length — caught upstream.
+        const uint64_t tx_count = vRecv.ReadCompactSize();
+        if (tx_count != 0) {
+            throw std::runtime_error("HEADERS message with tx_count != 0");
+        }
+
+        headers.push_back(header);
+    }
+
+    // SAFE: copy-state-out — no peers_mutex / sync_state_mutex held here.
+    // Null-check g_node_context.headers_manager before dereference. Null is
+    // a node-side configuration issue, not peer misbehavior; return false
+    // without scoring.
+    CHeadersManager* hdr_mgr = g_node_context.headers_manager.get();
+    if (hdr_mgr == nullptr) {
+        return false;
+    }
+
+    // Delegate to CHeadersManager — SSOT for header sync state.
+    // ProcessHeadersWithDoSProtection's return value (true/false) is
+    // CHeadersManager's signal about delegation outcome; per contract,
+    // HandleHeaders ALWAYS returns true on a structurally-valid vector
+    // (delegated successfully), regardless of CHeadersManager's verdict.
+    // CHeadersManager reports its own misbehavior via existing legacy
+    // paths (peer_manager.cpp:6 of legacy peers.cpp).
+    (void)hdr_mgr->ProcessHeadersWithDoSProtection(peer, headers);
+
+    // PR6.5b.3 best-effort tip tracking: update per-peer
+    // n_best_known_height to the height implied by the highest header
+    // in the batch. CHeadersManager already knows the canonical heights
+    // from validation; we use HeightForHash on the last header's
+    // hashPrevBlock + 1 as a best-effort estimate. If the lookup fails
+    // (parent unknown to CHeadersManager — happens during initial sync
+    // when batches arrive out of order), leave n_best_known_height
+    // unchanged.
+    //
+    // SAFE: copy-state-out — read tip estimate from hdr_mgr (no peers
+    // lock held), THEN take m_peers_mutex to mutate the per-peer state.
+    if (!headers.empty()) {
+        const CBlockHeader& tip = headers.back();
+        const int parent_height = hdr_mgr->GetHeightForHash(tip.hashPrevBlock);
+        if (parent_height >= 0) {
+            const int64_t implied_height = static_cast<int64_t>(parent_height) + 1;
+            std::lock_guard<std::mutex> lk(m_peers_mutex);
+            auto it = m_peers.find(peer);
+            if (it != m_peers.end()) {
+                CPeer& p = *it->second;
+                if (implied_height > p.m_block_download.n_best_known_height) {
+                    p.m_block_download.n_best_known_height = implied_height;
+                }
+            }
+        }
+    }
+
+    return true;
+}
+
+// PR6.5b.3 — port of CIbdCoordinator::SelectHeadersSyncPeer
+// (ibd_coordinator.cpp:2718-2803), adapted to per-peer
+// CPeer::m_is_chosen_sync_peer state. Selection criterion: highest
+// BlockDownloadState::n_best_known_height among peers not in
+// m_headers_bad_peers; pool-exhausted safety valve clears bad set if
+// every connected peer is excluded.
+//
+// SAFE: copy-state-out — peer state is read into local copies under
+// m_peers_mutex (drop), then m_sync_state_mutex (drop), then the
+// per-peer m_is_chosen_sync_peer flags are flipped under
+// m_peers_mutex again. No callout while either lock is held; the
+// g_node_context.headers_manager callout to seed last_height /
+// last_processed happens AFTER both locks drop.
+void CPeerManager::SelectHeadersSyncPeerLocked() {
+    // Step 1: snapshot peers under m_peers_mutex into local vector.
+    struct PeerSnapshot {
+        NodeId id;
+        int64_t known_height;
+    };
+    std::vector<PeerSnapshot> peer_snap;
+    {
+        std::lock_guard<std::mutex> lk(m_peers_mutex);
+        peer_snap.reserve(m_peers.size());
+        for (const auto& kv : m_peers) {
+            peer_snap.push_back(PeerSnapshot{kv.second->id,
+                                             kv.second->m_block_download.n_best_known_height});
+        }
+    }
+
+    if (peer_snap.empty()) {
+        // No peers to choose from: ensure no current selection.
+        std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+        m_headers_sync_peer = -1;
+        return;
+    }
+
+    // Step 2: choose under m_sync_state_mutex (using local peer snapshot).
+    NodeId chosen = -1;
+    int64_t best_height = 0;
+    bool cleared_bad = false;
+    {
+        std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+
+        for (const auto& ps : peer_snap) {
+            if (m_headers_bad_peers.count(ps.id) > 0) {
+                continue;
+            }
+            if (ps.known_height > best_height) {
+                best_height = ps.known_height;
+                chosen = ps.id;
+            }
+        }
+
+        // Pool-exhausted safety valve (mirrors ibd_coordinator.cpp:2763-2781):
+        // every connected peer is in m_headers_bad_peers — clear it once and
+        // retry to recover (observed on SGP during 2026-04-25 incident).
+        if (chosen == -1 && !m_headers_bad_peers.empty()) {
+            m_headers_bad_peers.clear();
+            m_headers_sync_peer_consecutive_stalls = 0;
+            cleared_bad = true;
+
+            for (const auto& ps : peer_snap) {
+                if (ps.known_height > best_height) {
+                    best_height = ps.known_height;
+                    chosen = ps.id;
+                }
+            }
+        }
+
+        // No peer has positive n_best_known_height: contract specifies -1
+        // (matches lifecycle test's "GetHeadersSyncPeer == -1 unchanged
+        // after connects with no headers received yet"). Upstream legacy
+        // had a peer->start_height fallback — that path is deferred to
+        // PR6.5b.6 SendMessages alongside outbound version-handshake
+        // height tracking.
+        m_headers_sync_peer = chosen;  // -1 if nothing eligible
+        m_headers_sync_peer_consecutive_stalls = 0;
+        (void)cleared_bad;  // reserved for future logging in 6b.6
+    }
+
+    // Step 3: callout to g_node_context.headers_manager OUTSIDE both locks
+    // to seed last_height / last_processed and compute timeout.
+    int seed_last_height = 0;
+    uint64_t seed_last_processed = 0;
+    if (CHeadersManager* hdr_mgr = g_node_context.headers_manager.get()) {
+        seed_last_height = hdr_mgr->GetBestHeight();
+        seed_last_processed = hdr_mgr->GetProcessedCount();
+    }
+
+    const int headers_missing = (best_height > static_cast<int64_t>(seed_last_height))
+        ? static_cast<int>(best_height - static_cast<int64_t>(seed_last_height))
+        : 0;
+    const int timeout_ms = HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000 +
+                           headers_missing * HEADERS_SYNC_TIMEOUT_PER_HEADER_MS;
+
+    // Step 4: under m_sync_state_mutex, store seeded fields + timeout.
+    {
+        std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+        m_headers_sync_last_height = seed_last_height;
+        m_headers_sync_last_processed = seed_last_processed;
+        m_headers_sync_timeout = std::chrono::steady_clock::now() +
+                                 std::chrono::milliseconds(timeout_ms);
+    }
+
+    // Step 5: under m_peers_mutex, set m_is_chosen_sync_peer on the
+    // elected peer and clear it on all others. KISS: full sweep is fine
+    // at the scale of inbound peer counts (~125 max, upstream slot cap).
+    {
+        std::lock_guard<std::mutex> lk(m_peers_mutex);
+        for (auto& kv : m_peers) {
+            kv.second->m_is_chosen_sync_peer = (kv.second->id == chosen);
+        }
+    }
+}
+
+// PR6.5b.3 — port of CIbdCoordinator::CheckHeadersSyncProgress
+// (ibd_coordinator.cpp:2805-2882). Returns true if making progress (or
+// no current sync-peer); false if current sync-peer has stalled past
+// its timeout. The caller (Tick) on `false` calls
+// SwitchHeadersSyncPeerLocked(/*penalize=*/true).
+//
+// SAFE: copy-state-out — current_height / current_processed are read
+// from g_node_context.headers_manager BEFORE m_sync_state_mutex is
+// taken. Inside the lock we only mutate state; nothing else.
+bool CPeerManager::CheckHeadersSyncProgressLocked() {
+    // Snapshot CHeadersManager state outside any lock.
+    int current_height = 0;
+    uint64_t current_processed = 0;
+    if (CHeadersManager* hdr_mgr = g_node_context.headers_manager.get()) {
+        current_height = hdr_mgr->GetBestHeight();
+        current_processed = hdr_mgr->GetProcessedCount();
+    }
+
+    const auto now = std::chrono::steady_clock::now();
+
+    std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+    if (m_headers_sync_peer == -1) {
+        return true;  // No current sync-peer: nothing to check.
+    }
+
+    // Progress check: validated header height advanced since last tick.
+    if (current_height > m_headers_sync_last_height) {
+        m_headers_sync_last_height = current_height;
+        // Extend the timeout (assume the peer keeps providing).
+        m_headers_sync_timeout = now +
+            std::chrono::milliseconds(HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000);
+        return true;
+    }
+
+    // Fork catch-up: processed count advanced even if best height didn't.
+    if (current_processed > m_headers_sync_last_processed) {
+        m_headers_sync_last_processed = current_processed;
+        m_headers_sync_timeout = now +
+            std::chrono::milliseconds(HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000);
+        return true;
+    }
+
+    // Timeout reached → stalled.
+    if (now > m_headers_sync_timeout) {
+        return false;
+    }
+
+    return true;
+}
+
+// PR6.5b.3 — port of CIbdCoordinator::SwitchHeadersSyncPeer
+// (ibd_coordinator.cpp:2884-2946). Increments stall counter (when
+// penalize=true), marks bad peer at MAX_HEADERS_CONSECUTIVE_STALLS,
+// then re-elects via SelectHeadersSyncPeerLocked. The outbound
+// GETHEADERS issuance / CHeadersManager::ClearPendingSync calls from
+// the legacy port are deferred to PR6.5b.6 (this PR MUST NOT issue
+// outbound network messages — see contract drift triggers).
+//
+// SAFE: copy-state-out — m_sync_state_mutex held only for state
+// mutation; SelectHeadersSyncPeerLocked re-acquires it internally.
+void CPeerManager::SwitchHeadersSyncPeerLocked(bool penalize) {
+    NodeId old_peer = -1;
+    {
+        std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+        old_peer = m_headers_sync_peer;
+
+        if (penalize && old_peer != -1) {
+            ++m_headers_sync_peer_consecutive_stalls;
+            if (m_headers_sync_peer_consecutive_stalls >= MAX_HEADERS_CONSECUTIVE_STALLS) {
+                m_headers_bad_peers.insert(old_peer);
+                m_headers_sync_peer_consecutive_stalls = 0;
+            }
+        }
+
+        m_headers_sync_peer = -1;  // Force reselection.
+    }
+
+    // Re-elect (drops/reacquires m_sync_state_mutex internally).
+    SelectHeadersSyncPeerLocked();
+}
+
 void CPeerManager::SendMessages(NodeId /*peer*/) {
     // STUB: no-op. Body work in PR6.5b.
 }
@@ -273,8 +618,25 @@ void CPeerManager::OnPeerConnected(NodeId peer) {
 }
 
 void CPeerManager::OnPeerDisconnected(NodeId peer) {
-    std::lock_guard<std::mutex> lk(m_peers_mutex);
-    m_peers.erase(peer);
+    {
+        std::lock_guard<std::mutex> lk(m_peers_mutex);
+        m_peers.erase(peer);
+    }
+
+    // PR6.5b.3: drop disconnecting peer from sync-state. If the peer was
+    // the current sync-peer, clear m_headers_sync_peer to -1 so the next
+    // Tick re-elects. Also remove the NodeId from m_headers_bad_peers so
+    // a future reconnection isn't permanently excluded.
+    //
+    // SAFE: copy-state-out — no callout under m_sync_state_mutex.
+    {
+        std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+        m_headers_bad_peers.erase(peer);
+        if (m_headers_sync_peer == peer) {
+            m_headers_sync_peer = -1;
+            m_headers_sync_peer_consecutive_stalls = 0;
+        }
+    }
 }
 
 }  // namespace port
