@@ -70,6 +70,21 @@ struct CPeer {
     bool m_is_block_relay_only = false;
     bool m_is_chosen_sync_peer = false;
 
+    // Handshake state (set by version/verack handlers in PR6.5b.2).
+    // m_handshake_complete is set by the verack handler; mirrors upstream's
+    // "fSuccessfullyConnected" flag.
+    bool m_handshake_complete = false;
+
+    // Ping/pong tracking (set by ping/pong handlers in PR6.5b.2).
+    // m_last_ping_nonce_recvd holds the nonce from the last received ping so
+    // PR6.5b.6 SendMessages can produce the pong reply. m_pong_expected /
+    // m_pong_expected_nonce track an outstanding outbound ping (set by
+    // PR6.5b.6's ping issuance; cleared by the pong handler on a matching
+    // nonce). With a wrong/unexpected nonce, the pong handler ticks scorer.
+    uint64_t m_last_ping_nonce_recvd = 0;
+    bool     m_pong_expected = false;
+    uint64_t m_pong_expected_nonce = 0;
+
     // Dilithion-native: DNA envelope handling (Phase 1.5 SMP1).
     bool m_dna_envelope_seen = false;
 

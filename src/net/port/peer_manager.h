@@ -109,6 +109,18 @@ public:
     void OnPeerDisconnected(NodeId peer);
 
 private:
+    // ===== ProcessMessage handlers (PR6.5b.2) =====
+    //
+    // Each handler follows the copy-state-out pattern: lock m_peers_mutex →
+    // look up CPeer* → mutate fields under lock → drop lock → call out
+    // (e.g., m_scorer). Under-length deserialization throws from CDataStream;
+    // ProcessMessage's dispatch wraps every handler in a try/catch and routes
+    // throws to the malformed-message scorer tick path.
+    bool HandleVersion(NodeId peer, CDataStream& vRecv);
+    bool HandleVerack(NodeId peer, CDataStream& vRecv);
+    bool HandlePing(NodeId peer, CDataStream& vRecv);
+    bool HandlePong(NodeId peer, CDataStream& vRecv);
+
     // ===== Lock-order discipline (v1.5 §2.1.1 rule 5; Option B) =====
     //
     // Partial order:  connman_peer_lock < m_peers_mutex

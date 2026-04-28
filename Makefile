@@ -598,6 +598,16 @@ peer_manager_dual_dispatch_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_d
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_dual_dispatch_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.2: ProcessMessage dispatch tests (9 cases). Verifies the
+# version/verack/ping/pong handler bodies, dispatch-chain semantics for
+# unknown commands and unknown peer ids, double-version misbehavior, and
+# pins the current "deferred handlers route to UnknownMessage" stub
+# behavior (so a regression in PR6.5b.3 / 6b.4 surfaces loudly).
+peer_manager_processmessage_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_processmessage_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_manager_processmessage_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
