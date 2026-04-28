@@ -13,6 +13,7 @@
 #include <net/protocol.h>
 #include <net/serialize.h>
 #include <net/banman.h>  // For MisbehaviorType
+#include <net/port/peer_manager.h>  // Phase 6 PR6.5b.1b: dual-dispatch hook target
 #include <core/chainparams.h>  // Phase 4: per-chain outbound class targets
 #include <util/time.h>
 #include <util/logging.h>
@@ -54,6 +55,56 @@ static std::atomic<int> g_blocks_worker_received{0};  // Step 5: Popped by Block
 static std::atomic<int> g_blocks_processed{0};        // Step 6: ProcessQueuedMessage returned
 
 CConnman::CConnman() = default;
+
+// =============================================================================
+// Phase 6 PR6.5b.1b — Centralized peer-event dispatch helpers.
+//
+// SAFE: dual-dispatch — legacy m_peer_manager keeps CNode map populated for 15
+// dependent connman query sites (GetAllPeers, GetPeer, EvictPeersIfNeeded,
+// Misbehaving, IsBanned, GetSeedNodes, SelectAddressesToConnect,
+// MarkAddressTried, RemoveNode). Port m_port_peer_manager tracks
+// ISyncCoordinator state independently. No state synchronization between the
+// two — they answer different questions. See post-1a dual-dispatch amendment
+// in .claude/contracts/port_phase_6_5b_decomposition.md "Why dual-dispatch"
+// for the full rationale.
+//
+// Sequential-not-nested: legacy call returns FIRST, then port. No port
+// invocation while legacy lock held. Port handlers must NOT call back into
+// connman APIs that take cs_vNodes (per §2.1.1 lock-order partial order:
+// connman_peer_lock < m_peers_mutex).
+//
+// Dispatch key: m_port_peer_manager != nullptr. Connman doesn't know about
+// --usenewpeerman; node startup registers (and on shutdown deregisters) the
+// port pointer via RegisterPortPeerManager().
+// =============================================================================
+bool CConnman::DispatchPeerConnected(int node_id, CNode* pnode,
+                                     const NetProtocol::CAddress& addr, bool inbound)
+{
+    // Legacy first. Returns false on banned-IP rejection; we surface that to
+    // callers (matches pre-1b behavior). Port is NOT invoked on legacy failure.
+    if (!m_peer_manager) return true;  // tolerated null in tests
+    const bool legacy_ok = m_peer_manager->RegisterNode(node_id, pnode, addr, inbound);
+    if (!legacy_ok) return false;
+
+    // Port dispatch under flag=1 (m_port_peer_manager set by node startup).
+    // Inert under flag=0 (pointer null).
+    if (m_port_peer_manager) {
+        m_port_peer_manager->OnPeerConnected(node_id);
+    }
+    return true;
+}
+
+void CConnman::DispatchPeerDisconnected(int node_id)
+{
+    // Legacy first. Tolerate null m_peer_manager (used in some test paths).
+    if (m_peer_manager) {
+        m_peer_manager->OnPeerDisconnected(node_id);
+    }
+    // Port dispatch under flag=1 (m_port_peer_manager set by node startup).
+    if (m_port_peer_manager) {
+        m_port_peer_manager->OnPeerDisconnected(node_id);
+    }
+}
 
 CConnman::~CConnman() {
     Interrupt();
@@ -397,7 +448,7 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr, bool manual,
         pnode->SetSocket(static_cast<int>(sock));
         pnode->state.store(CNode::STATE_CONNECTING);
 
-        if (!m_peer_manager->RegisterNode(node_id, pnode, addr, false)) {
+        if (!DispatchPeerConnected(node_id, pnode, addr, false)) {
             LogPrintf(NET, WARN, "[CConnman] Not connecting to banned IP %s\n", ip_str.c_str());
             // node destructor closes socket
             return nullptr;
@@ -533,7 +584,7 @@ bool CConnman::AcceptConnection(std::unique_ptr<CSocket> socket, const NetProtoc
         std::lock_guard<std::mutex> lock(cs_vNodes);
         // FIX: Register BEFORE adding to m_nodes to prevent race condition
         // BUG #148 ROOT CAUSE FIX: Check return value (banned IP check)
-        if (!m_peer_manager->RegisterNode(node_id, pnode, addr, true)) {
+        if (!DispatchPeerConnected(node_id, pnode, addr, true)) {
             LogPrintf(NET, WARN, "[CConnman] Rejecting banned inbound from %s\n", ip_str.c_str());
             // node destructor closes socket
             return false;
@@ -1252,7 +1303,7 @@ void CConnman::SocketHandler() {
                 // BUG #148 ROOT CAUSE FIX: Check return value!
                 // If RegisterNode returns false (banned IP), do NOT add to m_nodes
                 // Otherwise GetNode() will return nullptr during handshake
-                if (!m_peer_manager->RegisterNode(node_id, pnode, addr, true)) {
+                if (!DispatchPeerConnected(node_id, pnode, addr, true)) {
                     LogPrintf(NET, WARN, "[CConnman] Rejecting banned inbound from %s\n", ip_str);
                     // Node destructor will close socket
                     continue;  // Skip to next pending connection
@@ -1668,12 +1719,14 @@ void CConnman::DisconnectNodes() {
                 // to exist in the peers map to clean up mapBlocksInFlight entries.
                 // If RemoveNode is called first, GetAndClearPeerBlocks bails early
                 // and mapBlocksInFlight entries are never cleaned up = memory leak.
-                if (m_peer_manager) {
-                    m_peer_manager->OnPeerDisconnected(node_id);
-                }
+                // Phase 6 PR6.5b.1b: dual-dispatch (legacy OnPeerDisconnected +
+                // port OnPeerDisconnected via DispatchPeerDisconnected helper).
+                DispatchPeerDisconnected(node_id);
 
                 // BUG #153 FIX: Remove from CPeerManager BEFORE destroying CNode
-                // This ensures node_refs is cleared while CNode still exists
+                // This ensures node_refs is cleared while CNode still exists.
+                // Legacy-only — port-CPeerManager doesn't have a RemoveNode
+                // analogue; OnPeerDisconnected above already cleared port state.
                 if (m_peer_manager) {
                     m_peer_manager->RemoveNode(node_id);
                 }

@@ -589,6 +589,15 @@ peer_manager_lifecycle_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_lifec
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_lifecycle_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.1b: dual-dispatch tests (3 cases). Lifecycle-A asserts BOTH
+# legacy + port observe peer events under flag=1; Lifecycle-B asserts port
+# is NOT invoked under flag=0; Drift-Watch asserts ProcessMessage routing
+# stays legacy-only (port stub doesn't get accidentally hit).
+peer_manager_dual_dispatch_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_dual_dispatch_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_manager_dual_dispatch_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)

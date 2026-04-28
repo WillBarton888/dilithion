@@ -213,6 +213,14 @@ void NodeContext::Shutdown() {
     }
 
 
+    // Phase 6 PR6.5b.1b: deregister port-CPeerManager from connman BEFORE the
+    // sync_coordinator (which may own port-CPeerManager under flag=1) gets
+    // destroyed. Avoids dangling raw ptr in connman if a peer event fires
+    // during teardown. Connman's setter accepts nullptr to deregister.
+    if (connman) {
+        connman->RegisterPortPeerManager(nullptr);
+    }
+
     // Phase 6 PR6.5b.0: reset CConnmanAdapter BEFORE connman because the
     // adapter holds a non-owning CConnman& reference. Resetting addrman /
     // peer_scorer here too — they don't depend on connman, but grouping with
@@ -281,6 +289,12 @@ void NodeContext::Reset() {
     // Phase 5: reset selector BEFORE clearing chainstate.
     chain_selector.reset();
     chainstate = nullptr;
+    // Phase 6 PR6.5b.1b: deregister port-CPeerManager from connman before any
+    // teardown (mirrors Shutdown). sync_coordinator (which may own port-pm)
+    // gets destructed by NodeContext destructor / member destruction order.
+    if (connman) {
+        connman->RegisterPortPeerManager(nullptr);
+    }
     // Phase 6 PR6.5b.0: reset adapter/instances BEFORE peer_manager/connman.
     connman_adapter.reset();
     addrman.reset();

@@ -6915,14 +6915,34 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 (void*)Dilithion::g_chainParams);
         }
         if (use_port_pm) {
-            g_node_context.sync_coordinator = std::make_unique<dilithion::net::port::CPeerManager>(
+            auto port_pm = std::make_unique<dilithion::net::port::CPeerManager>(
                 *g_node_context.connman_adapter,
                 *g_node_context.addrman,
                 *g_node_context.peer_scorer,
                 *g_node_context.chain_selector,
                 *Dilithion::g_chainParams);
+
+            // Phase 6 PR6.5b.1b: register port-CPeerManager on connman for
+            // dual-dispatch of peer-events (legacy + port both see connect /
+            // disconnect under flag=1; legacy-only under flag=0). Per
+            // post-1a dual-dispatch amendment 2026-04-28 in
+            // .claude/contracts/port_phase_6_5b_decomposition.md.
+            //
+            // NOTE on registration ordering: connman.Start() runs earlier in
+            // main() (~line 5481) than this construction site. A small window
+            // exists between Start() and this registration where peer events
+            // go to legacy ONLY. Acceptable for flag=1 developer-only scope;
+            // if the window matters operationally, PR6.5b.5+ may move port-pm
+            // construction earlier. Contract registration-ordering ("BEFORE
+            // Start()") is honored in spirit (no peers expected to connect
+            // in the window) but not literal under current main() layout.
+            if (g_node_context.connman) {
+                g_node_context.connman->RegisterPortPeerManager(port_pm.get());
+            }
+            g_node_context.sync_coordinator = std::move(port_pm);
             LogPrintf(NET, INFO,
-                "Phase 6 PR6.5b.1a: sync_coordinator backed by port-CPeerManager (--usenewpeerman=1)");
+                "Phase 6 PR6.5b.1a/1b: sync_coordinator backed by port-CPeerManager "
+                "(--usenewpeerman=1); registered on connman for dual-dispatch");
         } else {
             g_node_context.sync_coordinator =
                 std::make_unique<dilithion::net::port::CIbdCoordinatorAdapter>(ibd_coordinator);

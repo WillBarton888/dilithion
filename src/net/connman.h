@@ -25,6 +25,12 @@
 class CPeerManager;
 class CNetMessageProcessor;
 
+// Phase 6 PR6.5b.1b: forward decl for port-namespace peer manager (dual-dispatch
+// hook target). Distinct from the legacy ::CPeerManager above.
+namespace dilithion::net::port {
+    class CPeerManager;
+}
+
 /**
  * Connection manager options
  */
@@ -423,6 +429,62 @@ private:
     CPeerManager* m_peer_manager = nullptr;
     CNetMessageProcessor* m_msg_processor = nullptr;
     MessageHandler m_msg_handler;
+
+    //
+    // Phase 6 PR6.5b.1b: dual-dispatch port-CPeerManager hook (LOCKED 2026-04-28
+    // post-1a dual-dispatch amendment in port_phase_6_5b_decomposition.md)
+    //
+    // Coexists with legacy m_peer_manager (above). Under --usenewpeerman=0
+    // (default), this field stays nullptr and only legacy sees connect/disconnect
+    // events — existing behavior unchanged. Under --usenewpeerman=1, node
+    // startup registers a non-null port-CPeerManager via RegisterPortPeerManager()
+    // BEFORE Start(); both legacy AND port see events thereafter (intentional
+    // dual-dispatch — legacy keeps CNode map for 15+ dependent connman queries;
+    // port tracks its own ISyncCoordinator state). Sequential-not-nested.
+    //
+    // Lifetime: non-owning. Caller (NodeContext) MUST deregister via
+    // RegisterPortPeerManager(nullptr) BEFORE destroying port-CPeerManager.
+    //
+    dilithion::net::port::CPeerManager* m_port_peer_manager = nullptr;
+
+public:
+    // Register / deregister port-CPeerManager for dual-dispatch of peer events.
+    // Pass nullptr to deregister (call before port instance is destroyed).
+    // Must be called BEFORE Start() if registering; the field is checked at
+    // every event-site dispatch so re-registration under load is technically
+    // safe but not load-tested in 1b.
+    void RegisterPortPeerManager(dilithion::net::port::CPeerManager* pm) {
+        m_port_peer_manager = pm;
+    }
+
+    // Test-only: set the legacy m_peer_manager pointer without going through
+    // Start(). Production code wires this via Start(peer_mgr, msg_proc, options).
+    // Phase 6 PR6.5b.1b dual-dispatch tests need legacy wired without spinning
+    // up sockets/threads. Restricted to test fixtures by convention.
+    void SetTestPeerManager(::CPeerManager& pm) {
+        m_peer_manager = &pm;
+    }
+
+public:
+    // Phase 6 PR6.5b.1b: centralized peer-event dispatch helpers. Each replaces
+    // inlined "legacy call + optional port call" pairs at the 4 connman event
+    // sites (RegisterNode at 400/536/1255 connect; OnPeerDisconnected at 1672).
+    // Centralization reduces "N comments in N sites" drift hazard and gives
+    // dual-validation a single audit point.
+    //
+    // PUBLIC for test access (lifecycle tests synthesize peer events without
+    // full socket I/O). Production callers are the 4 connman event sites only.
+    //
+    // SAFE: dual-dispatch — legacy keeps CNode map populated for GetAllPeers /
+    // GetPeer / EvictPeersIfNeeded / Misbehaving / IsBanned / GetSeedNodes /
+    // SelectAddressesToConnect / MarkAddressTried / RemoveNode (15 dependent
+    // sites in this file). Port tracks ISyncCoordinator state independently.
+    // No state synchronization between the two. See post-1a dual-dispatch
+    // amendment in .claude/contracts/port_phase_6_5b_decomposition.md for
+    // the full rationale.
+    bool DispatchPeerConnected(int node_id, CNode* pnode,
+                               const NetProtocol::CAddress& addr, bool inbound);
+    void DispatchPeerDisconnected(int node_id);
 };
 
 #endif // DILITHION_NET_CONNMAN_H

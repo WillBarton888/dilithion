@@ -6725,14 +6725,23 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 (void*)Dilithion::g_chainParams);
         }
         if (use_port_pm) {
-            g_node_context.sync_coordinator = std::make_unique<dilithion::net::port::CPeerManager>(
+            auto port_pm = std::make_unique<dilithion::net::port::CPeerManager>(
                 *g_node_context.connman_adapter,
                 *g_node_context.addrman,
                 *g_node_context.peer_scorer,
                 *g_node_context.chain_selector,
                 *Dilithion::g_chainParams);
+
+            // Phase 6 PR6.5b.1b: register port-CPeerManager on connman for
+            // dual-dispatch. See dilithion-node.cpp for the full note on
+            // registration-ordering vs connman.Start().
+            if (g_node_context.connman) {
+                g_node_context.connman->RegisterPortPeerManager(port_pm.get());
+            }
+            g_node_context.sync_coordinator = std::move(port_pm);
             LogPrintf(NET, INFO,
-                "Phase 6 PR6.5b.1a: sync_coordinator backed by port-CPeerManager (--usenewpeerman=1)");
+                "Phase 6 PR6.5b.1a/1b: sync_coordinator backed by port-CPeerManager "
+                "(--usenewpeerman=1); registered on connman for dual-dispatch");
         } else {
             g_node_context.sync_coordinator =
                 std::make_unique<dilithion::net::port::CIbdCoordinatorAdapter>(ibd_coordinator);
