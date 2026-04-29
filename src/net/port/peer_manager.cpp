@@ -32,11 +32,13 @@
 #include <net/protocol.h>
 #include <net/serialize.h>
 #include <primitives/block.h>
+#include <util/logging.h>
 
 #include <chrono>
 #include <ctime>
 #include <memory>
 #include <stdexcept>
+#include <utility>
 #include <vector>
 
 namespace dilithion {
@@ -59,15 +61,20 @@ CPeerManager::~CPeerManager() = default;
 
 // ===== ISyncCoordinator overrides =====
 
+// PR6.5b.5: real body. !m_synced. Atomic acquire-load so callers see
+// the latest Tick-side store. MUST NOT recurse through
+// m_chain_selector.IsInitialBlockDownload() — the chain-selector adapter
+// (chain_selector_impl.cpp:255-261) delegates back to
+// g_node_context.sync_coordinator which IS this CPeerManager under
+// flag=1. Direct atomic-bool read is the load-bearing pattern.
 bool CPeerManager::IsInitialBlockDownload() const {
-    // STUB: safe default = "yes, in IBD" so callers behave conservatively
-    // until the body lands.
-    return true;
+    return !m_synced.load(std::memory_order_acquire);
 }
 
+// PR6.5b.5: real body. m_synced acquire-load. Inverse of
+// IsInitialBlockDownload() at any single instant (same atomic).
 bool CPeerManager::IsSynced() const {
-    // STUB: safe default = "no, not synced".
-    return false;
+    return m_synced.load(std::memory_order_acquire);
 }
 
 int CPeerManager::GetHeadersSyncPeer() const {
@@ -89,15 +96,30 @@ void CPeerManager::OnBlockConnected() {
     // last-block-arrival timestamps in per-peer state.
 }
 
-// PR6.5b.3: Tick body — headers-sync stall detection + peer rotation.
-// Mirrors the (CheckHeadersSyncProgress → SwitchHeadersSyncPeer)
-// rhythm from CIbdCoordinator::Tick. IsIBD/IsSynced + RequestNextBlocks
-// dispatch + outbound message issuance remain stubbed (PR6.5b.4 / 6b.5 / 6b.6).
+// PR6.5b.3 + PR6.5b.5: Tick body. Call sequence (per PR6.5b.5 contract):
+//   (1) UpdateSyncStateLocked() — recompute m_synced from
+//       headers_manager->GetBestHeight() / chain_selector.GetActiveHeight()
+//       + handshake-complete gate. Always runs first so m_synced is fresh
+//       even when there is no current sync-peer.
+//   (2) Existing PR6.5b.3 headers-sync flow: SelectHeadersSyncPeerLocked
+//       (when no current sync-peer; early-exit) or
+//       CheckHeadersSyncProgressLocked → SwitchHeadersSyncPeerLocked
+//       (when current sync-peer present and stalled).
+//   (3) RetryStaleBlocksLocked() — sweep m_blocks_in_flight for stale
+//       entries and re-dispatch via RemoveBlockInFlight (no scorer
+//       dispatch — that's PR6.5b.6).
+//   (4) RequestNextBlocks() — only if NOT synced (when synced, no further
+//       block requests are issued).
 //
 // SAFE: copy-state-out — every helper drops m_peers_mutex /
 // m_sync_state_mutex before any callout. No m_connman / outbound
 // network primitive is invoked here (PR6.5b.6 owns that path).
 void CPeerManager::Tick() {
+    // (1) State update — runs before the early-exit so m_synced
+    // is updated even when there is no current sync-peer.
+    UpdateSyncStateLocked();
+
+    // (2) Existing PR6.5b.3 headers-sync flow.
     NodeId current = -1;
     {
         std::lock_guard<std::mutex> lk(m_sync_state_mutex);
@@ -105,16 +127,200 @@ void CPeerManager::Tick() {
     }
 
     if (current == -1) {
-        // No current sync-peer: try to elect one.
+        // No current sync-peer: try to elect one. Headers-sync flow
+        // returns here (matches PR6.5b.3 early-exit). Block-download
+        // sweep + dispatch still run below.
         SelectHeadersSyncPeerLocked();
-        return;
+    } else {
+        // Have a current sync-peer: check progress; rotate (with
+        // penalize=true) on stall.
+        const bool progressing = CheckHeadersSyncProgressLocked();
+        if (!progressing) {
+            SwitchHeadersSyncPeerLocked(/*penalize=*/true);
+        }
     }
 
-    // Have a current sync-peer: check progress; rotate (with penalize=true)
-    // on stall.
-    const bool progressing = CheckHeadersSyncProgressLocked();
-    if (!progressing) {
-        SwitchHeadersSyncPeerLocked(/*penalize=*/true);
+    // (3) Block-download stall sweep.
+    RetryStaleBlocksLocked();
+
+    // (4) Block-download dispatch — only when not synced. When synced,
+    // no further block requests are issued.
+    if (!m_synced.load(std::memory_order_acquire)) {
+        RequestNextBlocks();
+    }
+}
+
+// PR6.5b.5 — port of CIbdCoordinator::UpdateState (ibd_coordinator.cpp:359-422)
+// DOWN-SCOPED to the m_synced flip only (the IBDState enum is not ported —
+// that's CIbdCoordinator-internal). Hysteresis rule:
+//   * currently_synced && blocks_behind > UNSYNC_THRESHOLD_BLOCKS (10)
+//     → m_synced.store(false)
+//   * !currently_synced && blocks_behind <= SYNC_TOLERANCE_BLOCKS (2)
+//     && header_height > 0 && has_peer_info → m_synced.store(true)
+//   * Otherwise no change.
+//
+// SAFE: copy-state-out — header_height + chain_height + has_peer_info are
+// all computed BEFORE m_sync_state_mutex is taken. has_peer_info comes
+// from HasCompletedHandshakeWithAnyPeer() which takes m_peers_mutex
+// internally — calling it under m_sync_state_mutex would invert the
+// locked partial order (peers_mutex < sync_state_mutex). The mutex here
+// only guards the m_synced WRITE, which we keep brief.
+//
+// Null guard: if g_node_context.headers_manager is null (test fixtures or
+// pre-init), return without flipping m_synced. Matches the legacy
+// fast-out at ibd_coordinator.cpp:360-364.
+void CPeerManager::UpdateSyncStateLocked() {
+    // (a) Single read of headers_manager + chain_selector OUTSIDE any
+    // PeerManager mutex. If headers_manager is null, no-op (matches
+    // legacy fast-out at ibd_coordinator.cpp:360-364).
+    CHeadersManager* hdr_mgr = g_node_context.headers_manager.get();
+    if (hdr_mgr == nullptr) {
+        return;
+    }
+    const int header_height = hdr_mgr->GetBestHeight();
+    const int chain_height = m_chain_selector.GetActiveHeight();
+    const int blocks_behind = header_height - chain_height;
+
+    // (b) Has any peer completed handshake? Helper takes m_peers_mutex
+    // internally — caller MUST NOT already hold it.
+    const bool has_peer_info = HasCompletedHandshakeWithAnyPeer();
+
+    // (c) Apply hysteresis. Atomic acquire-load → conditional store
+    // with release semantics. m_sync_state_mutex is NOT required for the
+    // atomic flip (m_synced is std::atomic), but we still take it here
+    // briefly to coordinate with future readers that may add additional
+    // sync-state fields (mirrors legacy CIbdCoordinator::UpdateState
+    // serialized ordering). NO callout under the lock.
+    const bool currently_synced = m_synced.load(std::memory_order_acquire);
+    bool new_synced = currently_synced;
+
+    if (currently_synced) {
+        // Already synced — only become un-synced if significantly behind.
+        if (blocks_behind > UNSYNC_THRESHOLD_BLOCKS) {
+            new_synced = false;
+        }
+    } else {
+        // Not synced — become synced if within tolerance AND we've heard
+        // from peers AND header_height > 0 (don't declare synced at
+        // genesis).
+        if (blocks_behind <= SYNC_TOLERANCE_BLOCKS && header_height > 0 &&
+            has_peer_info) {
+            new_synced = true;
+        }
+    }
+
+    if (new_synced != currently_synced) {
+        // SAFE: copy-state-out — m_sync_state_mutex held only for the
+        // atomic store. No callout to m_scorer / m_connman /
+        // m_chain_selector / g_node_context.* under the lock.
+        std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+        m_synced.store(new_synced, std::memory_order_release);
+
+        // Verbose-only log (mirrors ibd_coordinator.cpp:396-405). Quiet by
+        // default. LogPrintIBD respects g_verbose internally? — no, it's
+        // unconditional. Match legacy: gate on g_verbose explicitly.
+        if (g_verbose.load(std::memory_order_relaxed)) {
+            if (new_synced) {
+                LogPrintIBD(INFO,
+                            "Sync state: NOT SYNCED -> SYNCED (chain within %d blocks of headers)",
+                            SYNC_TOLERANCE_BLOCKS);
+            } else {
+                LogPrintIBD(INFO,
+                            "Sync state: SYNCED -> NOT SYNCED (chain %d blocks behind headers)",
+                            blocks_behind);
+            }
+        }
+    }
+}
+
+// PR6.5b.5 — handshake-complete check. Walks m_peers under m_peers_mutex
+// briefly; returns true iff any CPeer::m_handshake_complete is true.
+// Replaces the legacy m_node_context.peer_manager->HasCompletedHandshakes()
+// callout from CIbdCoordinator::UpdateState:389-390 with a port-side
+// equivalent.
+//
+// SAFE: copy-state-out — single brief lock, no callout under the lock.
+bool CPeerManager::HasCompletedHandshakeWithAnyPeer() const {
+    std::lock_guard<std::mutex> lk(m_peers_mutex);
+    for (const auto& kv : m_peers) {
+        if (kv.second->m_handshake_complete) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// PR6.5b.5 — port of CIbdCoordinator::RetryTimeoutsAndStalls
+// (ibd_coordinator.cpp:2162-2242) DOWN-SCOPED to per-peer state owned by
+// this class. Walks m_blocks_in_flight; entries whose
+// requested_at_unix_sec exceeds the hysteretic timeout (15s near tip,
+// 60s bulk) are removed via RemoveBlockInFlight. NO scorer dispatch, NO
+// peer disconnect, NO bad-peer rotation — those are PR6.5b.6 scope per
+// decomposition §PR6.5b.5 "Deferred".
+//
+// Strict 4-step lock-order sequence (matches RequestNextBlocks discipline):
+//   (1) Compute blocks_behind / timeout_seconds with NO PeerManager locks
+//       held — reads g_node_context.headers_manager + GetActiveHeight().
+//   (2) Snapshot stale (hash, peer_id) pairs under
+//       m_blocks_in_flight_mutex briefly; drop.
+//   (3) Iterate the snapshot calling RemoveBlockInFlight(peer, hash) —
+//       which takes its own locks per PR6.5b.4. NO PeerManager mutex held.
+//   (4) Log a single line if any entry was removed (verbose-gated).
+//
+// SAFE: copy-state-out — every callout (headers_manager,
+// chain_selector, RemoveBlockInFlight) happens with NO PeerManager
+// mutex held.
+void CPeerManager::RetryStaleBlocksLocked() {
+    // Step 1: compute blocks_behind / timeout_seconds OUTSIDE any
+    // PeerManager mutex. Null-safe on headers_manager (chain_height
+    // alone is insufficient — we need both to derive blocks_behind, so
+    // null headers_manager forces the bulk timeout, which is the safer
+    // choice — won't aggressively re-request).
+    int header_height = 0;
+    if (CHeadersManager* hdr_mgr = g_node_context.headers_manager.get()) {
+        header_height = hdr_mgr->GetBestHeight();
+    }
+    const int chain_height = m_chain_selector.GetActiveHeight();
+    const int blocks_behind = header_height - chain_height;
+    const int timeout_seconds = (blocks_behind <= BLOCKS_NEAR_TIP_THRESHOLD)
+        ? BLOCK_TIMEOUT_NEAR_TIP_SECS
+        : BLOCK_TIMEOUT_BULK_SECS;
+
+    // Step 2: snapshot stale entries under m_blocks_in_flight_mutex
+    // briefly. Copy out (hash, peer_id) so we can drop the lock before
+    // calling RemoveBlockInFlight.
+    const int64_t now_unix = static_cast<int64_t>(std::time(nullptr));
+    std::vector<std::pair<uint256, NodeId>> stale;
+    {
+        std::lock_guard<std::mutex> bf_lk(m_blocks_in_flight_mutex);
+        for (const auto& kv : m_blocks_in_flight) {
+            const int64_t age = now_unix - kv.second.requested_at_unix_sec;
+            if (age >= timeout_seconds) {
+                stale.emplace_back(kv.first, kv.second.peer_id);
+            }
+        }
+    }
+
+    if (stale.empty()) return;
+
+    // Step 3: iterate snapshot calling RemoveBlockInFlight (which
+    // takes its own locks per PR6.5b.4). NO PeerManager mutex held here.
+    // Misbehavior dispatch on stall is intentionally NOT issued — that's
+    // PR6.5b.6 scope. We log the stale-entry count and let the next
+    // Tick re-dispatch via RequestNextBlocks.
+    for (const auto& sp : stale) {
+        // SAFE: copy-state-out — RemoveBlockInFlight scopes its own locks.
+        RemoveBlockInFlight(sp.second, sp.first);
+    }
+
+    // Step 4: log a single warn line (verbose-gated). PR6.5b.6 will
+    // upgrade this to a scorer-misbehavior callout per stalling peer;
+    // for now logging-only matches the contract's "logging only, no
+    // scorer dispatch" rule.
+    if (g_verbose.load(std::memory_order_relaxed)) {
+        LogPrintIBD(WARN,
+                    "removed %zu stale block requests >%ds timeout",
+                    stale.size(), timeout_seconds);
     }
 }
 

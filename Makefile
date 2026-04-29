@@ -628,6 +628,16 @@ peer_manager_block_download_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_block_download_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.5: sync-state hysteresis + stall sweep tests (7 cases).
+# Verifies the real bodies of IsInitialBlockDownload / IsSynced / Tick's
+# new state update + stall sweep, the SYNC_TOLERANCE / UNSYNC_THRESHOLD
+# hysteresis, the (blocks_behind <= 20) ? 15 : 60 timeout selector, and
+# the "misbehavior dispatch on stall deferred to PR6.5b.6" invariant.
+peer_manager_sync_state_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_sync_state_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_manager_sync_state_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)

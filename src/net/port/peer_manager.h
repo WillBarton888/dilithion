@@ -22,6 +22,7 @@
 #include <net/port/peer.h>
 #include <net/port/sync_coordinator.h>
 
+#include <atomic>
 #include <chrono>
 #include <map>
 #include <memory>
@@ -184,6 +185,28 @@ private:
     bool CheckHeadersSyncProgressLocked();
     void SwitchHeadersSyncPeerLocked(bool penalize);
 
+    // PR6.5b.5: sync-state hysteresis update. Reads
+    // headers_manager->GetBestHeight() + m_chain_selector.GetActiveHeight()
+    // OUTSIDE m_sync_state_mutex, then flips m_synced under hysteresis
+    // rules (SYNC_TOLERANCE_BLOCKS / UNSYNC_THRESHOLD_BLOCKS). MUST NOT
+    // be called with m_sync_state_mutex held — the *_Locked suffix is
+    // the same naming-misnomer convention used by PR6.5b.3 helpers.
+    void UpdateSyncStateLocked();
+
+    // PR6.5b.5: walk m_blocks_in_flight, snapshot stale (hash, peer_id)
+    // pairs under m_blocks_in_flight_mutex briefly, drop, then call
+    // RemoveBlockInFlight(peer, hash) for each (which takes its own
+    // locks). NO scorer dispatch, NO disconnect — misbehavior on stall
+    // is PR6.5b.6.
+    void RetryStaleBlocksLocked();
+
+    // PR6.5b.5: any-peer handshake-complete check. Walks m_peers under
+    // m_peers_mutex briefly; returns true iff any CPeer::m_handshake_complete
+    // is true. Replaces the legacy
+    // m_node_context.peer_manager->HasCompletedHandshakes() callout from
+    // CIbdCoordinator::UpdateState:389-390 with a port-side equivalent.
+    bool HasCompletedHandshakeWithAnyPeer() const;
+
     // ===== Lock-order discipline (v1.5 §2.1.1 rule 5; Option B) =====
     //
     // Partial order:  connman_peer_lock < m_peers_mutex
@@ -225,6 +248,22 @@ private:
     static constexpr int HEADERS_SYNC_TIMEOUT_BASE_SECS = 120;
     static constexpr int HEADERS_SYNC_TIMEOUT_PER_HEADER_MS = 1;
     static constexpr int MAX_HEADERS_CONSECUTIVE_STALLS = 3;
+
+    // PR6.5b.5 hysteresis + stall-timeout constants (SSOT — private to
+    // CPeerManager; mirrors CIbdCoordinator's private constants in
+    // ibd_coordinator.h:203-204 and the literal `(blocks_behind <= 20)
+    // ? 15 : 60` selector at ibd_coordinator.cpp:2174).
+    static constexpr int SYNC_TOLERANCE_BLOCKS = 2;
+    static constexpr int UNSYNC_THRESHOLD_BLOCKS = 10;
+    static constexpr int BLOCK_TIMEOUT_NEAR_TIP_SECS = 15;
+    static constexpr int BLOCK_TIMEOUT_BULK_SECS = 60;
+    static constexpr int BLOCKS_NEAR_TIP_THRESHOLD = 20;
+
+    // PR6.5b.5 sync state. std::atomic<bool> mirrors
+    // CIbdCoordinator::m_synced idiom (ibd_coordinator.h). NO mutex —
+    // single bool, atomic acquire/release. Initial value matches legacy:
+    // start NOT synced (so IsInitialBlockDownload() == true at construction).
+    std::atomic<bool> m_synced{false};
 
     std::map<uint256, BlockDownloadInfo> m_blocks_in_flight;
     mutable std::mutex m_blocks_in_flight_mutex;
