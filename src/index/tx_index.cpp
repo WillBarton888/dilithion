@@ -3,11 +3,14 @@
 
 #include <index/tx_index.h>
 
+#include <consensus/chain.h>
 #include <consensus/validation.h>
+#include <node/block_index.h>
 #include <node/blockchain_storage.h>
 #include <primitives/transaction.h>
 
 #include <leveldb/db.h>
+#include <leveldb/iterator.h>
 #include <leveldb/options.h>
 #include <leveldb/slice.h>
 #include <leveldb/status.h>
@@ -15,10 +18,23 @@
 
 #include <cstring>
 #include <iostream>
+#include <thread>
+
+extern CChainState g_chainstate;
 
 std::unique_ptr<CTxIndex> g_tx_index;
 
 const std::string CTxIndex::META_KEY = std::string("\x00meta", 5);
+
+// Test-observability hook (U3, Cursor 2nd-pass): counts the number of
+// m_db->Write() calls issued by WipeIndex. Lives in a dedicated namespace
+// so production code never reads it. Cost in production: 8 bytes of static
+// storage and one relaxed atomic increment per wipe — wipes happen at most
+// once per startup on a corrupted index. The counter proves the wipe is
+// implemented as a SINGLE WriteBatch (criterion U3).
+namespace tx_index_test_hooks {
+std::atomic<uint64_t> g_wipe_write_count{0};
+}
 
 CTxIndex::CTxIndex() = default;
 
@@ -50,11 +66,25 @@ bool CTxIndex::WriteMeta(leveldb::WriteBatch& batch, int height, const uint256& 
     return true;
 }
 
+// U2 (Cursor 2nd-pass): calling Init twice on the same instance returns true
+// AND is a no-op. No leveldb re-open, no meta re-read, no state mutation, no
+// thread spawn. The early-return on m_db != nullptr below pins this contract;
+// any future change to Init must preserve it (PR-3 callback wiring depends on
+// idempotent Init across paths).
+//
+// R1 (Cursor 2nd-pass): the C7 startup integrity check calls into
+// g_chainstate (which acquires cs_main internally). m_mutex is NEVER held
+// across those calls. Init is single-threaded by contract — it runs once
+// during node startup before any worker or callback can enter CTxIndex —
+// so we use a unique_lock and explicitly drop it before the chainstate
+// query and the wipe, then re-take it only to set state. This honors the
+// lock-order invariant explicitly rather than relying on the startup
+// single-thread property.
 bool CTxIndex::Init(const std::string& datadir, CBlockchainDB* chain_db) {
-    std::lock_guard<std::mutex> lock(m_mutex);
+    std::unique_lock<std::mutex> lock(m_mutex);
 
     if (m_db) {
-        // Already initialized
+        // Already initialized — U2 no-op path.
         return true;
     }
 
@@ -68,8 +98,23 @@ bool CTxIndex::Init(const std::string& datadir, CBlockchainDB* chain_db) {
     leveldb::DB* db = nullptr;
     leveldb::Status status = leveldb::DB::Open(options, datadir, &db);
     if (!status.ok()) {
-        std::cerr << "[txindex] Failed to open index database at " << datadir
-                  << ": " << status.ToString() << std::endl;
+        // U4 (Cursor 2nd-pass): stale-LOCK path — when leveldb fails to open
+        // because another process holds the LOCK file, surface the exact path
+        // and remediation step. No retry, no crash, no infinite loop.
+        const std::string status_str = status.ToString();
+        const bool likely_lock =
+            status_str.find("lock") != std::string::npos ||
+            status_str.find("LOCK") != std::string::npos ||
+            status_str.find("Resource temporarily unavailable") != std::string::npos;
+        if (likely_lock) {
+            std::cerr << "[txindex] failed to open index database "
+                      << "(likely stale LOCK file from previous unclean shutdown — "
+                      << "remove " << datadir << "/LOCK and retry): "
+                      << status_str << std::endl;
+        } else {
+            std::cerr << "[txindex] Failed to open index database at " << datadir
+                      << ": " << status_str << std::endl;
+        }
         return false;
     }
     m_db.reset(db);
@@ -111,6 +156,108 @@ bool CTxIndex::Init(const std::string& datadir, CBlockchainDB* chain_db) {
     m_last_height.store(height);
     m_synced.store(false);
 
+    // C7 (plan §5): startup integrity check. If meta says we have indexed
+    // up to `height` AND the live chainstate has a block at that height,
+    // the truncated 8-byte hash recorded in meta must match the truncated
+    // hash of that block. On contradiction, atomically wipe via a single
+    // WriteBatch and reset to -1.
+    //
+    // If chainstate has NO block at the recorded height (e.g., chainstate
+    // not yet populated, or running in a unit test that doesn't seed
+    // mapBlockIndex), leave the index alone — we cannot prove a mismatch
+    // without ground truth, and an unwarranted wipe would lose work.
+    if (height >= 0) {
+        char meta_trunc[8];
+        std::memcpy(meta_trunc, &meta_value[5], 8);
+
+        // Release m_mutex before chainstate query (R1 invariant).
+        lock.unlock();
+
+        uint256 expected_hash;
+        bool have_block_at_height = false;
+        std::vector<uint256> hashes_at_h = g_chainstate.GetBlocksAtHeight(height);
+        for (const uint256& h : hashes_at_h) {
+            CBlockIndex* pi = g_chainstate.GetBlockIndex(h);
+            if (pi != nullptr && pi->IsOnMainChain()) {
+                expected_hash = pi->GetBlockHash();
+                have_block_at_height = true;
+                break;
+            }
+        }
+        // No main-chain block but at least one block index entry at the
+        // height: use the first one. Avoids spurious wipe when pnext wiring
+        // hasn't completed at very early startup.
+        if (!have_block_at_height && !hashes_at_h.empty()) {
+            CBlockIndex* pi = g_chainstate.GetBlockIndex(hashes_at_h.front());
+            if (pi != nullptr) {
+                expected_hash = pi->GetBlockHash();
+                have_block_at_height = true;
+            }
+        }
+
+        bool need_wipe = false;
+        if (have_block_at_height) {
+            char chain_trunc[8];
+            std::memcpy(chain_trunc, expected_hash.data, 8);
+            if (std::memcmp(meta_trunc, chain_trunc, 8) != 0) {
+                need_wipe = true;
+            }
+        }
+        // If !have_block_at_height: chainstate not yet populated for this
+        // height; leave the index untouched. The reindex thread will not
+        // walk past m_last_height for blocks the index already covers.
+
+        if (need_wipe) {
+            std::cerr << "[txindex] startup integrity check failed at height "
+                      << height << " — wiping index and resetting to -1" << std::endl;
+            // WipeIndex documented to run without m_mutex held.
+            const bool wiped = WipeIndex();
+            // Re-take the lock to update state coherently.
+            lock.lock();
+            if (!wiped) {
+                std::cerr << "[txindex] integrity wipe failed; closing index" << std::endl;
+                m_db.reset();
+                return false;
+            }
+            m_last_height.store(-1);
+            m_synced.store(false);
+        } else {
+            lock.lock();
+        }
+    }
+
+    return true;
+}
+
+bool CTxIndex::WipeIndex() {
+    // No lock acquired here — Init calls WipeIndex without holding m_mutex
+    // (see C7 path). Init runs single-threaded during startup; no callback
+    // or reindex thread can enter CTxIndex before Init returns.
+    if (!m_db) {
+        return false;
+    }
+
+    leveldb::WriteBatch batch;
+
+    {
+        std::unique_ptr<leveldb::Iterator> it(
+            m_db->NewIterator(leveldb::ReadOptions()));
+        for (it->Seek("t"); it->Valid(); it->Next()) {
+            leveldb::Slice k = it->key();
+            if (k.size() == 0 || k.data()[0] != 't') break;
+            batch.Delete(k);
+        }
+    }
+
+    batch.Delete(leveldb::Slice(META_KEY.data(), META_KEY.size()));
+
+    leveldb::Status status = m_db->Write(leveldb::WriteOptions(), &batch);
+    tx_index_test_hooks::g_wipe_write_count.fetch_add(1, std::memory_order_relaxed);
+    if (!status.ok()) {
+        std::cerr << "[txindex] WipeIndex write failed: "
+                  << status.ToString() << std::endl;
+        return false;
+    }
     return true;
 }
 
@@ -260,7 +407,109 @@ bool CTxIndex::IsSynced() const {
 }
 
 void CTxIndex::StartBackgroundSync() {
-    // PR-4 implements the reindex thread.
+    // R2 (Cursor 2nd-pass): preconditions checked BEFORE thread spawn.
+    // m_chain_db / m_db / g_chainstate.GetTip() must all be non-null.
+    // If any are missing, log to stderr and return without spawning.
+    //
+    // GetTip() acquires cs_main internally (R1). We do NOT hold m_mutex
+    // here — read it through the public API only.
+    {
+        std::lock_guard<std::mutex> lock(m_mutex);
+        if (!m_db || !m_chain_db) {
+            std::cerr << "[txindex] StartBackgroundSync called before chainstate "
+                      << "initialized; reindex skipped" << std::endl;
+            return;
+        }
+        if (m_sync_thread.joinable()) {
+            // Already running — defensive: do not double-spawn.
+            return;
+        }
+    }
+
+    CBlockIndex* tip = g_chainstate.GetTip();
+    if (tip == nullptr) {
+        std::cerr << "[txindex] StartBackgroundSync called before chainstate "
+                  << "initialized; reindex skipped" << std::endl;
+        return;
+    }
+    const int snapshotted_tip = tip->nHeight;
+
+    // R2 pin: snapshot tip ONCE at thread entry; thread walks
+    // [m_last_height+1, snapshotted_tip].
+    m_sync_thread = std::thread(&CTxIndex::SyncLoop, this, snapshotted_tip);
+}
+
+void CTxIndex::SyncLoop(int snapshotted_tip_height) {
+    // R3 (Cursor 2nd-pass) — load-bearing comment, NOT decoration:
+    // Chain reads (`g_chainstate.GetTip()`, `g_chainstate.GetBlockIndex(hash)`)
+    // acquire `cs_main` internally. `m_mutex` MUST NOT be held across these
+    // calls. The callback path only enters CTxIndex through `WriteBlock` /
+    // `EraseBlock`, which acquire `m_mutex` themselves; the reindex thread
+    // acquires `m_mutex` only via the same `WriteBlock` call site.
+
+    int current = m_last_height.load() + 1;
+    int blocks_indexed_this_run = 0;
+    while (current <= snapshotted_tip_height) {
+        if (m_interrupt.load()) {
+            break;
+        }
+
+        // Resolve current height -> block hash via g_chainstate. We do NOT
+        // hold m_mutex across this call (R1).
+        std::vector<uint256> hashes = g_chainstate.GetBlocksAtHeight(current);
+        if (hashes.empty()) {
+            std::cerr << "[txindex] reindex: no block index entry at height "
+                      << current << "; aborting reindex" << std::endl;
+            break;
+        }
+
+        // Prefer the on-main-chain block at this height; fall back to any.
+        uint256 block_hash;
+        bool found_main = false;
+        for (const uint256& h : hashes) {
+            CBlockIndex* pi = g_chainstate.GetBlockIndex(h);
+            if (pi != nullptr && pi->IsOnMainChain()) {
+                block_hash = h;
+                found_main = true;
+                break;
+            }
+        }
+        if (!found_main) {
+            block_hash = hashes.front();
+        }
+
+        // m_chain_db is set by Init; reads are independent of m_mutex.
+        CBlock block;
+        if (!m_chain_db->ReadBlock(block_hash, block)) {
+            std::cerr << "[txindex] reindex: failed to read block at height "
+                      << current << "; skipping" << std::endl;
+            ++current;
+            continue;
+        }
+
+        // WriteBlock acquires m_mutex internally. The reindex thread does
+        // NOT hold m_mutex across this call.
+        if (!WriteBlock(block, current, block_hash)) {
+            // WriteBlock already logged the cause. C1 monotonicity means a
+            // racing live-callback WriteBlock at the same height returns
+            // true (no-op); a real error here is rare.
+        }
+
+        ++blocks_indexed_this_run;
+        if ((current % 1000) == 0) {
+            std::cout << "[txindex] indexed " << current
+                      << "/" << snapshotted_tip_height << " blocks" << std::endl;
+        }
+        ++current;
+    }
+
+    if (!m_interrupt.load() && current > snapshotted_tip_height) {
+        std::cout << "[txindex] indexed " << snapshotted_tip_height
+                  << "/" << snapshotted_tip_height << " blocks (sync complete)"
+                  << std::endl;
+        m_synced.store(true);
+    }
+    (void)blocks_indexed_this_run;
 }
 
 void CTxIndex::Interrupt() {

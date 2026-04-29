@@ -67,6 +67,15 @@ private:
     static std::string MakeTxKey(const uint256& txid);
 
     bool WriteMeta(leveldb::WriteBatch& batch, int height, const uint256& hash);
+
+    // Single-WriteBatch wipe: collects Deletes for every 't'-prefix key plus
+    // the meta key, issues one m_db->Write. Caller must NOT hold m_mutex.
+    bool WipeIndex();
+
+    // Reindex thread body. Spawned by StartBackgroundSync; reads g_chainstate
+    // and m_chain_db without holding m_mutex (m_mutex is acquired only inside
+    // WriteBlock). Honors m_interrupt between blocks.
+    void SyncLoop(int snapshotted_tip_height);
 };
 
 extern std::unique_ptr<CTxIndex> g_tx_index;
