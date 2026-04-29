@@ -618,6 +618,16 @@ peer_manager_headers_sync_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_he
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_headers_sync_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.4: block-download accounting + block_fetcher fold-in tests
+# (8 cases). Verifies the dispatch arm for `block` and `getdata`,
+# MarkBlockInFlight / RemoveBlockInFlight / GetBlocksInFlightForPeer
+# accounting, OnPeerDisconnected in-flight cleanup, RequestNextBlocks
+# per-peer cap enforcement, and no-peer no-op behavior.
+peer_manager_block_download_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_block_download_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_manager_block_download_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)

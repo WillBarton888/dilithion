@@ -110,7 +110,46 @@ public:
     void OnPeerConnected(NodeId peer);
     void OnPeerDisconnected(NodeId peer);
 
+    // ===== Block-download accounting (PR6.5b.4) =====
+    //
+    // Mark a block hash as in-flight from `peer`. Increments the per-peer
+    // BlockDownloadState::n_blocks_in_flight counter and inserts the hash
+    // into m_blocks_in_flight. Idempotent: re-marking the same hash from
+    // the same peer is a no-op (no double-count). Lock order: takes
+    // m_peers_mutex then m_blocks_in_flight_mutex (per locked partial
+    // order). Peer must be present (silently ignored if disconnected).
+    void MarkBlockInFlight(NodeId peer, const uint256& hash);
+
+    // Remove a block hash from in-flight state. Decrements the per-peer
+    // counter and removes the hash from m_blocks_in_flight. No-op if the
+    // hash isn't tracked (does not throw, does not decrement). Same lock
+    // order as MarkBlockInFlight.
+    void RemoveBlockInFlight(NodeId peer, const uint256& hash);
+
+    // Read the per-peer in-flight counter. Returns 0 for unknown peers.
+    int GetBlocksInFlightForPeer(NodeId peer) const;
+
 private:
+    // ===== Block-download handlers (PR6.5b.4) =====
+    //
+    // HandleBlock: deserialize CBlock from vRecv, look up the block hash,
+    // call RemoveBlockInFlight(peer, hash) if tracked, then call
+    // m_chain_selector.ProcessNewBlock with NO PeerManager locks held.
+    // Always returns true on a structurally-valid block payload (handler
+    // success means "we delegated"; chain_selector reports its own
+    // verdict via existing legacy paths). Under-length read throws and
+    // is caught by ProcessMessage's try/catch (UnknownMessage weight=1).
+    bool HandleBlock(NodeId peer, CDataStream& vRecv);
+
+    // HandleGetData: deserialize the inv vector and validate. Empty inv is
+    // a no-op (matches upstream Bitcoin Core behavior — not misbehavior).
+    // For inv entries with type=MSG_BLOCK_INV, look up the hash via
+    // m_chain_selector.LookupBlockIndex(hash); unknown blocks tick scorer
+    // with MisbehaviorType::UnknownMessage weight=1. Outbound block
+    // payload responses are forbidden in this PR (PR6.5b.6 scope).
+    // Returns true on a structurally-valid getdata; under-length throws.
+    bool HandleGetData(NodeId peer, CDataStream& vRecv);
+
     // ===== ProcessMessage handlers (PR6.5b.2) =====
     //
     // Each handler follows the copy-state-out pattern: lock m_peers_mutex →
