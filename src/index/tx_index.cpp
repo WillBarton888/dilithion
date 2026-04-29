@@ -25,6 +25,9 @@ CTxIndex::CTxIndex() = default;
 CTxIndex::~CTxIndex() {
     Stop();
     std::lock_guard<std::mutex> lock(m_mutex);
+    if (m_db) {
+        std::cout << "[txindex] shutting down" << std::endl;
+    }
     m_db.reset();
 }
 
@@ -167,6 +170,13 @@ bool CTxIndex::EraseBlock(const CBlock& block, int height, const uint256& block_
 
     if (!m_db) {
         return false;
+    }
+
+    // C1 (PR-3 fold-in): a stray double-disconnect or out-of-order erase
+    // becomes a no-op rather than walking m_last_height backwards. Returns
+    // true to keep callers idempotent — no leveldb write is issued.
+    if (height != m_last_height.load()) {
+        return true;
     }
 
     std::vector<CTransactionRef> txs;

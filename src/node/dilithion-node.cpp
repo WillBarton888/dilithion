@@ -72,6 +72,7 @@
 #include <consensus/tx_validation.h>  // BUG #108 FIX: For CTransactionValidator
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
+#include <index/tx_index.h>            // PR-3: optional transaction index
 #include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
 #include <util/stacktrace.h>  // Phase 2.2: Crash diagnostics
@@ -530,6 +531,7 @@ struct NodeConfig {
     bool reindex = false;           // Phase 4.2: Rebuild block index from blocks on disk
     bool rescan = false;            // Phase 4.2: Rescan wallet transactions
     bool reset_chain = false;       // --reset-chain: wipe chain-derived state, keep wallet/MIK
+    bool txindex_enabled = false;   // --txindex / -txindex: enable transaction index (PR-3)
     bool yes_flag = false;          // --yes: bypass --reset-chain confirmation prompt
     bool verbose = false;           // Show debug output (hidden by default)
     bool quiet = false;             // Quiet mode: only block lifecycle, errors, and warnings
@@ -656,6 +658,9 @@ struct NodeConfig {
                 // Phase 4.2: Rebuild block index from blocks on disk
                 reindex = true;
             }
+            else if (arg == "--txindex" || arg == "-txindex") {
+                txindex_enabled = true;
+            }
             else if (arg == "--reset-chain") {
                 // Wipe chain-derived state (blocks, chainstate, headers, dna_registry),
                 // preserve wallet.dat and mik_registration.dat. Exits after reset.
@@ -772,6 +777,7 @@ struct NodeConfig {
         std::cout << "  --verbose, -v         Show debug output (hidden by default)" << std::endl;
         std::cout << "  --quiet, -q           Quiet mode: only block events, errors, and warnings" << std::endl;
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
+        std::cout << "  --txindex             Build full transaction index (requires --reindex on warm chain)" << std::endl;
         std::cout << "  --reset-chain         Wipe chain state for a clean resync." << std::endl;
         std::cout << "                          Preserves wallet.dat and mik_registration.dat" << std::endl;
         std::cout << "                          so miners do NOT re-solve the registration PoW." << std::endl;
@@ -2891,6 +2897,44 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // IBD HANG FIX #14: Register blockchain_db for block serving
         g_node_context.blockchain_db = &blockchain;
+
+        // PR-3: Optional transaction index. Default OFF; --txindex opts in.
+        // On a non-empty chain a cold index requires --reindex to acknowledge
+        // the multi-hour rebuild (N2). Callbacks register with chain so future
+        // connect/disconnect events flow through to the index. Reset() runs
+        // BEFORE blockchain.Close() in shutdown (N4).
+        if (config.txindex_enabled) {
+            g_tx_index = std::make_unique<CTxIndex>();
+            std::string txindex_dir = config.datadir + "/indexes/txindex";
+            std::error_code _txi_ec;
+            std::filesystem::create_directories(txindex_dir, _txi_ec);
+            if (!g_tx_index->Init(txindex_dir, &blockchain)) {
+                std::cerr << "[txindex] Init failed; aborting." << std::endl;
+                return 1;
+            }
+            int last = g_tx_index->LastIndexedHeight();
+            int tip = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+            if (last == -1 && tip > 0 && !config.reindex) {
+                std::cerr << "[txindex] -txindex=1 on a non-empty chain requires -reindex "
+                          << "to acknowledge a multi-hour rebuild. Aborting." << std::endl;
+                return 1;
+            }
+            if (last >= 0 && tip > last) {
+                std::cout << "[txindex] resuming from height " << last
+                          << " (chain tip " << tip << ", gap=" << (tip - last)
+                          << " blocks)" << std::endl;
+            }
+            g_chainstate.RegisterBlockConnectCallback(
+                [](const CBlock& b, int h, const uint256& hh) {
+                    if (g_tx_index) g_tx_index->WriteBlock(b, h, hh);
+                });
+            g_chainstate.RegisterBlockDisconnectCallback(
+                [](const CBlock& b, int h, const uint256& hh) {
+                    if (g_tx_index) g_tx_index->EraseBlock(b, h, hh);
+                });
+            g_tx_index->StartBackgroundSync();
+            std::cout << "  [OK] Transaction index initialized" << std::endl;
+        }
 
         // Keep legacy globals for backward compatibility during migration
         // REMOVED: g_peer_manager assignment - CBlockFetcher now uses dependency injection
@@ -7659,6 +7703,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         std::cout << "  Closing UTXO database..." << std::endl;
         utxo_set.Close();
+
+        // PR-3 N4: tx_index must be released BEFORE blockchain.Close() so that
+        // the destructor's [txindex] shutting down log line precedes any
+        // chain-shutdown line and so the index never holds a dangling
+        // CBlockchainDB* across blockchain teardown.
+        g_tx_index.reset();
 
         std::cout << "  Closing blockchain database..." << std::endl;
         blockchain.Close();

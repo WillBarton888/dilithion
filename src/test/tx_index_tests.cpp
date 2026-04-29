@@ -219,6 +219,34 @@ BOOST_AUTO_TEST_CASE(monotonicity_no_op) {
     BOOST_CHECK(fb == block_hash);
 }
 
+BOOST_AUTO_TEST_CASE(erase_block_double_disconnect_no_op) {
+    TempDbScope scope("erase_double_disconnect");
+    CTxIndex idx;
+    BOOST_REQUIRE(idx.Init(scope.path(), nullptr));
+
+    auto tx0 = MakeUniqueTx(0xA1, 0xB1);
+    auto block = MakeBlock({tx0});
+    auto block_hash = MakeBlockHash(0xC1);
+
+    BOOST_REQUIRE(idx.WriteBlock(block, 5, block_hash));
+    BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), 5);
+
+    // First EraseBlock at H=5: succeeds, height drops to 4.
+    BOOST_REQUIRE(idx.EraseBlock(block, 5, block_hash));
+    BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), 4);
+
+    // Second EraseBlock at the same H=5: must be a no-op.
+    // Returns true (idempotent contract), height stays 4, no crash, no
+    // backward walk. Guard form `height != m_last_height` catches the
+    // double-disconnect; an out-of-order erase at H=99 would hit the same
+    // guard and also be a no-op.
+    BOOST_REQUIRE(idx.EraseBlock(block, 5, block_hash));
+    BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), 4);
+
+    BOOST_REQUIRE(idx.EraseBlock(block, 99, block_hash));
+    BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), 4);
+}
+
 BOOST_AUTO_TEST_CASE(meta_round_trip_on_reopen) {
     TempDbScope scope("meta_round_trip");
     auto tx0 = MakeUniqueTx(0xAA, 0x70);
