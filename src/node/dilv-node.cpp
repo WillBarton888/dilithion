@@ -2789,6 +2789,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::string txindex_dir = config.datadir + "/indexes/txindex";
             std::error_code _txi_ec;
             std::filesystem::create_directories(txindex_dir, _txi_ec);
+            if (_txi_ec) {
+                std::cerr << "[txindex] could not create " << txindex_dir
+                          << ": " << _txi_ec.message() << std::endl;
+                // continue — Init() will fail and emit its own error too; we just want operator-visible cause
+            }
             if (!g_tx_index->Init(txindex_dir, &blockchain)) {
                 std::cerr << "[txindex] Init failed; aborting." << std::endl;
                 return 1;
@@ -2798,6 +2803,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (last == -1 && tip > 0 && !config.reindex) {
                 std::cerr << "[txindex] -txindex=1 on a non-empty chain requires -reindex "
                           << "to acknowledge a multi-hour rebuild. Aborting." << std::endl;
+                g_tx_index.reset();
                 return 1;
             }
             if (last >= 0 && tip > last) {
