@@ -61,6 +61,15 @@ struct CPeer {
     uint64_t nServices = 0;
     int64_t nTimeConnected = 0;
 
+    // Duplicate-version sentinel (PR6.5b.fixups-mechanical, finding
+    // PR6.5b.2-SEC-MD-1). The legacy `nVersion != 0` test misclassified a
+    // peer that legitimately sent `version=0` on the first message: the
+    // duplicate-version check would never fire on a second VERSION because
+    // nVersion still tested as zero. This bool is set true on the first
+    // VERSION (regardless of read_version's value) and tested in
+    // HandleVersion to dispatch DuplicateVersion misbehavior on the second.
+    bool m_version_received = false;
+
     // Block-flow state.
     BlockDownloadState m_block_download;
     std::set<uint256> m_blocks_in_flight;

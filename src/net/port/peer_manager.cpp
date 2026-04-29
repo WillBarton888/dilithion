@@ -102,9 +102,10 @@ void CPeerManager::OnBlockConnected() {
 //       + handshake-complete gate. Always runs first so m_synced is fresh
 //       even when there is no current sync-peer.
 //   (2) Existing PR6.5b.3 headers-sync flow: SelectHeadersSyncPeerLocked
-//       (when no current sync-peer; early-exit) or
-//       CheckHeadersSyncProgressLocked → SwitchHeadersSyncPeerLocked
-//       (when current sync-peer present and stalled).
+//       when no current sync-peer; CheckHeadersSyncProgressLocked →
+//       SwitchHeadersSyncPeerLocked when current sync-peer present and
+//       stalled. **No early-exit; steps (3) and (4) run unconditionally
+//       on every Tick.**
 //   (3) RetryStaleBlocksLocked() — sweep m_blocks_in_flight for stale
 //       entries and re-dispatch via RemoveBlockInFlight (no scorer
 //       dispatch — that's PR6.5b.6).
@@ -127,9 +128,8 @@ void CPeerManager::Tick() {
     }
 
     if (current == -1) {
-        // No current sync-peer: try to elect one. Headers-sync flow
-        // returns here (matches PR6.5b.3 early-exit). Block-download
-        // sweep + dispatch still run below.
+        // No current sync-peer: try to elect one. Block-download sweep +
+        // dispatch still run below — no early-exit.
         SelectHeadersSyncPeerLocked();
     } else {
         // Have a current sync-peer: check progress; rotate (with
@@ -212,13 +212,18 @@ void CPeerManager::UpdateSyncStateLocked() {
     if (new_synced != currently_synced) {
         // SAFE: copy-state-out — m_sync_state_mutex held only for the
         // atomic store. No callout to m_scorer / m_connman /
-        // m_chain_selector / g_node_context.* under the lock.
-        std::lock_guard<std::mutex> lk(m_sync_state_mutex);
-        m_synced.store(new_synced, std::memory_order_release);
+        // m_chain_selector / g_node_context.* under the lock. The
+        // LogPrintIBD callout below is emitted AFTER the lock_guard goes
+        // out of scope (PR6.5b.fixups-mechanical, finding PR6.5b.5-M1).
+        {
+            std::lock_guard<std::mutex> lk(m_sync_state_mutex);
+            m_synced.store(new_synced, std::memory_order_release);
+        }
 
         // Verbose-only log (mirrors ibd_coordinator.cpp:396-405). Quiet by
         // default. LogPrintIBD respects g_verbose internally? — no, it's
         // unconditional. Match legacy: gate on g_verbose explicitly.
+        // Emitted OUTSIDE m_sync_state_mutex per copy-state-out discipline.
         if (g_verbose.load(std::memory_order_relaxed)) {
             if (new_synced) {
                 LogPrintIBD(INFO,
@@ -408,14 +413,18 @@ bool CPeerManager::HandleVersion(NodeId peer, CDataStream& vRecv) {
         CPeer& p = *it->second;
 
         // Upstream pattern: a second version on the same peer is misbehavior
-        // (DuplicateVersion weight=1 in MisbehaviorType). Detect by checking
-        // nVersion already populated (zero on fresh peer per peer.h:60).
-        if (p.nVersion != 0) {
+        // (DuplicateVersion weight=1 in MisbehaviorType). PR6.5b.fixups-mechanical
+        // (finding PR6.5b.2-SEC-MD-1): use a dedicated bool sentinel rather than
+        // `nVersion != 0`. The legacy test silently failed when read_version
+        // happened to be zero on the first message — the second VERSION wouldn't
+        // dispatch misbehavior because nVersion would still read as zero.
+        if (p.m_version_received) {
             is_duplicate = true;
         } else {
             p.nVersion = read_version;
             p.nServices = read_services;
             p.nTimeConnected = read_timestamp;
+            p.m_version_received = true;
         }
     }
 
@@ -525,7 +534,10 @@ bool CPeerManager::HandleHeaders(NodeId peer, CDataStream& vRecv) {
     // (2000). This guards against pre-allocation DoS before the real
     // CHeadersManager::ProcessHeadersWithDoSProtection two-phase guard
     // kicks in. Mirrors net.cpp:1571 cap.
-    if (header_count > 2000) {
+    // PR6.5b.fixups-mechanical (finding PR6.5b.3-SEC-MD-2): reference the
+    // SSOT constant in <consensus/params.h> rather than re-spelling the
+    // literal 2000, so future consensus-cap changes propagate uniformly.
+    if (header_count > Consensus::MAX_HEADERS_RESULTS) {
         // Throw rather than reach for a new MisbehaviorType enum value
         // (interface bump deferred). ProcessMessage's catch then ticks
         // UnknownMessage. Functionally equivalent for this PR — the real
@@ -697,9 +709,22 @@ void CPeerManager::SelectHeadersSyncPeerLocked() {
         seed_last_processed = hdr_mgr->GetProcessedCount();
     }
 
-    const int headers_missing = (best_height > static_cast<int64_t>(seed_last_height))
-        ? static_cast<int>(best_height - static_cast<int64_t>(seed_last_height))
+    // PR6.5b.fixups-mechanical (finding PR6.5b.3-SEC-MD-1): defensive clamp on
+    // headers_missing at the int-narrowing boundary. best_height is peer-influenced
+    // (set in HandleHeaders from the wire), so a malicious peer could in principle
+    // drive (best_height - seed_last_height) past INT_MAX before the static_cast,
+    // producing UB or a negative timeout. Clamp BEFORE the cast at a value with
+    // generous headroom: INT_MAX / HEADERS_SYNC_TIMEOUT_PER_HEADER_MS would still
+    // produce valid signed math when later multiplied; we use 100,000,000 (one
+    // hundred million headers) which is well past any realistic chain height for
+    // years to come, leaves three decimal orders of magnitude of integer headroom
+    // for the subsequent multiply, and keeps the timeout well under INT_MAX ms.
+    static constexpr int64_t kHeadersMissingClamp = 100'000'000;
+    int64_t hm64 = (best_height > static_cast<int64_t>(seed_last_height))
+        ? (best_height - static_cast<int64_t>(seed_last_height))
         : 0;
+    if (hm64 > kHeadersMissingClamp) hm64 = kHeadersMissingClamp;
+    const int headers_missing = static_cast<int>(hm64);
     const int timeout_ms = HEADERS_SYNC_TIMEOUT_BASE_SECS * 1000 +
                            headers_missing * HEADERS_SYNC_TIMEOUT_PER_HEADER_MS;
 
