@@ -188,7 +188,7 @@ To roll back:
    — you'll see:
 
    ```
-   [txindex] startup integrity check failed at height N — wiping
+   [txindex] startup integrity check failed at height N -- wiping
    index and resetting to -1
    ```
 

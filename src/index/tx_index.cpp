@@ -108,7 +108,7 @@ bool CTxIndex::Init(const std::string& datadir, CBlockchainDB* chain_db) {
             status_str.find("Resource temporarily unavailable") != std::string::npos;
         if (likely_lock) {
             std::cerr << "[txindex] failed to open index database "
-                      << "(likely stale LOCK file from previous unclean shutdown — "
+                      << "(likely stale LOCK file from previous unclean shutdown -- "
                       << "remove " << datadir << "/LOCK and retry): "
                       << status_str << std::endl;
         } else {
@@ -222,11 +222,11 @@ bool CTxIndex::Init(const std::string& datadir, CBlockchainDB* chain_db) {
                 std::cerr << "[txindex] integrity wipe skipped: state advanced "
                           << "during init (recorded=" << height
                           << ", now=" << m_last_height.load()
-                          << ") — leaving index intact" << std::endl;
+                          << ") -- leaving index intact" << std::endl;
             } else {
                 lock.unlock();   // wipe doesn't need m_mutex (leveldb own mutex)
                 std::cerr << "[txindex] startup integrity check failed at height "
-                          << height << " — wiping index and resetting to -1" << std::endl;
+                          << height << " -- wiping index and resetting to -1" << std::endl;
                 const bool wiped = WipeIndex();
                 lock.lock();
                 if (!wiped) {
