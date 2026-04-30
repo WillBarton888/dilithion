@@ -108,6 +108,12 @@ public:
     int GetConnectionCount(::dilithion::net::OutboundClass) const override { return 0; }
     int GetTotalInbound() const override { return 0; }
     int GetTotalOutbound() const override { return 0; }
+    bool PushMessage(::dilithion::net::NodeId,
+                     const ::CNetMessage&) override {
+        // Cheap atomic counter for lock-order tests; if any test cares about
+        // the actual byte stream, swap in a recording mock.
+        return true;
+    }
 };
 
 // Iteration count per worker thread. Kept modest so the binary completes

@@ -152,4 +152,14 @@ int CConnmanAdapter::GetTotalOutbound() const
     return count;
 }
 
+bool CConnmanAdapter::PushMessage(::dilithion::net::NodeId peer,
+                                  const ::CNetMessage& msg)
+{
+    // Direct proxy to legacy CConnman::PushMessage(int, const CNetMessage&)
+    // (connman.h:207). Phase 6 sub-stream (c) ratification §3 — this method
+    // adapts the legacy outbound dispatch surface so port code can call
+    // it through the IConnectionManager abstraction.
+    return m_connman.PushMessage(static_cast<int>(peer), msg);
+}
+
 }  // namespace dilithion::net::port

@@ -119,6 +119,8 @@ public:
     int GetConnectionCount(::dilithion::net::OutboundClass) const override { return 0; }
     int GetTotalInbound() const override { return 0; }
     int GetTotalOutbound() const override { return 0; }
+    bool PushMessage(::dilithion::net::NodeId,
+                     const ::CNetMessage&) override { return true; }
 };
 
 constexpr int kPeerId = 42;

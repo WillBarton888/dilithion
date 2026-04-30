@@ -63,6 +63,11 @@ public:
     int  GetTotalInbound() const override;
     int  GetTotalOutbound() const override;
 
+    // Phase 6 sub-stream (c) — forwards to CConnman::PushMessage(int, const
+    // CNetMessage&). See ratification §3.
+    bool PushMessage(::dilithion::net::NodeId peer,
+                     const ::CNetMessage& msg) override;
+
 private:
     CConnman& m_connman;
 };

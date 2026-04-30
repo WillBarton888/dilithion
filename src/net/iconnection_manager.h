@@ -13,6 +13,10 @@
 #include <vector>
 #include <net/iaddress_manager.h>  // OutboundClass enum
 
+// Forward declaration so the interface header does not pull in connman.h
+// (connman.h includes platform networking headers — heavy include surface).
+class CNetMessage;
+
 namespace dilithion::net {
 
 using NodeId = int;
@@ -55,6 +59,22 @@ public:
     virtual int GetConnectionCount(OutboundClass cls) const = 0;
     virtual int GetTotalInbound() const = 0;
     virtual int GetTotalOutbound() const = 0;
+
+    // Phase 6 sub-stream (c) — outbound message dispatch surface.
+    // Adapts the legacy CConnman::PushMessage(int, const CNetMessage&)
+    // into the IConnectionManager interface so port code can dispatch
+    // outbound messages through a mockable surface (test routing connman
+    // intercepts and re-delivers as inbound on the destination fixture).
+    // See `phase_6_interface_additions_ratification.md` §3.
+    //
+    // Returns true on successful enqueue (does not block on socket I/O);
+    // false if the destination peer is unknown or disconnected.
+    //
+    // The caller MUST NOT hold any PeerManager mutex when invoking this
+    // — PushMessage may take connman-internal locks (m_nodes_mutex etc.)
+    // which sit ABOVE the PeerManager mutexes in the locked partial
+    // order. The "copy-state-out" discipline applies.
+    virtual bool PushMessage(NodeId peer, const CNetMessage& msg) = 0;
 };
 
 }  // namespace dilithion::net

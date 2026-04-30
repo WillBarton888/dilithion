@@ -1452,16 +1452,23 @@ void CPeerManager::RequestNextBlocks() {
         }
     }
 
-    // Step 4: outbound getdata issuance via g_node_context.connman.
+    // Step 4: outbound getdata issuance via m_connman (Phase 6 sub-stream
+    // (c) refactor — was g_node_context.connman.get()->PushMessage; now
+    // routes through the IConnectionManager interface so the test routing
+    // connman can intercept and re-deliver bytes as inbound on a
+    // destination fixture). Message construction still pulls from
+    // g_node_context.message_processor — that surface is side-effect-free
+    // (a CNetMessage factory), null-safe, and out of scope for the (c)
+    // routing change.
+    //
     // SAFE: copy-state-out — NO PeerManager mutex held here. Null-safe:
-    // under unit-test fixtures or pre-flag-1 wiring, connman /
-    // message_processor are null and the call simply returns. Accounting
-    // (steps 1-3) has already updated m_blocks_in_flight regardless.
+    // under unit-test fixtures with no message_processor wired, the call
+    // simply returns; accounting (steps 1-3) has already updated
+    // m_blocks_in_flight regardless.
     if (requests.empty()) return;
 
-    CConnman* connman_ptr = g_node_context.connman.get();
     CNetMessageProcessor* msg_proc = g_node_context.message_processor;
-    if (connman_ptr == nullptr || msg_proc == nullptr) {
+    if (msg_proc == nullptr) {
         return;
     }
 
@@ -1473,7 +1480,7 @@ void CPeerManager::RequestNextBlocks() {
     }
     for (const auto& kv : by_peer) {
         CNetMessage msg = msg_proc->CreateGetDataMessage(kv.second);
-        connman_ptr->PushMessage(kv.first, std::move(msg));
+        m_connman.PushMessage(kv.first, msg);
     }
 }
 
