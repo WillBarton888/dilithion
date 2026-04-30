@@ -59,7 +59,18 @@ struct CPeer {
     // Connection metadata (filled by OnPeerConnected from connman).
     int nVersion = 0;
     uint64_t nServices = 0;
-    int64_t nTimeConnected = 0;
+
+    // Local connect-time (PR6.5b.fixups-semantic, finding PR6.5b.2-SEC-MD-2).
+    // Set by OnPeerConnected from GetTime() — matches the original documented
+    // semantics of the legacy `nTimeConnected` field. Trusted local-clock value.
+    int64_t nTimeConnectedLocal = 0;
+
+    // Peer-claimed wire timestamp (PR6.5b.fixups-semantic, finding
+    // PR6.5b.2-SEC-MD-2). Attacker-controlled int64 from the VERSION message.
+    // Bounds-checked in HandleVersion against `now ± Consensus::MAX_FUTURE_BLOCK_TIME`
+    // before being stored; out-of-range values trigger UnknownMessage misbehavior
+    // and are NOT written to this field. Never use as a trusted clock source.
+    int64_t m_peer_claimed_time = 0;
 
     // Duplicate-version sentinel (PR6.5b.fixups-mechanical, finding
     // PR6.5b.2-SEC-MD-1). The legacy `nVersion != 0` test misclassified a

@@ -33,6 +33,7 @@
 #include <net/serialize.h>
 #include <primitives/block.h>
 #include <util/logging.h>
+#include <util/time.h>
 
 #include <chrono>
 #include <ctime>
@@ -391,19 +392,32 @@ bool CPeerManager::ProcessMessage(NodeId peer,
 }
 
 // version handler. Reads enough of the upstream wire format to populate
-// nVersion / nServices / nTimeConnected on the per-peer CPeer struct,
+// nVersion / nServices / m_peer_claimed_time on the per-peer CPeer struct,
 // closing the deferred-from-PR6.5b.1b populate path. Wire layout matches
 // CNetMessageProcessor::SerializeVersionMessage in src/net/net.cpp:2843.
 //
-// SAFE: copy-state-out — duplicate-version detection mutates state under
-// the lock; the m_scorer call is performed AFTER drop with a captured-out
-// `is_duplicate` bool.
+// SAFE: copy-state-out — duplicate-version detection AND out-of-range
+// timestamp detection mutate state under the lock; m_scorer calls are
+// performed AFTER drop with captured-out `is_duplicate` / `is_out_of_range`
+// bools. Bounds check on read_timestamp uses Consensus::MAX_FUTURE_BLOCK_TIME
+// (src/consensus/params.h:201) symmetrically (past and future), routing
+// out-of-range values to UnknownMessage — no new enum value (PR6.5b.fixups-
+// semantic, finding PR6.5b.2-SEC-MD-2).
 bool CPeerManager::HandleVersion(NodeId peer, CDataStream& vRecv) {
     // Read minimum required fields from the wire. CDataStream throws on
     // under-length; ProcessMessage's try/catch routes to UnknownMessage.
     const int32_t  read_version  = vRecv.ReadInt32();
     const uint64_t read_services = vRecv.ReadUint64();
     const int64_t  read_timestamp = vRecv.ReadInt64();
+
+    // Bounds-check the peer-claimed timestamp against local clock.
+    // Out-of-range (in either direction) is treated as a malformed VERSION:
+    // route to UnknownMessage (no new enum) and reject the message. The
+    // bound matches Consensus::MAX_FUTURE_BLOCK_TIME (2 hours) symmetrically.
+    const int64_t now = GetTime();
+    const bool is_out_of_range =
+        (read_timestamp > now + Consensus::MAX_FUTURE_BLOCK_TIME) ||
+        (read_timestamp < now - Consensus::MAX_FUTURE_BLOCK_TIME);
 
     bool is_duplicate = false;
     {
@@ -420,10 +434,14 @@ bool CPeerManager::HandleVersion(NodeId peer, CDataStream& vRecv) {
         // dispatch misbehavior because nVersion would still read as zero.
         if (p.m_version_received) {
             is_duplicate = true;
-        } else {
+        } else if (!is_out_of_range) {
+            // Commit state only on a clean (non-duplicate, in-range) version.
+            // An out-of-range version is rejected without touching CPeer state
+            // (treated as if the message never arrived) — the scorer tick is
+            // performed below after lock drop.
             p.nVersion = read_version;
             p.nServices = read_services;
-            p.nTimeConnected = read_timestamp;
+            p.m_peer_claimed_time = read_timestamp;
             p.m_version_received = true;
         }
     }
@@ -432,6 +450,11 @@ bool CPeerManager::HandleVersion(NodeId peer, CDataStream& vRecv) {
     if (is_duplicate) {
         m_scorer.Misbehaving(peer, ::dilithion::net::MisbehaviorType::DuplicateVersion,
                              "duplicate version message");
+        return false;
+    }
+    if (is_out_of_range) {
+        m_scorer.Misbehaving(peer, ::dilithion::net::MisbehaviorType::UnknownMessage,
+                             "version timestamp out of range");
         return false;
     }
     return true;
@@ -1213,7 +1236,7 @@ std::vector<PeerInfo> CPeerManager::GetPeerInfo() const {
     for (const auto& kv : m_peers) {
         const CPeer& p = *kv.second;
         out.push_back(PeerInfo{p.id, p.nVersion, p.nServices,
-                               p.nTimeConnected, p.m_is_chosen_sync_peer});
+                               p.nTimeConnectedLocal, p.m_is_chosen_sync_peer});
     }
     return out;
 }
@@ -1221,7 +1244,11 @@ std::vector<PeerInfo> CPeerManager::GetPeerInfo() const {
 void CPeerManager::OnPeerConnected(NodeId peer) {
     std::lock_guard<std::mutex> lk(m_peers_mutex);
     if (m_peers.find(peer) != m_peers.end()) return;  // already connected
-    m_peers.emplace(peer, std::make_unique<CPeer>(peer));
+    auto [it, inserted] = m_peers.emplace(peer, std::make_unique<CPeer>(peer));
+    // Local connect-time stamped from GetTime() (PR6.5b.fixups-semantic,
+    // finding PR6.5b.2-SEC-MD-2). Distinct from m_peer_claimed_time which is
+    // set wire-side by HandleVersion after a bounds check.
+    it->second->nTimeConnectedLocal = GetTime();
 }
 
 void CPeerManager::OnPeerDisconnected(NodeId peer) {

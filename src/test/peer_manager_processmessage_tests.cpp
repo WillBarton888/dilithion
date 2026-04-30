@@ -46,6 +46,7 @@
 
 #include <consensus/port/chain_selector_impl.h>
 #include <consensus/chain.h>
+#include <consensus/params.h>
 #include <core/chainparams.h>
 #include <net/connman.h>
 #include <net/ipeer_scorer.h>
@@ -147,8 +148,15 @@ constexpr int kPeerId = 42;
 
 // ============================================================================
 // Test 1 — dispatch-table-version: version handler populates nVersion,
-// nServices, nTimeConnected on CPeer (closes the deferred-from-PR6.5b.1b
-// populate path).
+// nServices on CPeer (closes the deferred-from-PR6.5b.1b populate path).
+//
+// PR6.5b.fixups-semantic update: PeerInfo::time_connected now exposes the
+// LOCAL connect-time (set by OnPeerConnected from GetTime()) — NOT the
+// peer-supplied wire timestamp (which lives in the internal
+// m_peer_claimed_time field after a bounds check). We assert non-zero
+// (proves OnPeerConnected stamped the local clock) rather than equality
+// against the wire value; the wire-value path is covered by
+// test_version_in_range_nTime_populates_peer_claimed below.
 // ============================================================================
 void test_dispatch_table_version()
 {
@@ -157,7 +165,12 @@ void test_dispatch_table_version()
     ProcessMessageFixture fix;
     fix.pm.OnPeerConnected(kPeerId);
 
-    auto wire = MakeVersionWire(70015, 0x9, 1700000000);
+    // Use a wire timestamp near now() so the bounds check in HandleVersion
+    // (now ± Consensus::MAX_FUTURE_BLOCK_TIME) passes regardless of when
+    // this test runs. The 1700000000 epoch literal would now fail the
+    // bounds check (it is years in the past relative to current time).
+    const int64_t now_ts = static_cast<int64_t>(time(nullptr));
+    auto wire = MakeVersionWire(70015, 0x9, now_ts);
     CDataStream stream(wire);
 
     bool result = fix.pm.ProcessMessage(kPeerId, "version", stream);
@@ -168,7 +181,10 @@ void test_dispatch_table_version()
     assert(info[0].id == kPeerId);
     assert(info[0].version == 70015);
     assert(info[0].services == 0x9);
-    assert(info[0].time_connected == 1700000000);
+    // time_connected is local-clock (PR6.5b.fixups-semantic): asserts that
+    // OnPeerConnected stamped GetTime() into nTimeConnectedLocal. It is NOT
+    // the peer-supplied wire timestamp.
+    assert(info[0].time_connected != 0);
 
     // No misbehavior expected on a clean version handshake.
     assert(fix.scorer.calls.empty());
@@ -389,15 +405,18 @@ void test_double_version_misbehavior()
     ProcessMessageFixture fix;
     fix.pm.OnPeerConnected(kPeerId);
 
-    // First version: clean, populates fields.
-    auto wire1 = MakeVersionWire(70015, 0x9, 1700000000);
+    // First version: clean, populates fields. Wire timestamp must be in
+    // bounds for HandleVersion's now ± Consensus::MAX_FUTURE_BLOCK_TIME check
+    // (PR6.5b.fixups-semantic).
+    const int64_t now_ts = static_cast<int64_t>(time(nullptr));
+    auto wire1 = MakeVersionWire(70015, 0x9, now_ts);
     CDataStream s1(wire1);
     bool r1 = fix.pm.ProcessMessage(kPeerId, "version", s1);
     assert(r1 == true);
     assert(fix.scorer.calls.empty());
 
     // Second version: rejected, scorer tick on DuplicateVersion.
-    auto wire2 = MakeVersionWire(70016, 0x1, 1700000001);
+    auto wire2 = MakeVersionWire(70016, 0x1, now_ts + 1);
     CDataStream s2(wire2);
     bool r2 = fix.pm.ProcessMessage(kPeerId, "version", s2);
     assert(r2 == false);
@@ -407,11 +426,13 @@ void test_double_version_misbehavior()
            ::dilithion::net::MisbehaviorType::DuplicateVersion);
 
     // Verify the first message's fields were retained (not overwritten).
+    // time_connected is local-clock (PR6.5b.fixups-semantic): asserts
+    // OnPeerConnected stamped GetTime() — NOT the wire timestamp.
     auto info = fix.pm.GetPeerInfo();
     assert(info.size() == 1);
     assert(info[0].version == 70015);
     assert(info[0].services == 0x9);
-    assert(info[0].time_connected == 1700000000);
+    assert(info[0].time_connected != 0);
 
     std::cout << " OK\n";
 }
@@ -450,10 +471,74 @@ void test_deferred_handlers_still_stubbed()
 }
 
 // ============================================================================
+// Test 10 — version-in-range-nTime-populates-peer-claimed (PR6.5b.fixups-
+// semantic, finding PR6.5b.2-SEC-MD-2): a peer-supplied wire timestamp inside
+// `now ± Consensus::MAX_FUTURE_BLOCK_TIME` is accepted. Handler returns true,
+// no scorer tick. m_peer_claimed_time is internal — observable evidence is
+// (a) handler returned true, (b) no scorer tick, (c) the local-clock-sourced
+// time_connected is non-zero (proves OnPeerConnected stamped it).
+// ============================================================================
+void test_version_in_range_nTime_populates_peer_claimed()
+{
+    std::cout << "  test_version_in_range_nTime_populates_peer_claimed..." << std::flush;
+
+    ProcessMessageFixture fix;
+    fix.pm.OnPeerConnected(kPeerId);
+
+    // 60 seconds in the past — well inside ± MAX_FUTURE_BLOCK_TIME (2 hours).
+    const int64_t now_ts = static_cast<int64_t>(time(nullptr));
+    auto wire = MakeVersionWire(70015, 0x9, now_ts - 60);
+    CDataStream stream(wire);
+
+    bool result = fix.pm.ProcessMessage(kPeerId, "version", stream);
+    assert(result == true);
+    assert(fix.scorer.calls.empty());
+
+    auto info = fix.pm.GetPeerInfo();
+    assert(info.size() == 1);
+    assert(info[0].version == 70015);
+    assert(info[0].services == 0x9);
+    // Local-clock value (NOT the wire-supplied timestamp) — non-zero proves
+    // OnPeerConnected ran and populated nTimeConnectedLocal.
+    assert(info[0].time_connected != 0);
+
+    std::cout << " OK\n";
+}
+
+// ============================================================================
+// Test 11 — version-out-of-range-nTime-misbehavior (PR6.5b.fixups-semantic,
+// finding PR6.5b.2-SEC-MD-2): a peer-supplied wire timestamp outside
+// `now ± Consensus::MAX_FUTURE_BLOCK_TIME` is rejected. Handler returns false
+// and routes exactly one UnknownMessage scorer tick (no new enum value).
+// ============================================================================
+void test_version_out_of_range_nTime_misbehavior()
+{
+    std::cout << "  test_version_out_of_range_nTime_misbehavior..." << std::flush;
+
+    ProcessMessageFixture fix;
+    fix.pm.OnPeerConnected(kPeerId);
+
+    // Timestamp 2× MAX_FUTURE_BLOCK_TIME in the future — well outside bounds.
+    const int64_t now_ts = static_cast<int64_t>(time(nullptr));
+    auto wire = MakeVersionWire(
+        70015, 0x9, now_ts + (Consensus::MAX_FUTURE_BLOCK_TIME * 2));
+    CDataStream stream(wire);
+
+    bool result = fix.pm.ProcessMessage(kPeerId, "version", stream);
+    assert(result == false);
+    assert(fix.scorer.calls.size() == 1);
+    assert(fix.scorer.calls[0].peer == kPeerId);
+    assert(fix.scorer.calls[0].type ==
+           ::dilithion::net::MisbehaviorType::UnknownMessage);
+
+    std::cout << " OK\n";
+}
+
+// ============================================================================
 int main()
 {
     std::cout << "Phase 6 PR6.5b.2 — ProcessMessage dispatch tests\n";
-    std::cout << "  (9-test suite per active_contract.md)\n\n";
+    std::cout << "  (11-test suite per active_contract.md + PR6.5b.fixups-semantic)\n\n";
 
     try {
         test_dispatch_table_version();
@@ -465,11 +550,13 @@ int main()
         test_dispatch_unknown_peer();
         test_double_version_misbehavior();
         test_deferred_handlers_still_stubbed();
+        test_version_in_range_nTime_populates_peer_claimed();
+        test_version_out_of_range_nTime_misbehavior();
     } catch (const std::exception& e) {
         std::cerr << "\nFAILED: " << e.what() << "\n";
         return 1;
     }
 
-    std::cout << "\nAll 9 PR6.5b.2 ProcessMessage dispatch tests passed.\n";
+    std::cout << "\nAll 11 PR6.5b.2 ProcessMessage dispatch tests passed.\n";
     return 0;
 }
