@@ -256,47 +256,60 @@ void test_dispatch_table_ping()
 }
 
 // ============================================================================
-// Test 4 — dispatch-table-pong (matching nonce): clears the pong-expected
-// state on CPeer. Test verifies via a second pong with the same nonce now
-// scoring (because the expected state was cleared).
+// Test 4 — dispatch-table-pong-no-crash-on-correct-nonce.
+// RENAMED 2026-04-30 (PR6.5b.7-close-prep) from
+// `test_dispatch_table_pong_correct_nonce` to honestly describe coverage.
+//
+// What this test actually verifies:
+//   - The pong handler returns `true` for a structurally-valid pong frame
+//     (pong wire-format successfully deserialized; dispatch table found
+//     the entry; handler returned through to ProcessMessage success path).
+//   - The handler does NOT crash on a "correct-nonce-shaped" payload.
+//   - Under the SHIPPED port semantics (γ ownership, no outbound ping
+//     issuance from port), the scorer is ALSO not ticked on this branch,
+//     because m_pong_expected starts false and HandlePong's matching-
+//     nonce branch is unreachable.
+//
+// What this test DOES NOT verify (intentional gap):
+//   - The matching-nonce-clears-state branch of HandlePong. That branch
+//     is dead code under γ in this PR — m_pong_expected / m_pong_expected_
+//     nonce are only set by SendMessages on outbound-ping issuance, and
+//     SendMessages is an intentional no-op under the γ topology this
+//     phase ships (legacy retains outbound ping issuance under flag=1).
+//     Making this test non-vacuous would require widening surface area
+//     (friend declaration to poke m_pong_expected, public test accessor,
+//     or a SendMessages rewrite) — all drift triggers per the PR6.5b.7-
+//     close-prep contract amendment 2026-04-30.
+//
+// TODO: end-to-end coverage of the matching-nonce branch is mapped to
+// PR6.5b.7 sub-stream (c) — the 3-node regtest harness — where outbound
+// ping issuance flows naturally through legacy and the port observes
+// ping-keyed pongs through real network plumbing. See
+// `c:/Users/will/dilithion/.claude/contracts/phase_6_deferred_findings.md`
+// for the explicit pong-nonce → sub-stream (c) mapping.
 // ============================================================================
-void test_dispatch_table_pong_correct_nonce()
+void test_dispatch_table_pong_no_crash_on_correct_nonce()
 {
-    std::cout << "  test_dispatch_table_pong_correct_nonce..." << std::flush;
+    std::cout << "  test_dispatch_table_pong_no_crash_on_correct_nonce..." << std::flush;
 
     ProcessMessageFixture fix;
     fix.pm.OnPeerConnected(kPeerId);
 
-    // Pong handler reads CPeer::m_pong_expected{,_nonce}. PR6.5b.6 owns
-    // setting these (outbound ping issuance); for 6b.2 testing, we need a
-    // way to inject the expected state. The simplest path: PR6.5b.6 hasn't
-    // landed yet, so any pong's nonce will be "unexpected" by default.
-    // We instead test the negative direction in Test 5 below; for the
-    // matching-nonce direction, we directly assert that the dispatch path
-    // returns true even when no pong was expected — the scoring is
-    // additional, not replacement, behavior. This pins the current
-    // semantics: pong-without-outbound-ping is misbehavior (Test 5), and
-    // pong-with-matching-nonce clears the state cleanly. Until 6b.6 wires
-    // outbound ping issuance, the matching path is exercised below by
-    // priming m_pong_expected via direct lifecycle re-entry through a
-    // crafted version message — but that's not how upstream's protocol
-    // works. Per contract Test 4 description "with correct_nonce_stream
-    // returns true and clears the in-flight pong-expected state", we
-    // verify the wire-format-level dispatch returns true and the
-    // happy-path-when-matching is structurally correct by Test 5's
-    // negative coverage.
+    // Send a pong with nonce 0xAAAAAAAAAAAAAAAA. The peer has no
+    // outstanding ping (m_pong_expected default-false), so HandlePong
+    // takes the unexpected-nonce branch (covered by Test 5 below) under
+    // the SHIPPED dispatch path. This test pins the wire-format-level
+    // success contract:
+    //   - dispatch returns `true` (structurally valid frame)
+    //   - handler does not crash
     //
-    // Pragmatic test: send a pong to a peer with no outstanding ping
-    // (m_pong_expected = false default). Per contract, this scores once
-    // (Test 5); Test 4 is the same wire path returning true. The positive
-    // matching-nonce branch's lock-and-clear logic is covered by code
-    // review + the symmetry of the if/else in HandlePong: if scoring
-    // happens (Test 5), the not-scoring branch is the only other path
-    // and clears the state.
+    // The matching-nonce branch (m_pong_expected=true && nonces equal) is
+    // dead code under γ in this PR — see top-of-test rationale and the
+    // deferred-findings ledger for the 3-node regtest harness mapping.
     auto wire = MakePingPongWire(0xAAAAAAAAAAAAAAAAull);
     CDataStream stream(wire);
     bool result = fix.pm.ProcessMessage(kPeerId, "pong", stream);
-    assert(result == true);  // wire dispatch result IS true regardless of nonce
+    assert(result == true);  // wire dispatch returns true for structurally valid frame
 
     std::cout << " OK\n";
 }
@@ -544,7 +557,7 @@ int main()
         test_dispatch_table_version();
         test_dispatch_table_verack();
         test_dispatch_table_ping();
-        test_dispatch_table_pong_correct_nonce();
+        test_dispatch_table_pong_no_crash_on_correct_nonce();
         test_dispatch_table_pong_wrong_nonce();
         test_dispatch_unknown_command();
         test_dispatch_unknown_peer();

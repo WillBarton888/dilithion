@@ -649,6 +649,22 @@ peer_manager_misbehavior_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_mis
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_misbehavior_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.7-close-prep: static-grep lock-order tests (3 cases). Reads
+# peer_manager.cpp source and asserts structural invariants via regex +
+# brace-depth tracking. Pin the locked partial order documented in
+# peer_manager.h: connman_peer_lock < m_peers_mutex < m_sync_state_mutex
+# < m_blocks_in_flight_mutex < cs_main. Cases:
+#   1. lock_order_no_reverse_acquisition (m_blocks_in_flight_mutex never
+#      held while acquiring m_peers_mutex / m_sync_state_mutex)
+#   2. no_callout_under_peer_manager_mutex (m_scorer/m_connman/m_chain_
+#      selector/m_addrman never invoked under any PM mutex)
+#   3. no_node_context_callout_under_peer_manager_mutex (g_node_context.*
+#      and hdr_mgr-> calls never under a PM mutex; closes re-entry hazard)
+peer_manager_lock_order_static_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_lock_order_static_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_manager_lock_order_static_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)

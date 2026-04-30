@@ -130,13 +130,12 @@ int CPeerManager::GetHeadersSyncPeer() const {
 // NO per-peer tracking from this hook (the hook itself doesn't carry a
 // peer_id; legacy is parameterless too).
 //
-// Per-peer orphan-cluster scoring lives at the in-scope site inside
-// HandleBlock — when the chain-selector's LookupBlockIndex on
-// block.hashPrevBlock returns null, the block is an orphan and the
-// peer_id is in local scope, so HandleBlock dispatches
-// m_scorer.Misbehaving directly. That keeps OnOrphanBlockReceived's
-// signature parameterless (frozen by Decision 1) and routes per-peer
-// scoring via the natural path.
+// PR6.5b.6 Item-B revert (close-prep PR6.5b.7 closes PR6.5b.6-M1):
+// per-peer orphan-cluster scoring at the HandleBlock site is INTENTIONALLY
+// DEFERRED. See HandleBlock body for the deferral rationale. This hook is
+// the ONLY active orphan accounting path under flag=1 — it bumps the
+// global atomic counter and that is all. No per-peer misbehavior dispatch
+// fires from chain.cpp's accept-and-orphan callback.
 //
 // Synchronous — fires under cs_main per Option B. Atomic counter
 // satisfies the cs_main constraint without taking a PeerManager mutex.
@@ -218,8 +217,9 @@ void CPeerManager::OnBlockConnected() {
 // m_sync_state_mutex before any callout. No m_connman / outbound
 // network primitive is invoked here (PR6.5b.6 owns that path).
 void CPeerManager::Tick() {
-    // (1) State update — runs before the early-exit so m_synced
-    // is updated even when there is no current sync-peer.
+    // (1) State update — runs unconditionally on every Tick so m_synced
+    // is updated even when there is no current sync-peer (no early-exit
+    // gates this block; see PR6.5b.fixups-mechanical-SEC-LO-1 close).
     UpdateSyncStateLocked();
 
     // (2) Existing PR6.5b.3 headers-sync flow.
@@ -1138,28 +1138,30 @@ bool CPeerManager::HandleBlock(NodeId peer, CDataStream& vRecv) {
     // PeerManager mutex is held across the chain_selector callout below.
     RemoveBlockInFlight(peer, block_hash);
 
-    // PR6.5b.6 (Item B) — orphan-cluster misbehavior dispatch is
-    // INTENTIONALLY DEFERRED. The contract marked per-peer orphan scoring
-    // from HandleBlock as OPTIONAL ("If NOT implemented, document in
-    // comments that orphan misbehavior dispatch is intentionally deferred
-    // (with rationale)"). Rationale:
-    //   - The global atomic counter `m_consecutive_orphan_blocks` driven
-    //     from `OnOrphanBlockReceived()` already covers the legacy parity
-    //     surface (ibd_coordinator.h:132).
+    // PR6.5b.6 / PR6.5b.7-close-prep (closes PR6.5b.6-M1): orphan-dispatch
+    // accounting in HandleBlock is INTENTIONALLY ABSENT. Per-peer scoring at
+    // this site was reverted in PR6.5b.6 (Item B revert); the only orphan
+    // accounting that the shipped port performs is the GLOBAL atomic counter
+    // bumped by `OnOrphanBlockReceived()` (parameterless hook fired by
+    // chain.cpp on accept-and-orphan; mirrors legacy CIbdCoordinator::
+    // OnOrphanBlockReceived at ibd_coordinator.h:132). NO per-peer
+    // misbehavior dispatch fires from this site under flag=1.
+    //
+    // Rationale for the deferral (kept for future-PR readers):
     //   - Per-peer orphan scoring at this site falsely punishes peers
     //     whose parent simply hasn't been processed yet (out-of-order
-    //     delivery is a legitimate condition, not misbehavior). Bitcoin
-    //     Core's analogous dispatch only fires on demonstrably-invalid
-    //     blocks (POW failure, malformed header), not on unknown-parent.
+    //     delivery is legitimate, not misbehavior). Bitcoin Core's
+    //     analogous dispatch only fires on demonstrably-invalid blocks
+    //     (POW failure, malformed header), not on unknown-parent.
     //   - Rate-bounding by scorer score-cap is insufficient: a peer
-    //     legitimately ahead of us by N blocks would be penalized N times
-    //     before we catch up.
+    //     legitimately ahead of us by N blocks would be penalized N
+    //     times before we catch up.
     // If a future PR demonstrates a use case where unknown-parent IS
     // adversarial (e.g. paired with a separate signal that the block
-    // header is invalid), reinstate dispatch HERE with copy-state-out.
-    // γ ownership of port-side orphan misbehavior remains exclusive —
-    // legacy does not score on this path either (ibd_coordinator
-    // tracks orphans for rotation, not for misbehavior scoring).
+    // header is invalid), reinstate per-peer dispatch HERE with copy-
+    // state-out. Until then, γ ownership of orphan accounting collapses
+    // to "global counter only" on the port side; legacy ibd_coordinator
+    // also tracks orphans for rotation only, not misbehavior scoring.
 
     // Delegate to chain_selector. ProcessNewBlock returns true/false based on
     // its own validation; per contract, HandleBlock returns true regardless
