@@ -119,15 +119,12 @@ constexpr int kInnerIters = 2000;
 // Synthesise a deterministic uint256 from a seed (avoids dependency on
 // crypto RNG from many threads).
 uint256 MakeHash(uint32_t seed) {
-    uint256 h;
-    h.SetNull();
+    uint256 h;  // default ctor zeros all 32 bytes
     auto* bytes = h.begin();
-    for (int i = 0; i < 4; ++i) {
-        bytes[i]     = static_cast<uint8_t>((seed >>  0) & 0xff);
-        bytes[i + 4] = static_cast<uint8_t>((seed >>  8) & 0xff);
-        bytes[i + 8] = static_cast<uint8_t>((seed >> 16) & 0xff);
-        bytes[i +12] = static_cast<uint8_t>((seed >> 24) & 0xff);
-    }
+    bytes[0] = static_cast<uint8_t>((seed >>  0) & 0xff);
+    bytes[1] = static_cast<uint8_t>((seed >>  8) & 0xff);
+    bytes[2] = static_cast<uint8_t>((seed >> 16) & 0xff);
+    bytes[3] = static_cast<uint8_t>((seed >> 24) & 0xff);
     return h;
 }
 
