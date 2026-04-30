@@ -62,6 +62,13 @@ private:
     std::atomic<bool>     m_interrupt{false};
     std::atomic<uint64_t> m_mismatches_observed{0};
 
+    // SEC-MD-1: gates the spawn-vs-stop race. Set under m_mutex inside
+    // StartBackgroundSync before m_mutex is released for the chainstate
+    // query. Cleared after m_sync_thread has been assigned. Stop() waits
+    // for this to clear before checking m_sync_thread.joinable() so a
+    // concurrent Stop never observes a half-spawned thread.
+    std::atomic<bool>     m_starting{false};
+
     std::thread m_sync_thread;
 
     static std::string MakeTxKey(const uint256& txid);

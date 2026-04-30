@@ -1062,4 +1062,98 @@ BOOST_AUTO_TEST_CASE(start_sync_with_empty_chainstate_does_not_spawn) {
     g_chainstate.Cleanup();
 }
 
+// SEC-MD-2 regression: a Start → Stop → Start sequence must produce a
+// thread that actually runs to completion. Before the fix, the second
+// Start observed m_interrupt latched true from the first Stop and the
+// new thread exited at its first interrupt check — a silent no-op.
+BOOST_AUTO_TEST_CASE(start_stop_start_resumes_sync_after_interrupt_clear) {
+    TempDbScope scope_idx("md2_idx");
+    TempDbScope scope_chain("md2_chain");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+
+    constexpr int kN = 8;
+    ChainFixture fix;
+    fix.Build(kN, chain_db);
+
+    CTxIndex idx;
+    BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db));
+
+    // First cycle: full sync.
+    idx.StartBackgroundSync();
+    BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
+    BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), kN - 1);
+    idx.Stop();
+    BOOST_CHECK(idx.IsSynced());
+
+    // Extend the chain so the second cycle has new work to do.
+    fix.Build(kN + 4, chain_db);   // height 0..(kN+3) now
+    constexpr int kN2 = kN + 4;
+
+    // SEC-MD-2: re-Start must clear m_interrupt and spawn a working thread.
+    idx.StartBackgroundSync();
+    BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
+    BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), kN2 - 1);
+
+    // Verify the new blocks were actually indexed (substantive work).
+    for (int h = kN; h < kN2; ++h) {
+        uint256 fb;
+        uint32_t fp = 0;
+        BOOST_REQUIRE(idx.FindTx(fix.per_height_tx[h]->GetHash(), fb, fp));
+        BOOST_CHECK(fb == fix.per_height_hash[h]);
+    }
+
+    idx.Stop();
+    g_chainstate.Cleanup();
+}
+
+// SEC-MD-1 regression: two concurrent StartBackgroundSync calls must NOT
+// both reach the m_sync_thread assignment (which would terminate the
+// program). The m_starting gate makes the second concurrent caller a
+// no-op even when the first is between mutex release and thread assign.
+BOOST_AUTO_TEST_CASE(concurrent_start_no_double_spawn) {
+    TempDbScope scope_idx("md1_idx");
+    TempDbScope scope_chain("md1_chain");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+
+    constexpr int kN = 6;
+    ChainFixture fix;
+    fix.Build(kN, chain_db);
+
+    CTxIndex idx;
+    BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db));
+
+    // Hammer Start from 4 threads simultaneously. Without the m_starting
+    // gate, two concurrent threads passing the joinable() check would
+    // both reach `m_sync_thread = std::thread(...)` — std::terminate.
+    // With the gate, exactly one wins; the others see m_starting==true
+    // or m_sync_thread.joinable()==true and bail.
+    constexpr int kStarters = 4;
+    std::vector<std::thread> starters;
+    starters.reserve(kStarters);
+    std::atomic<int> ready{0};
+    std::atomic<bool> go{false};
+    for (int i = 0; i < kStarters; ++i) {
+        starters.emplace_back([&]() {
+            ready.fetch_add(1);
+            while (!go.load()) std::this_thread::yield();
+            idx.StartBackgroundSync();
+        });
+    }
+    while (ready.load() < kStarters) std::this_thread::yield();
+    go.store(true);
+    for (auto& t : starters) t.join();
+
+    // If any of the 4 starters double-spawned, std::terminate would have
+    // killed the test process. Reaching here proves the gate works.
+    BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
+    BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), kN - 1);
+
+    idx.Stop();
+    g_chainstate.Cleanup();
+}
+
 BOOST_AUTO_TEST_SUITE_END()

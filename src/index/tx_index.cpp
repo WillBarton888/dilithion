@@ -208,19 +208,40 @@ bool CTxIndex::Init(const std::string& datadir, CBlockchainDB* chain_db) {
         // walk past m_last_height for blocks the index already covers.
 
         if (need_wipe) {
-            std::cerr << "[txindex] startup integrity check failed at height "
-                      << height << " — wiping index and resetting to -1" << std::endl;
-            // WipeIndex documented to run without m_mutex held.
-            const bool wiped = WipeIndex();
-            // Re-take the lock to update state coherently.
+            // SEC-MD-3: re-verify state before destructive wipe. The lock
+            // was released for the chainstate query (R1); during that
+            // window a concurrent WriteBlock (e.g. from a prematurely-
+            // registered callback) could have advanced m_last_height. If
+            // it did, the staleness assumption underlying need_wipe no
+            // longer holds — abort the wipe rather than discard new work.
+            // Today's PR-3 wiring registers callbacks AFTER Init returns,
+            // so this race is not exploitable, but the class header does
+            // not enforce that ordering — defense in depth.
             lock.lock();
-            if (!wiped) {
-                std::cerr << "[txindex] integrity wipe failed; closing index" << std::endl;
-                m_db.reset();
-                return false;
+            if (m_last_height.load() != height) {
+                std::cerr << "[txindex] integrity wipe skipped: state advanced "
+                          << "during init (recorded=" << height
+                          << ", now=" << m_last_height.load()
+                          << ") — leaving index intact" << std::endl;
+            } else {
+                lock.unlock();   // wipe doesn't need m_mutex (leveldb own mutex)
+                std::cerr << "[txindex] startup integrity check failed at height "
+                          << height << " — wiping index and resetting to -1" << std::endl;
+                const bool wiped = WipeIndex();
+                lock.lock();
+                if (!wiped) {
+                    std::cerr << "[txindex] integrity wipe failed; closing index" << std::endl;
+                    m_db.reset();
+                    return false;
+                }
+                if (m_last_height.load() == height) {
+                    m_last_height.store(-1);
+                    m_synced.store(false);
+                }
+                // else: race lost during wipe; leave m_last_height as the
+                // concurrent-writer's value. The reindex thread will re-walk
+                // anything that the wipe erased — self-healing.
             }
-            m_last_height.store(-1);
-            m_synced.store(false);
         } else {
             lock.lock();
         }
@@ -413,6 +434,11 @@ void CTxIndex::StartBackgroundSync() {
     //
     // GetTip() acquires cs_main internally (R1). We do NOT hold m_mutex
     // here — read it through the public API only.
+    //
+    // SEC-MD-1: m_starting gates the spawn-vs-stop race. SEC-MD-2: clear
+    // m_interrupt under the same lock so a Start-after-Stop sequence
+    // produces a thread that actually runs (idempotency claim on Stop()
+    // does not imply permanent termination of the class).
     {
         std::lock_guard<std::mutex> lock(m_mutex);
         if (!m_db || !m_chain_db) {
@@ -420,14 +446,17 @@ void CTxIndex::StartBackgroundSync() {
                       << "initialized; reindex skipped" << std::endl;
             return;
         }
-        if (m_sync_thread.joinable()) {
-            // Already running — defensive: do not double-spawn.
+        if (m_starting.load() || m_sync_thread.joinable()) {
+            // Either another caller is mid-spawn, or a thread is already running.
             return;
         }
+        m_starting.store(true);
+        m_interrupt.store(false);   // SEC-MD-2: re-spawn must clear stale latch
     }
 
     CBlockIndex* tip = g_chainstate.GetTip();
     if (tip == nullptr) {
+        m_starting.store(false);    // release the gate before bailing
         std::cerr << "[txindex] StartBackgroundSync called before chainstate "
                   << "initialized; reindex skipped" << std::endl;
         return;
@@ -437,6 +466,7 @@ void CTxIndex::StartBackgroundSync() {
     // R2 pin: snapshot tip ONCE at thread entry; thread walks
     // [m_last_height+1, snapshotted_tip].
     m_sync_thread = std::thread(&CTxIndex::SyncLoop, this, snapshotted_tip);
+    m_starting.store(false);        // thread is now joinable; gate released
 }
 
 void CTxIndex::SyncLoop(int snapshotted_tip_height) {
@@ -518,6 +548,14 @@ void CTxIndex::Interrupt() {
 
 void CTxIndex::Stop() {
     m_interrupt.store(true);
+    // SEC-MD-1: wait for any in-progress StartBackgroundSync to finish
+    // assigning m_sync_thread before checking joinable(). Without this,
+    // a Stop racing a Start could observe joinable()==false during the
+    // brief window between m_mutex release and m_sync_thread assignment,
+    // skip the join, and leak an unjoined thread.
+    while (m_starting.load()) {
+        std::this_thread::yield();
+    }
     if (m_sync_thread.joinable()) {
         m_sync_thread.join();
     }
