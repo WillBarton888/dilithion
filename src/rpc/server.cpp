@@ -2939,7 +2939,7 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
                 }
                 std::cerr << "[txindex] WARN paranoia mismatch txid=" << txid.GetHex().substr(0,16)
                           << " indexed_block=" << indexedBlockHash.GetHex().substr(0,16)
-                          << " — falling through to scan" << std::endl;
+                          << " -- falling through to scan" << std::endl;
                 g_tx_index->IncrementMismatches();
             }
         }
@@ -5619,7 +5619,7 @@ std::string CRPCServer::RPC_GetRawTransaction(const std::string& params) {
                 }
                 std::cerr << "[txindex] WARN paranoia mismatch txid=" << txid.GetHex().substr(0,16)
                           << " indexed_block=" << indexedBlockHash.GetHex().substr(0,16)
-                          << " — falling through to scan" << std::endl;
+                          << " -- falling through to scan" << std::endl;
                 g_tx_index->IncrementMismatches();
             }
         }
