@@ -68,7 +68,7 @@
 #include <net/port/peer_scorer.h>
 #include <net/protocol.h>
 #include <net/serialize.h>
-#include <primitives/uint256.h>
+#include <uint256.h>
 
 #include <atomic>
 #include <cassert>
