@@ -25,6 +25,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -532,6 +533,57 @@ BOOST_AUTO_TEST_CASE(tc2_paranoia_mismatch_fall_through) {
     std::string genuine_env = SendRPCRequest(fix.port, "getrawtransaction",
                                              TxidParams(genuine, true));
     BOOST_CHECK_NE(genuine_env.find("\"result\""), std::string::npos);
+
+    // PR-7a hardening (PR6-C1): exercise the FALL-THROUGH-SUCCESS path.
+    // Forge a record: block_2_genuine_txid -> (block_hash[1], pos=0). The
+    // tx at (block_hash[1], pos=0) is block 1's coinbase, whose hash is
+    // NOT block_2_genuine_txid — so the paranoia check fires. Fall-through
+    // then runs the legacy tip-walk over the real chain, which DOES find
+    // block_2_genuine_txid in block 2 → returns the correct JSON.
+    //
+    // Asserts: (i) WARN logged a 2nd time, (ii) MismatchCount delta == 1
+    // for THIS sub-block, (iii) RPC envelope contains "result" with the
+    // genuine txid hex (proving fall-through tip-walk found it).
+    g_tx_index->Stop();
+    const uint256& block2_genuine_txid = fix.per_height_tx[2]->GetHash();
+    g_tx_index.reset();
+    {
+        leveldb::DB* raw = nullptr;
+        leveldb::Options opts;
+        opts.create_if_missing = false;
+        BOOST_REQUIRE(leveldb::DB::Open(opts, fix.idx_scope.path(), &raw).ok());
+        std::unique_ptr<leveldb::DB> raw_db(raw);
+
+        std::string key;
+        key.push_back('t');
+        key.append(reinterpret_cast<const char*>(block2_genuine_txid.data), 32);
+        char value[40];
+        std::memset(value, 0, 40);
+        value[0] = 0x01;
+        std::memcpy(&value[1], fix.per_height_hash[1].data, 32);  // WRONG block
+        uint32_t pos = 0;  // coinbase position; coinbase hash != block2_genuine_txid
+        std::memcpy(&value[33], &pos, 4);
+        BOOST_REQUIRE(raw_db->Put(leveldb::WriteOptions(),
+                                  leveldb::Slice(key.data(), key.size()),
+                                  leveldb::Slice(value, 40)).ok());
+    }
+
+    g_tx_index = std::make_unique<CTxIndex>();
+    BOOST_REQUIRE(g_tx_index->Init(fix.idx_scope.path(), &fix.chain_db));
+    const uint64_t pre_mismatch_b = g_tx_index->MismatchCount();
+
+    CerrCapture cap_b;
+    std::string env_b = SendRPCRequest(fix.port, "getrawtransaction",
+                                       TxidParams(block2_genuine_txid, true));
+    std::string captured_b = cap_b.str();
+
+    BOOST_CHECK_NE(captured_b.find("[txindex] WARN paranoia mismatch txid="),
+                   std::string::npos);
+    BOOST_CHECK_EQUAL(g_tx_index->MismatchCount() - pre_mismatch_b, 1u);
+    // Fall-through-success: tip-walk finds the genuine tx in block 2; the
+    // result envelope must contain the txid hex.
+    BOOST_CHECK_NE(env_b.find("\"result\""), std::string::npos);
+    BOOST_CHECK_NE(env_b.find(block2_genuine_txid.GetHex()), std::string::npos);
 }
 
 // TC3 — Reorg correctness (folds [TXINDEX-PR5-SEC-MD-1]).
@@ -591,11 +643,28 @@ BOOST_AUTO_TEST_CASE(tc3_reorg_no_negative_confirmations) {
     }
 }
 
-// TC4 — Reindex resume across destruct/reopen.
-// First instance: Init + StartBackgroundSync + immediate Interrupt+Stop.
-// Capture partial K. Second instance on the same datadir: Init + sync to
-// completion. Assert no data loss across the boundary.
-BOOST_AUTO_TEST_CASE(tc4_reindex_resume_across_destruct) {
+// TC4 — Reindex persistence across destruct/reopen.
+//
+// PR-7a hardening (PR6-C3): renamed from `tc4_reindex_resume_across_destruct`
+// because the test does not deterministically exercise mid-walk resume on
+// fast hardware. The test issues `StartBackgroundSync(); Interrupt(); Stop();`
+// in immediate succession; on slow hardware the thread is captured mid-walk
+// (K < kN-1, exercising true partial-resume), but on fast hardware the
+// thread may complete the entire walk before Interrupt fires (K == kN-1,
+// degrading to a pure persistence-only check).
+//
+// Both outcomes are acceptable for THIS test's load-bearing property:
+// `LastIndexedHeight()` after reopen MUST equal whatever K was captured.
+// That is the persistence guarantee, and it holds in both regimes. The
+// mid-walk partial-resume path is exercised by `reindex_resume_across_destruct`
+// in `tx_index_tests.cpp` (which doesn't depend on RPC infrastructure and
+// can use a slower fixture). What integration adds here is the post-reopen
+// RPC roundtrip — every txid findable via the live JSON-RPC after sync
+// completes from the persisted resume point.
+//
+// Test name MUST contain `persistence` (per PR-7a contract) so future
+// maintainers do not mistake this for a mid-walk-determinism guarantee.
+BOOST_AUTO_TEST_CASE(tc4_reindex_persistence_across_destruct) {
     IntegrationFixture fix("tc4");
     constexpr int kN = 20;
     fix.BuildChain(kN);
@@ -608,6 +677,10 @@ BOOST_AUTO_TEST_CASE(tc4_reindex_resume_across_destruct) {
         g_tx_index->Interrupt();
         g_tx_index->Stop();
         K = g_tx_index->LastIndexedHeight();
+        // K may be anywhere in [-1, kN-1]: -1 if Interrupt landed before
+        // the first WriteBlock; kN-1 if the thread completed the walk
+        // before Stop was reached (acceptable on fast hardware — the
+        // test is persistence-focused, not mid-walk-focused).
         BOOST_CHECK(K >= -1 && K <= kN - 1);
         g_tx_index.reset();
     }
@@ -662,11 +735,134 @@ BOOST_AUTO_TEST_CASE(tc5_default_flag_unchanged) {
 }
 
 // TC6 — N2 cold-reindex acknowledgement (end-to-end).
+//
 // Replicate the production node-startup gate verbatim:
 //   if (last == -1 && tip > 0 && !reindex_flag) abort with literal message.
 // Verify both branches: (1) without reindex flag, abort string in stderr;
 // (2) with reindex flag, no abort, sync completes.
+//
+// PR-7a hardening (PR6-C2): the test body's local cerr emission and
+// substring assertion would not catch a typo in production. Add a
+// build/test-time grep that reads both production source files and
+// asserts the literal abort substring is present. If a future production
+// edit drifts the wording, this test fails with a clear message naming
+// the missing string.
+//
+// Trade-off acknowledged: this still does not exercise the actual
+// dilithion-node.cpp/dilv-node.cpp startup path through a subprocess (no
+// subprocess infra is available in this test harness, and adding it would
+// expand scope into production-test plumbing). The grep-style check is
+// the contract-mandated "build/test-time grep-style runtime check" from
+// `contract_pr7a.md` line 41 — it makes the test sensitive to drift
+// without requiring out-of-scope production refactors. A future PR (the
+// "deploy verification" step or PR-7b follow-up) may add a true
+// subprocess-based startup test.
 BOOST_AUTO_TEST_CASE(tc6_n2_cold_reindex_acknowledgement) {
+    // Production source grep: assert the literal abort substring is present
+    // verbatim in both node startup files. A typo at the production site
+    // would fail this assertion with a clear message naming the file and
+    // the missing string.
+    static constexpr const char* kAbortLiteralA =
+        "[txindex] -txindex=1 on a non-empty chain requires -reindex ";
+    static constexpr const char* kAbortLiteralB =
+        "to acknowledge a multi-hour rebuild. Aborting.";
+    // Locate the source tree root by walking up from multiple candidate
+    // starting points looking for `src/index/tx_index.h` (a stable in-tree
+    // anchor). The build system emits `__FILE__` as a relative path
+    // ("src/test/..."), the test binary may be run from any cwd, and the
+    // build directory is not known at compile time without a -D flag we
+    // cannot add (Makefile is out of scope for PR-7a).
+    //
+    // Candidate sources, in order:
+    //   1. cwd and up to 8 ancestors (covers "run from worktree root or
+    //      any subdir").
+    //   2. The directory containing the test_dilithion binary itself,
+    //      derived from argv[0]/runtime probing — the test_dilithion
+    //      binary lives in the worktree root (build target).
+    //   3. The directory derived from absolute(__FILE__) (best-effort).
+    //
+    // First match wins. If no candidate resolves, the failure message
+    // instructs the maintainer how to recover.
+    auto FindSourceRoot = []() -> std::filesystem::path {
+        const std::filesystem::path anchor("src/index/tx_index.h");
+        std::vector<std::filesystem::path> roots;
+
+        std::error_code cwd_ec;
+        std::filesystem::path cwd = std::filesystem::current_path(cwd_ec);
+        for (int up = 0; up < 9 && !cwd.empty(); ++up) {
+            roots.push_back(cwd);
+            if (!cwd.has_parent_path() || cwd.parent_path() == cwd) break;
+            cwd = cwd.parent_path();
+        }
+
+        // Probe: the boost master test suite holds the argv passed to main.
+        // Use it to derive the binary's containing directory (the worktree
+        // root, since test_dilithion is built directly there).
+        const auto& master = boost::unit_test::framework::master_test_suite();
+        if (master.argc > 0 && master.argv[0] != nullptr) {
+            std::error_code abs_ec;
+            std::filesystem::path argv0_abs = std::filesystem::absolute(
+                std::filesystem::path(master.argv[0]), abs_ec);
+            if (!abs_ec && argv0_abs.has_parent_path()) {
+                std::filesystem::path bin_dir = argv0_abs.parent_path();
+                for (int up = 0; up < 4 && !bin_dir.empty(); ++up) {
+                    roots.push_back(bin_dir);
+                    if (!bin_dir.has_parent_path()
+                        || bin_dir.parent_path() == bin_dir) break;
+                    bin_dir = bin_dir.parent_path();
+                }
+            }
+        }
+
+        // Best-effort: absolute(__FILE__) walked up by 3 (.../src/test/x).
+        std::error_code abs_ec;
+        std::filesystem::path file_abs =
+            std::filesystem::absolute(std::filesystem::path(__FILE__), abs_ec);
+        if (!abs_ec && file_abs.has_parent_path()) {
+            roots.push_back(file_abs.parent_path()
+                                    .parent_path()
+                                    .parent_path());
+        }
+
+        for (const auto& root : roots) {
+            std::error_code exists_ec;
+            if (std::filesystem::exists(root / anchor, exists_ec)) {
+                return root;
+            }
+        }
+        return {};
+    };
+
+    std::filesystem::path source_root = FindSourceRoot();
+    BOOST_REQUIRE_MESSAGE(!source_root.empty(),
+        "[tc6 grep] could not locate source tree root (anchor "
+        "src/index/tx_index.h not found in cwd or any ancestor up to 8 "
+        "levels). Run test_dilithion from the worktree root, or from any "
+        "directory inside it.");
+
+    auto AssertProductionSourceContains =
+        [&source_root](const char* relative_path, const char* literal) {
+            std::filesystem::path target = source_root / relative_path;
+            std::error_code exists_ec;
+            BOOST_REQUIRE_MESSAGE(
+                std::filesystem::exists(target, exists_ec),
+                "[tc6 grep] production file not found: " << target.string());
+            std::ifstream in(target);
+            BOOST_REQUIRE_MESSAGE(in.good(),
+                "[tc6 grep] could not open production file: " << target.string());
+            std::ostringstream oss;
+            oss << in.rdbuf();
+            std::string content = oss.str();
+            BOOST_REQUIRE_MESSAGE(
+                content.find(literal) != std::string::npos,
+                "[tc6 grep] production literal missing in " << target.string()
+                    << ": expected substring \"" << literal << "\"");
+        };
+    AssertProductionSourceContains("src/node/dilithion-node.cpp", kAbortLiteralA);
+    AssertProductionSourceContains("src/node/dilithion-node.cpp", kAbortLiteralB);
+    AssertProductionSourceContains("src/node/dilv-node.cpp",      kAbortLiteralA);
+    AssertProductionSourceContains("src/node/dilv-node.cpp",      kAbortLiteralB);
+
     IntegrationFixture fix("tc6");
     fix.BuildChain(5);
 

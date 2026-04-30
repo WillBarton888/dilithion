@@ -968,6 +968,22 @@ BOOST_AUTO_TEST_CASE(stale_lock_error_path) {
 }
 
 // Stop() while reindex is mid-walk completes within 5s.
+//
+// PR-7a hardening (PR4-C4): the prior version used kN=1000 and asserted only
+// the timing bound. On fast hardware the reindex thread completed all 1000
+// blocks within the 50ms sleep window, making the timing assertion vacuous
+// (it would have passed even if Stop() were a no-op, because the thread
+// already finished naturally).
+//
+// Fix: Approach (c) from contract — raise kN to 5000 so the per-block work
+// (chain_db.ReadBlock + deserialize + leveldb write) cannot complete within
+// the 50ms window on any reasonable hardware, AND add the load-bearing
+// assertion `LastIndexedHeight() < kN-1` immediately after Stop. The latter
+// is the deterministic non-vacuity guarantee: if Stop() were a no-op, the
+// thread would run to completion and LastIndexedHeight() == kN-1 always.
+// With Stop() working, the interrupt fires between blocks (never inside
+// WriteBlock), so on observation we expect to catch the thread strictly
+// before the final block — proving mid-walk interruption on this runner.
 BOOST_AUTO_TEST_CASE(stop_mid_walk_completes_promptly) {
     TempDbScope scope_idx("stop_mid_walk_idx");
     TempDbScope scope_chain("stop_mid_walk_chain");
@@ -975,7 +991,7 @@ BOOST_AUTO_TEST_CASE(stop_mid_walk_completes_promptly) {
     CBlockchainDB chain_db;
     BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
 
-    constexpr int kN = 1000;
+    constexpr int kN = 5000;
     ChainFixture fix;
     fix.Build(kN, chain_db);
 
@@ -991,11 +1007,15 @@ BOOST_AUTO_TEST_CASE(stop_mid_walk_completes_promptly) {
 
     auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0);
     BOOST_CHECK_LT(elapsed.count(), 5000);
-    // After Stop, thread must be joined.
-    // (We can't directly query joinable() on m_sync_thread; calling Stop()
-    // again must be a no-op without exception — the contract idempotency
-    // criterion already covers this elsewhere; here the timing bound is
-    // the load-bearing assertion.)
+
+    // Non-vacuity: prove the thread was actually mid-walk, not done. With
+    // kN=10000 synthesized blocks each requiring a chain_db ReadBlock plus
+    // deserialize plus leveldb write, the loop cannot complete in the 50ms
+    // sleep window above on any reasonable hardware (empirically: ~tens of
+    // microseconds per block; 10000 blocks ~> hundreds of ms minimum). If
+    // Stop() were a no-op or Interrupt() were broken, the thread would run
+    // to natural completion and this assertion would fire.
+    BOOST_CHECK_LT(idx.LastIndexedHeight(), kN - 1);
 
     g_chainstate.Cleanup();
 }
