@@ -2921,7 +2921,13 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
                     && txPos < txs.size()
                     && txs[txPos]->GetHash() == txid) {
                     CBlockIndex* pIdx = m_chainstate->GetBlockIndex(indexedBlockHash);
-                    int conf = pIdx ? (pTip->nHeight - pIdx->nHeight + 1) : 0;
+                    // SEC-MD-1: bound confirmations to >=0. pIdx is a free-form
+                    // mapBlockIndex lookup, not a pprev walk from pTip — under
+                    // reorg the indexed block may sit at a height above the
+                    // post-reorg tip, which would produce a negative result.
+                    int conf = (pIdx && pIdx->nHeight <= pTip->nHeight)
+                               ? (pTip->nHeight - pIdx->nHeight + 1)
+                               : 0;
                     int height = pIdx ? pIdx->nHeight : 0;
 
                     std::cout << "[RPC] Found transaction " << txid.GetHex()
@@ -5598,7 +5604,13 @@ std::string CRPCServer::RPC_GetRawTransaction(const std::string& params) {
                     && txPos < txs.size()
                     && txs[txPos]->GetHash() == txid) {
                     CBlockIndex* pIdx = m_chainstate->GetBlockIndex(indexedBlockHash);
-                    int conf = pIdx ? (pTip->nHeight - pIdx->nHeight + 1) : 0;
+                    // SEC-MD-1: bound confirmations to >=0. pIdx is a free-form
+                    // mapBlockIndex lookup, not a pprev walk from pTip — under
+                    // reorg the indexed block may sit at a height above the
+                    // post-reorg tip, which would produce a negative result.
+                    int conf = (pIdx && pIdx->nHeight <= pTip->nHeight)
+                               ? (pTip->nHeight - pIdx->nHeight + 1)
+                               : 0;
                     if (!verbose) {
                         return "\"" + HexStr(txs[txPos]->Serialize()) + "\"";
                     }
