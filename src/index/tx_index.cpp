@@ -452,6 +452,12 @@ void CTxIndex::StartBackgroundSync() {
         }
         m_starting.store(true);
         m_interrupt.store(false);   // SEC-MD-2: re-spawn must clear stale latch
+        m_synced.store(false);      // SEC-MD-2 follow-on: leftover-true from a prior
+                                    // sync cycle would make WaitForSync return
+                                    // immediately on re-spawn (test vacuity) AND
+                                    // mislead RPC fast-path readers that check
+                                    // IsSynced. Mirror Bitcoin Core BaseIndex.
+
     }
 
     CBlockIndex* tip = g_chainstate.GetTip();
