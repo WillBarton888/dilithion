@@ -684,6 +684,22 @@ peer_manager_lock_order_static_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manag
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_lock_order_static_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.7-b: multithreaded lock-order invariants tests (6 cases).
+# Drives CPeerManager's public surface from concurrent threads to surface
+# any unsynchronised state that the static-grep tests cannot see. Intended
+# to be built and run under `make TSAN=1 …` on a Linux host with libtsan.
+# Cases:
+#   1. tick_with_concurrent_process_message
+#   2. mark_remove_block_in_flight_concurrent
+#   3. peer_lifecycle_churn_with_tick
+#   4. send_messages_concurrent_across_peers
+#   5. misbehavior_dispatch_concurrent_unknown_messages
+#   6. mixed_full_load
+peer_manager_lock_order_invariants_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_lock_order_invariants_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -lpthread
+	@echo "$(COLOR_GREEN)✓ peer_manager_lock_order_invariants_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
