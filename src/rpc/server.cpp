@@ -28,6 +28,7 @@
 #include <consensus/tx_validation.h>
 #include <consensus/pow.h>
 #include <consensus/validation.h>  // For DeserializeBlockTransactions
+#include <index/tx_index.h>  // PR-5: txindex fast-path for getrawtransaction/gettransaction
 #include <cmath>  // For pow()
 #include <util/base58.h>           // For EncodeBase58Check
 #include <dfmp/dfmp.h>  // DFMP v2.0
@@ -2782,6 +2783,162 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
         throw std::runtime_error("Chain state not initialized");
     }
 
+    // PR-5: shared JSON builder used by both the fast-path and the legacy
+    // tip-walk so the response shape is bit-identical regardless of which
+    // path produced the hit. Mirrors the pre-PR-5 inline construction
+    // verbatim — same fields, same ordering, same wallet sub-object.
+    auto buildTxJSON = [&](const CTransactionRef& tx,
+                           const uint256& blockHash,
+                           int blockHeight,
+                           int confirmations) -> std::string {
+        std::ostringstream oss;
+        oss << "{";
+        oss << "\"txid\":\"" << tx->GetHash().GetHex() << "\",";
+        oss << "\"version\":" << tx->nVersion << ",";
+
+        oss << "\"vin\":[";
+        for (size_t i = 0; i < tx->vin.size(); i++) {
+            if (i > 0) oss << ",";
+            const CTxIn& txin = tx->vin[i];
+            oss << "{";
+            if (txin.prevout.hash.IsNull()) {
+                oss << "\"coinbase\":true";
+            } else {
+                oss << "\"txid\":\"" << txin.prevout.hash.GetHex() << "\",";
+                oss << "\"vout\":" << txin.prevout.n << ",";
+                oss << "\"scriptSig\":\"" << HexStr(txin.scriptSig) << "\",";
+                oss << "\"sequence\":" << txin.nSequence;
+            }
+            oss << "}";
+        }
+        oss << "],";
+
+        oss << "\"vout\":[";
+        for (size_t i = 0; i < tx->vout.size(); i++) {
+            if (i > 0) oss << ",";
+            const CTxOut& txout = tx->vout[i];
+            std::string addr = DecodeScriptPubKeyToAddress(txout.scriptPubKey);
+            oss << "{";
+            oss << "\"value\":" << txout.nValue << ",";
+            oss << "\"n\":" << i << ",";
+            if (!addr.empty()) {
+                oss << "\"address\":\"" << addr << "\",";
+            }
+            oss << "\"scriptPubKey\":\"" << HexStr(txout.scriptPubKey) << "\"";
+            oss << "}";
+        }
+        oss << "],";
+
+        oss << "\"locktime\":" << tx->nLockTime << ",";
+        oss << "\"blockhash\":\"" << blockHash.GetHex() << "\",";
+        oss << "\"blockheight\":" << blockHeight << ",";
+        oss << "\"confirmations\":" << confirmations << ",";
+        oss << "\"in_mempool\":false";
+
+        // Wallet context: lets callers verify whether this tx
+        // involved the local wallet — forensic support for the
+        // bridge (did the bridge wallet sign this send?). Uses
+        // mapWalletTx (tracks all owned UTXOs by outpoint) so
+        // HD-derived change addresses are detected even though
+        // they're not in mapKeys.
+        if (m_wallet) {
+            CSentTx sentTx;
+            bool isSend = m_wallet->GetSentTransaction(txid, sentTx);
+
+            std::ostringstream details;
+            details << "\"details\":[";
+            bool firstDetail = true;
+            int64_t walletReceive = 0;
+            bool anyReceive = false;
+
+            for (size_t i = 0; i < tx->vout.size(); i++) {
+                const CTxOut& txout = tx->vout[i];
+                CDilithiumAddress walletAddr;
+                int64_t walletValue = 0;
+                bool isOurs = m_wallet->GetWalletOutput(
+                    txid, static_cast<uint32_t>(i),
+                    walletAddr, walletValue);
+                std::string addr = isOurs
+                    ? walletAddr.ToString()
+                    : DecodeScriptPubKeyToAddress(txout.scriptPubKey);
+
+                if (isOurs) {
+                    if (!firstDetail) details << ",";
+                    details << "{\"address\":\"" << addr << "\","
+                            << "\"category\":\"receive\","
+                            << "\"amount\":" << txout.nValue << ","
+                            << "\"vout\":" << i << "}";
+                    firstDetail = false;
+                    walletReceive += txout.nValue;
+                    anyReceive = true;
+                } else if (isSend && !addr.empty()
+                           && sentTx.toAddress.ToString() == addr) {
+                    if (!firstDetail) details << ",";
+                    details << "{\"address\":\"" << addr << "\","
+                            << "\"category\":\"send\","
+                            << "\"amount\":-" << txout.nValue << ","
+                            << "\"vout\":" << i << ","
+                            << "\"fee\":-" << sentTx.nFee << "}";
+                    firstDetail = false;
+                }
+            }
+            details << "]";
+
+            oss << ",\"wallet\":{";
+            if (isSend) {
+                oss << "\"category\":\"send\","
+                    << "\"amount\":-" << sentTx.nValue << ","
+                    << "\"fee\":-" << sentTx.nFee << ","
+                    << "\"to_address\":\"" << sentTx.toAddress.ToString() << "\","
+                    << "\"time\":" << sentTx.nTime;
+            } else if (anyReceive) {
+                oss << "\"category\":\"receive\","
+                    << "\"amount\":" << walletReceive;
+            } else {
+                oss << "\"category\":\"not_wallet_related\"";
+            }
+            oss << "},";
+            oss << details.str();
+        }
+
+        oss << "}";
+        return oss.str();
+    };
+
+    // PR-5: txindex fast-path. Same semantics as the RPC_GetRawTransaction
+    // wiring — verified hit returns immediately, paranoia mismatch logs and
+    // falls through to the legacy tip-walk below.
+    if (g_tx_index) {
+        uint256 indexedBlockHash;
+        uint32_t txPos = 0;
+        if (g_tx_index->FindTx(txid, indexedBlockHash, txPos)) {
+            CBlock block;
+            if (m_blockchain->ReadBlock(indexedBlockHash, block)) {
+                std::vector<CTransactionRef> txs;
+                std::string err;
+                CBlockValidator validator;
+                if (validator.DeserializeBlockTransactions(block, txs, err)
+                    && txPos < txs.size()
+                    && txs[txPos]->GetHash() == txid) {
+                    CBlockIndex* pIdx = m_chainstate->GetBlockIndex(indexedBlockHash);
+                    int conf = pIdx ? (pTip->nHeight - pIdx->nHeight + 1) : 0;
+                    int height = pIdx ? pIdx->nHeight : 0;
+
+                    std::cout << "[RPC] Found transaction " << txid.GetHex()
+                              << " in block " << indexedBlockHash.GetHex()
+                              << " (height " << height << ", "
+                              << conf << " confirmations) [txindex]" << std::endl;
+
+                    return buildTxJSON(txs[txPos], indexedBlockHash, height, conf);
+                }
+                std::cerr << "[txindex] WARN paranoia mismatch txid=" << txid.GetHex().substr(0,16)
+                          << " indexed_block=" << indexedBlockHash.GetHex().substr(0,16)
+                          << " — falling through to scan" << std::endl;
+                g_tx_index->IncrementMismatches();
+            }
+        }
+    }
+
     // Walk backwards through chain looking for transaction
     // Search entire chain (chain is still young enough for full scan)
     const int MAX_BLOCKS_TO_SEARCH = pTip->nHeight + 1;  // Search all blocks
@@ -2825,122 +2982,7 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
                           << " (height " << pCurrent->nHeight << ", "
                           << confirmations << " confirmations)" << std::endl;
 
-                // Build JSON response
-                std::ostringstream oss;
-                oss << "{";
-                oss << "\"txid\":\"" << foundTxid.GetHex() << "\",";
-                oss << "\"version\":" << tx->nVersion << ",";
-
-                // Inputs
-                oss << "\"vin\":[";
-                for (size_t i = 0; i < tx->vin.size(); i++) {
-                    if (i > 0) oss << ",";
-                    const CTxIn& txin = tx->vin[i];
-                    oss << "{";
-                    if (txin.prevout.hash.IsNull()) {
-                        oss << "\"coinbase\":true";
-                    } else {
-                        oss << "\"txid\":\"" << txin.prevout.hash.GetHex() << "\",";
-                        oss << "\"vout\":" << txin.prevout.n << ",";
-                        oss << "\"scriptSig\":\"" << HexStr(txin.scriptSig) << "\",";
-                        oss << "\"sequence\":" << txin.nSequence;
-                    }
-                    oss << "}";
-                }
-                oss << "],";
-
-                // Outputs
-                oss << "\"vout\":[";
-                for (size_t i = 0; i < tx->vout.size(); i++) {
-                    if (i > 0) oss << ",";
-                    const CTxOut& txout = tx->vout[i];
-                    std::string addr = DecodeScriptPubKeyToAddress(txout.scriptPubKey);
-                    oss << "{";
-                    oss << "\"value\":" << txout.nValue << ",";
-                    oss << "\"n\":" << i << ",";
-                    if (!addr.empty()) {
-                        oss << "\"address\":\"" << addr << "\",";
-                    }
-                    oss << "\"scriptPubKey\":\"" << HexStr(txout.scriptPubKey) << "\"";
-                    oss << "}";
-                }
-                oss << "],";
-
-                oss << "\"locktime\":" << tx->nLockTime << ",";
-                oss << "\"blockhash\":\"" << blockHash.GetHex() << "\",";
-                oss << "\"blockheight\":" << pCurrent->nHeight << ",";
-                oss << "\"confirmations\":" << confirmations << ",";
-                oss << "\"in_mempool\":false";
-
-                // Wallet context: lets callers verify whether this tx
-                // involved the local wallet — forensic support for the
-                // bridge (did the bridge wallet sign this send?). Uses
-                // mapWalletTx (tracks all owned UTXOs by outpoint) so
-                // HD-derived change addresses are detected even though
-                // they're not in mapKeys.
-                if (m_wallet) {
-                    CSentTx sentTx;
-                    bool isSend = m_wallet->GetSentTransaction(txid, sentTx);
-
-                    std::ostringstream details;
-                    details << "\"details\":[";
-                    bool firstDetail = true;
-                    int64_t walletReceive = 0;
-                    bool anyReceive = false;
-
-                    for (size_t i = 0; i < tx->vout.size(); i++) {
-                        const CTxOut& txout = tx->vout[i];
-                        CDilithiumAddress walletAddr;
-                        int64_t walletValue = 0;
-                        bool isOurs = m_wallet->GetWalletOutput(
-                            txid, static_cast<uint32_t>(i),
-                            walletAddr, walletValue);
-                        std::string addr = isOurs
-                            ? walletAddr.ToString()
-                            : DecodeScriptPubKeyToAddress(txout.scriptPubKey);
-
-                        if (isOurs) {
-                            if (!firstDetail) details << ",";
-                            details << "{\"address\":\"" << addr << "\","
-                                    << "\"category\":\"receive\","
-                                    << "\"amount\":" << txout.nValue << ","
-                                    << "\"vout\":" << i << "}";
-                            firstDetail = false;
-                            walletReceive += txout.nValue;
-                            anyReceive = true;
-                        } else if (isSend && !addr.empty()
-                                   && sentTx.toAddress.ToString() == addr) {
-                            if (!firstDetail) details << ",";
-                            details << "{\"address\":\"" << addr << "\","
-                                    << "\"category\":\"send\","
-                                    << "\"amount\":-" << txout.nValue << ","
-                                    << "\"vout\":" << i << ","
-                                    << "\"fee\":-" << sentTx.nFee << "}";
-                            firstDetail = false;
-                        }
-                    }
-                    details << "]";
-
-                    oss << ",\"wallet\":{";
-                    if (isSend) {
-                        oss << "\"category\":\"send\","
-                            << "\"amount\":-" << sentTx.nValue << ","
-                            << "\"fee\":-" << sentTx.nFee << ","
-                            << "\"to_address\":\"" << sentTx.toAddress.ToString() << "\","
-                            << "\"time\":" << sentTx.nTime;
-                    } else if (anyReceive) {
-                        oss << "\"category\":\"receive\","
-                            << "\"amount\":" << walletReceive;
-                    } else {
-                        oss << "\"category\":\"not_wallet_related\"";
-                    }
-                    oss << "},";
-                    oss << details.str();
-                }
-
-                oss << "}";
-
-                return oss.str();
+                return buildTxJSON(tx, blockHash, pCurrent->nHeight, confirmations);
             }
         }
 
@@ -5536,6 +5578,39 @@ std::string CRPCServer::RPC_GetRawTransaction(const std::string& params) {
     CBlockIndex* pTip = m_chainstate->GetTip();
     if (pTip == nullptr) {
         throw std::runtime_error("Chain state not initialized");
+    }
+
+    // PR-5: txindex fast-path. When -txindex is enabled, look up the txid in
+    // the secondary index, read the indexed block, and return immediately on a
+    // verified hit. On any failure (paranoia guard, block read, deserialize),
+    // log a WARN, increment the mismatch counter, and fall through to the
+    // existing tip-walk so behavior is bounded by the legacy scan.
+    if (g_tx_index) {
+        uint256 indexedBlockHash;
+        uint32_t txPos = 0;
+        if (g_tx_index->FindTx(txid, indexedBlockHash, txPos)) {
+            CBlock block;
+            if (m_blockchain->ReadBlock(indexedBlockHash, block)) {
+                std::vector<CTransactionRef> txs;
+                std::string err;
+                CBlockValidator validator;
+                if (validator.DeserializeBlockTransactions(block, txs, err)
+                    && txPos < txs.size()
+                    && txs[txPos]->GetHash() == txid) {
+                    CBlockIndex* pIdx = m_chainstate->GetBlockIndex(indexedBlockHash);
+                    int conf = pIdx ? (pTip->nHeight - pIdx->nHeight + 1) : 0;
+                    if (!verbose) {
+                        return "\"" + HexStr(txs[txPos]->Serialize()) + "\"";
+                    }
+                    return txToJSON(txs[txPos], indexedBlockHash.GetHex(),
+                                    pIdx ? pIdx->nHeight : 0, conf);
+                }
+                std::cerr << "[txindex] WARN paranoia mismatch txid=" << txid.GetHex().substr(0,16)
+                          << " indexed_block=" << indexedBlockHash.GetHex().substr(0,16)
+                          << " — falling through to scan" << std::endl;
+                g_tx_index->IncrementMismatches();
+            }
+        }
     }
 
     CBlockIndex* pCurrent = pTip;
