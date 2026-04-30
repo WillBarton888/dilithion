@@ -40,6 +40,14 @@ class CDataStream;
 // CPeerManager can name it).
 struct SyncStateFixture;
 
+// PR6.5b.6 — same pattern for the misbehavior-test fixture. Defined at
+// global scope in src/test/peer_manager_misbehavior_tests.cpp; needs friend
+// access to the m_test_*_override fields (test-hardening clock injection
+// seam from PR6.5b.test-hardening) AND to m_consecutive_orphan_blocks /
+// m_last_block_connected_ticks for direct counter observation. Production
+// code never instantiates this fixture (it's a test-only struct).
+struct MisbehaviorFixture;
+
 namespace dilithion {
 
 namespace consensus { class IChainSelector; }
@@ -76,9 +84,11 @@ class CPeerManager : public ::dilithion::net::port::ISyncCoordinator {
     // PR6.5b.test-hardening — friend the test fixture so unit tests can
     // inject deterministic clock/height values via the private override
     // fields (m_test_now_override, m_test_header_height_override,
-    // m_test_chain_height_override). Single friend; the fixture is the
-    // ONLY entity outside CPeerManager that may set these fields.
+    // m_test_chain_height_override). The fixtures are the ONLY entities
+    // outside CPeerManager that may set these fields. Production never
+    // instantiates these fixture structs.
     friend struct ::SyncStateFixture;
+    friend struct ::MisbehaviorFixture;
 public:
     // Construction wires consumed interfaces. None are held by smart
     // pointer here; PeerManager does not own them.
@@ -291,6 +301,30 @@ private:
     static constexpr int BLOCK_TIMEOUT_NEAR_TIP_SECS = 15;
     static constexpr int BLOCK_TIMEOUT_BULK_SECS = 60;
     static constexpr int BLOCKS_NEAR_TIP_THRESHOLD = 20;
+
+    // PR6.5b.6 (Item A) — bad-peer rotation threshold. After a peer
+    // accumulates this many consecutive block-download stalls (sweep
+    // removals via RetryStaleBlocksLocked), the rotation logic invokes
+    // m_connman.DisconnectNode. Mirrors legacy ibd_coordinator.cpp:2197.
+    // Near-tip aggressiveness (Item A step 3) drops the effective threshold
+    // to 1 when blocks_behind <= BLOCKS_NEAR_TIP_THRESHOLD.
+    static constexpr int MAX_PEER_CONSECUTIVE_TIMEOUTS = 3;
+
+    // PR6.5b.6 (Item B) — orphan-block counter. Incremented from
+    // OnOrphanBlockReceived() (parameterless per ISyncCoordinator §1.5).
+    // Mirrors legacy CIbdCoordinator::m_consecutive_orphan_blocks
+    // (ibd_coordinator.h:132). Reset to 0 from OnBlockConnected() (Item C).
+    // Single-writer pattern in legacy carries over: chain.cpp callbacks
+    // fire serially under cs_main, so no race between increment and reset.
+    // std::atomic for cross-thread reads (RPC / future scoring).
+    std::atomic<int> m_consecutive_orphan_blocks{0};
+
+    // PR6.5b.6 (Item C) — last block-connected timestamp (steady_clock
+    // ticks via .count() of nanoseconds duration since epoch). Updated
+    // from OnBlockConnected; read only from RPC / future stall heuristics.
+    // std::atomic<int64_t> for race-free read; written under cs_main from
+    // OnBlockConnected. Sentinel 0 = never connected.
+    std::atomic<int64_t> m_last_block_connected_ticks{0};
 
     // PR6.5b.5 sync state. std::atomic<bool> mirrors
     // CIbdCoordinator::m_synced idiom (ibd_coordinator.h). NO mutex —

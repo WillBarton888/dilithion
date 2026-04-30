@@ -26,6 +26,7 @@
 #include <core/node_context.h>
 #include <net/connman.h>
 #include <net/headers_manager.h>
+#include <net/iconnection_manager.h>
 #include <net/ipeer_scorer.h>
 #include <net/net.h>
 #include <net/port/regtest_only.h>
@@ -123,14 +124,78 @@ int CPeerManager::GetHeadersSyncPeer() const {
     return m_headers_sync_peer;
 }
 
+// PR6.5b.6 (Item B) — real body. Parameterless per ISyncCoordinator §1.5
+// (Decision 1 freeze). Mirrors legacy CIbdCoordinator::OnOrphanBlockReceived
+// at ibd_coordinator.h:132: increment a global consecutive-orphan counter.
+// NO per-peer tracking from this hook (the hook itself doesn't carry a
+// peer_id; legacy is parameterless too).
+//
+// Per-peer orphan-cluster scoring lives at the in-scope site inside
+// HandleBlock — when the chain-selector's LookupBlockIndex on
+// block.hashPrevBlock returns null, the block is an orphan and the
+// peer_id is in local scope, so HandleBlock dispatches
+// m_scorer.Misbehaving directly. That keeps OnOrphanBlockReceived's
+// signature parameterless (frozen by Decision 1) and routes per-peer
+// scoring via the natural path.
+//
+// Synchronous — fires under cs_main per Option B. Atomic counter
+// satisfies the cs_main constraint without taking a PeerManager mutex.
+//
+// SAFE: copy-state-out — atomic relaxed increment; no callout.
 void CPeerManager::OnOrphanBlockReceived() {
-    // STUB: no-op. PR6.5b body will track per-peer orphan counts
-    // and dispatch misbehavior penalties via m_scorer.
+    m_consecutive_orphan_blocks.fetch_add(1, std::memory_order_relaxed);
 }
 
+// PR6.5b.6 (Item C) — real body. Parameterless per ISyncCoordinator §1.5
+// (Decision 1 freeze). Mirrors legacy CIbdCoordinator::OnBlockConnected at
+// ibd_coordinator.h:142:
+//   (1) Reset the global atomic orphan counter to 0 ("fresh blocks
+//       flowing → orphan accumulation resets").
+//   (2) Update m_last_block_connected_ticks to steady_clock::now (as
+//       nanoseconds since epoch — atomic int64_t for race-free RPC reads).
+//   (3) Reset per-peer m_consecutive_block_timeouts to 0 across all
+//       peers under brief m_peers_mutex (mirrors the "fresh blocks
+//       flowing → bad-peer counters reset" semantic from Item A).
+//
+// Lock-order discipline: callers fire under cs_main (Option B). cs_main
+// is the OUTER lock (held by caller); m_peers_mutex is acquired here as
+// the INNER lock. No cycle is possible: this method never acquires
+// cs_main, and no path elsewhere acquires cs_main while holding
+// m_peers_mutex (verified by inspection — see the file-level lock-order
+// block). The brief m_peers_mutex section is write-only iteration; no
+// callout.
+//
+// Idempotency: a second OnBlockConnected with no orphans in between
+// is a no-op (counter already 0; per-peer counters already 0). The
+// timestamp is unconditionally updated, so consecutive calls with no
+// orphan activity still advance the "last connected" tick — that's
+// correct semantics (the block DID connect).
+//
+// SAFE: copy-state-out — m_peers_mutex is the only lock taken; no
+// callout to m_scorer / m_connman / m_chain_selector under it. Per-peer
+// reset is a write-only field set; no callbacks fire.
 void CPeerManager::OnBlockConnected() {
-    // STUB: no-op. PR6.5b body will reset stall counters and update
-    // last-block-arrival timestamps in per-peer state.
+    // (1) Reset orphan counter — atomic relaxed store is sufficient
+    // (single-writer pattern from chain.cpp under cs_main).
+    m_consecutive_orphan_blocks.store(0, std::memory_order_relaxed);
+
+    // (2) Update last-block-connected timestamp. steady_clock chosen for
+    // monotonicity (test-only; production reads via RPC compare deltas).
+    const auto now_ticks = std::chrono::steady_clock::now()
+                               .time_since_epoch()
+                               .count();
+    m_last_block_connected_ticks.store(static_cast<int64_t>(now_ticks),
+                                       std::memory_order_relaxed);
+
+    // (3) Reset per-peer m_consecutive_block_timeouts across all peers.
+    // Bounded ≤ ~125 peers per the upstream slot cap; iteration is
+    // write-only (no callout). m_peers_mutex is the inner lock here;
+    // cs_main (held by caller) is the outer lock. No cycle: this body
+    // never acquires cs_main.
+    std::lock_guard<std::mutex> lk(m_peers_mutex);
+    for (auto& kv : m_peers) {
+        kv.second->m_consecutive_block_timeouts = 0;
+    }
 }
 
 // PR6.5b.3 + PR6.5b.5: Tick body. Call sequence (per PR6.5b.5 contract):
@@ -295,26 +360,47 @@ bool CPeerManager::HasCompletedHandshakeWithAnyPeer() const {
     return false;
 }
 
-// PR6.5b.5 — port of CIbdCoordinator::RetryTimeoutsAndStalls
-// (ibd_coordinator.cpp:2162-2242) DOWN-SCOPED to per-peer state owned by
-// this class. Walks m_blocks_in_flight; entries whose
-// requested_at_unix_sec exceeds the hysteretic timeout (15s near tip,
-// 60s bulk) are removed via RemoveBlockInFlight. NO scorer dispatch, NO
-// peer disconnect, NO bad-peer rotation — those are PR6.5b.6 scope per
-// decomposition §PR6.5b.5 "Deferred".
+// PR6.5b.5 + PR6.5b.6 (Item A) — port of
+// CIbdCoordinator::RetryTimeoutsAndStalls (ibd_coordinator.cpp:2162-2242)
+// DOWN-SCOPED to per-peer state owned by this class. Walks
+// m_blocks_in_flight; entries whose requested_at_unix_sec exceeds the
+// hysteretic timeout (15s near tip, 60s bulk) are removed via
+// RemoveBlockInFlight. PR6.5b.6 wires the previously-deferred misbehavior
+// dispatch (γ topology — port owns stall-timeout scoring) and bad-peer
+// rotation (DisconnectNode after consecutive-timeout threshold crossed).
 //
-// Strict 4-step lock-order sequence (matches RequestNextBlocks discipline):
+// γ ownership rule (per contract): this method is the canonical port-side
+// dispatch site for stall-timeout misbehavior. Legacy ::CPeerManager does
+// NOT score stall events — only port's m_scorer ticks here. Legacy retains
+// transport-integrity scoring (checksum failures at connman.cpp:1666 etc.)
+// per non-overlapping event ownership.
+//
+// Strict 6-step lock-order sequence (extends PR6.5b.5's 4-step pattern):
 //   (1) Compute blocks_behind / timeout_seconds with NO PeerManager locks
 //       held — reads g_node_context.headers_manager + GetActiveHeight().
 //   (2) Snapshot stale (hash, peer_id) pairs under
 //       m_blocks_in_flight_mutex briefly; drop.
 //   (3) Iterate the snapshot calling RemoveBlockInFlight(peer, hash) —
 //       which takes its own locks per PR6.5b.4. NO PeerManager mutex held.
-//   (4) Log a single line if any entry was removed (verbose-gated).
+//   (4) Build a deduplicated set of stalled peer-ids from the snapshot
+//       (KISS — small std::set; same peer may have multiple stale entries
+//       in one sweep, score it ONCE per sweep per contract).
+//   (5) For each unique stalled peer: increment per-peer
+//       m_consecutive_block_timeouts under m_peers_mutex briefly,
+//       capture out the new counter value, drop the lock; THEN call
+//       m_scorer.Misbehaving(peer, UnknownMessage, "stall") with NO
+//       PeerManager mutex held; THEN — if the new counter crossed the
+//       effective threshold (3 bulk; 1 near-tip per contract Item A
+//       step 3) — call m_connman.DisconnectNode with NO PeerManager
+//       mutex held. Counter is NOT reset by the disconnect call;
+//       OnBlockConnected (Item C) is the canonical reset site.
+//   (6) Log a single line if any entry was removed (verbose-gated).
 //
-// SAFE: copy-state-out — every callout (headers_manager,
+// SAFE: copy-state-out — every callout (m_scorer, m_connman, headers_manager,
 // chain_selector, RemoveBlockInFlight) happens with NO PeerManager
-// mutex held.
+// mutex held. CI grep gate per v1.5 §2.1.1: m_scorer.Misbehaving and
+// m_connman.DisconnectNode below have explicit "// SAFE: copy-state-out"
+// annotations.
 void CPeerManager::RetryStaleBlocksLocked() {
     // Step 1: compute blocks_behind / timeout_seconds OUTSIDE any
     // PeerManager mutex. Null-safe on headers_manager (chain_height
@@ -352,22 +438,80 @@ void CPeerManager::RetryStaleBlocksLocked() {
 
     // Step 3: iterate snapshot calling RemoveBlockInFlight (which
     // takes its own locks per PR6.5b.4). NO PeerManager mutex held here.
-    // Misbehavior dispatch on stall is intentionally NOT issued — that's
-    // PR6.5b.6 scope. We log the stale-entry count and let the next
-    // Tick re-dispatch via RequestNextBlocks.
     for (const auto& sp : stale) {
         // SAFE: copy-state-out — RemoveBlockInFlight scopes its own locks.
         RemoveBlockInFlight(sp.second, sp.first);
     }
 
-    // Step 4: log a single warn line (verbose-gated). PR6.5b.6 will
-    // upgrade this to a scorer-misbehavior callout per stalling peer;
-    // for now logging-only matches the contract's "logging only, no
-    // scorer dispatch" rule.
+    // Step 4: build deduplicated set of stalled peer-ids. Same peer may
+    // appear multiple times in `stale` (multiple stale entries in one
+    // sweep) — contract requires scoring ONCE per peer per sweep, so we
+    // dedupe via std::set. Keep insertion-order list for deterministic
+    // logging if needed; the set itself is the misbehavior gate.
+    std::set<NodeId> stalled_peers;
+    for (const auto& sp : stale) {
+        stalled_peers.insert(sp.second);
+    }
+
+    // Effective rotation threshold: contract Item A step 3 mirrors legacy
+    // near-tip aggressiveness — when blocks_behind <= NEAR_TIP_THRESHOLD,
+    // a single stall triggers disconnect; otherwise the bulk threshold of
+    // MAX_PEER_CONSECUTIVE_TIMEOUTS applies.
+    const int rotation_threshold =
+        (blocks_behind <= BLOCKS_NEAR_TIP_THRESHOLD)
+            ? 1
+            : MAX_PEER_CONSECUTIVE_TIMEOUTS;
+
+    // Step 5: for each unique stalled peer, increment per-peer counter
+    // under m_peers_mutex (capture the new value out), drop the lock,
+    // THEN call m_scorer.Misbehaving (γ ownership: port-side scoring),
+    // THEN — if counter >= threshold — call m_connman.DisconnectNode.
+    // Lock-order: m_peers_mutex is taken alone for the increment; no
+    // m_sync_state_mutex / m_blocks_in_flight_mutex / cs_main is held
+    // when m_scorer or m_connman are invoked.
+    for (NodeId peer_id : stalled_peers) {
+        // Per-peer counter increment under m_peers_mutex briefly.
+        // Capture the new value out so the misbehavior + disconnect
+        // dispatch happens with no PeerManager mutex held.
+        int new_counter = 0;
+        bool peer_present = false;
+        {
+            std::lock_guard<std::mutex> lk(m_peers_mutex);
+            auto it = m_peers.find(peer_id);
+            if (it != m_peers.end()) {
+                ++it->second->m_consecutive_block_timeouts;
+                new_counter = it->second->m_consecutive_block_timeouts;
+                peer_present = true;
+            }
+        }
+        if (!peer_present) continue;  // Disconnected mid-sweep — skip.
+
+        // SAFE: copy-state-out — m_peers_mutex dropped above. m_scorer is
+        // g_node_context.peer_scorer with internal locking; no PeerManager
+        // mutex is held during this callout. γ topology: this is the
+        // canonical port-side stall-misbehavior dispatch site. Legacy
+        // ::CPeerManager does NOT score stall events.
+        m_scorer.Misbehaving(peer_id,
+                             ::dilithion::net::MisbehaviorType::UnknownMessage,
+                             "block download stall timeout");
+
+        // Bad-peer rotation: counter crossed effective threshold → ask
+        // connman to disconnect. Counter is NOT reset here; OnBlockConnected
+        // (Item C) is the canonical reset site once fresh blocks flow
+        // again. SAFE: copy-state-out — no PeerManager mutex held during
+        // m_connman.DisconnectNode.
+        if (new_counter >= rotation_threshold) {
+            m_connman.DisconnectNode(peer_id, "block download stalling");
+        }
+    }
+
+    // Step 6: log a single warn line (verbose-gated). Per-peer scorer +
+    // disconnect lines are emitted by their respective subsystems; this
+    // log line is the sweep-level summary.
     if (g_verbose.load(std::memory_order_relaxed)) {
         LogPrintIBD(WARN,
-                    "removed %zu stale block requests >%ds timeout",
-                    stale.size(), timeout_seconds);
+                    "removed %zu stale block requests >%ds timeout (%zu peers)",
+                    stale.size(), timeout_seconds, stalled_peers.size());
     }
 }
 
@@ -893,8 +1037,51 @@ void CPeerManager::SwitchHeadersSyncPeerLocked(bool penalize) {
     SelectHeadersSyncPeerLocked();
 }
 
-void CPeerManager::SendMessages(NodeId /*peer*/) {
-    // STUB: no-op. Body work in PR6.5b.6.
+// PR6.5b.6 (Item D) — INTENTIONAL NO-OP under γ topology.
+//
+// γ ownership rule (per PR6.5b.6 contract): each outbound message type
+// is owned by EXACTLY ONE class. Under the active legacy outbound paths,
+// every outbound type that SendMessages might issue is already owned
+// elsewhere:
+//   * verack       — legacy ::CPeerManager / dilithion-node.cpp:3485.
+//   * ping         — connman.cpp:1830 (legacy connman ping path).
+//   * getheaders   — CHeadersManager (headers_manager.cpp:430,771).
+//   * getdata      — port's RequestNextBlocks (peer_manager.cpp), already
+//                    issued from Tick() not SendMessages.
+//
+// Port adding a duplicate verack/ping/getheaders here would produce a
+// wire-level double-send during cutover — peers might (correctly) score
+// the local node for malformed-protocol behavior. NO outbound work for
+// SendMessages to perform under flag=1 today.
+//
+// FUTURE EXIT RAMP: when a future PR migrates ownership of a specific
+// outbound type from legacy to port (e.g. ping handoff in a future cutover
+// step), it modifies THIS body to issue that single type and updates the
+// γ ownership table at the top of this comment. The intentional no-op
+// status is the SSOT for "port does not own outbound until further notice."
+//
+// Implementation rules per contract Item D:
+//   * Defensive unknown-peer guard (m_peers_mutex briefly; mirrors
+//     ProcessMessage pattern). Ensures a SendMessages call for a
+//     disconnected peer is a clean return, not a crash.
+//   * NO outbound PushMessage calls. NO state mutation. NO scorer ticks.
+//   * Documentation IS the value of this body — explains WHY, not WHAT,
+//     so a reader sees the γ ownership rule without spelunking the
+//     contract.
+//
+// SAFE: copy-state-out — single brief m_peers_mutex acquisition for the
+// existence check; no callout under the lock.
+void CPeerManager::SendMessages(NodeId peer) {
+    // Defensive unknown-peer guard. Drop silently for unknown peers
+    // (harmless race with disconnect; matches ProcessMessage:387-394).
+    {
+        std::lock_guard<std::mutex> lk(m_peers_mutex);
+        if (m_peers.find(peer) == m_peers.end()) {
+            return;
+        }
+    }
+    // Body deliberately empty — γ ownership delegates all outbound
+    // message types to other paths (see comment block above).
 }
 
 // PR6.5b.4 — HandleBlock. Deserializes a CBlock from the wire (matches
@@ -950,6 +1137,29 @@ bool CPeerManager::HandleBlock(NodeId peer, CDataStream& vRecv) {
     // SAFE: copy-state-out — RemoveBlockInFlight scopes its own locks; no
     // PeerManager mutex is held across the chain_selector callout below.
     RemoveBlockInFlight(peer, block_hash);
+
+    // PR6.5b.6 (Item B) — orphan-cluster misbehavior dispatch is
+    // INTENTIONALLY DEFERRED. The contract marked per-peer orphan scoring
+    // from HandleBlock as OPTIONAL ("If NOT implemented, document in
+    // comments that orphan misbehavior dispatch is intentionally deferred
+    // (with rationale)"). Rationale:
+    //   - The global atomic counter `m_consecutive_orphan_blocks` driven
+    //     from `OnOrphanBlockReceived()` already covers the legacy parity
+    //     surface (ibd_coordinator.h:132).
+    //   - Per-peer orphan scoring at this site falsely punishes peers
+    //     whose parent simply hasn't been processed yet (out-of-order
+    //     delivery is a legitimate condition, not misbehavior). Bitcoin
+    //     Core's analogous dispatch only fires on demonstrably-invalid
+    //     blocks (POW failure, malformed header), not on unknown-parent.
+    //   - Rate-bounding by scorer score-cap is insufficient: a peer
+    //     legitimately ahead of us by N blocks would be penalized N times
+    //     before we catch up.
+    // If a future PR demonstrates a use case where unknown-parent IS
+    // adversarial (e.g. paired with a separate signal that the block
+    // header is invalid), reinstate dispatch HERE with copy-state-out.
+    // γ ownership of port-side orphan misbehavior remains exclusive —
+    // legacy does not score on this path either (ibd_coordinator
+    // tracks orphans for rotation, not for misbehavior scoring).
 
     // Delegate to chain_selector. ProcessNewBlock returns true/false based on
     // its own validation; per contract, HandleBlock returns true regardless

@@ -86,6 +86,16 @@ struct CPeer {
     std::set<uint256> m_blocks_in_flight;
     std::chrono::steady_clock::time_point m_last_block_announcement{};
 
+    // PR6.5b.6 (Item A) — per-peer consecutive-stall counter for the
+    // bad-peer rotation logic in RetryStaleBlocksLocked. Mirrors the
+    // legacy CIbdCoordinator counter at ibd_coordinator.cpp:2197.
+    // Bumped each time a peer's in-flight blocks are sweep-removed; reset
+    // to 0 on OnBlockConnected (Item C). Protected by CPeerManager's
+    // existing m_peers_mutex (no new mutex per contract Lock-order
+    // discipline). NodeId-keyed lookup is implicit — this field lives on
+    // the per-peer CPeer instance, indexed by m_peers map key.
+    int m_consecutive_block_timeouts = 0;
+
     // Sync-peer rotation (only one peer is the sync-peer at a time).
     bool m_is_block_relay_only = false;
     bool m_is_chosen_sync_peer = false;

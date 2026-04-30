@@ -422,9 +422,19 @@ void test_stale_in_flight_block_is_recovered()
     // Both stale entries removed; per-peer counter back to zero.
     assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 0);
 
-    // Negative-side: scorer not called from RetryStaleBlocksLocked
-    // (PR6.5b.6 owns misbehavior dispatch on stalled peers).
-    assert(fix.scorer.calls.empty());
+    // PR6.5b.6 (Item A) owns stall misbehavior dispatch (γ topology —
+    // port's m_scorer ticks once per unique stalled peer per sweep).
+    // PR6.5b.5 anticipated this update; AMENDMENT 2026-04-30 authorizes it.
+    // Two stale entries → one peer → exactly ONE Misbehaving call with
+    // MisbehaviorType::UnknownMessage (weight=1) and reason containing
+    // "stall timeout".
+    assert(fix.scorer.calls.size() == 1);
+    assert(fix.scorer.calls[0].peer == kPeerId);
+    assert(fix.scorer.calls[0].type.has_value());
+    assert(*fix.scorer.calls[0].type
+           == ::dilithion::net::MisbehaviorType::UnknownMessage);
+    assert(fix.scorer.calls[0].reason.find("stall timeout")
+           != std::string::npos);
 
     // Belt-and-braces: a fresh-entry case (no override) preserves entries.
     {
@@ -456,7 +466,10 @@ void test_stale_in_flight_block_is_recovered()
 // Same age, different blocks_behind → opposite outcomes. This is the
 // behavioral signature of the timeout pivot.
 //
-// Negative-side assertion: scorer not called in either scenario.
+// Scorer pin: Scenario (a)'s Tick() removes a stale entry, so PR6.5b.6
+// Item A's stall scoring fires (one call, UnknownMessage, "stall timeout").
+// Scenario (b)'s Tick() preserves the entry (no stall sweep removal), so
+// the scorer is NOT called.
 // ============================================================================
 void test_near_tip_uses_shorter_timeout()
 {
@@ -485,7 +498,20 @@ void test_near_tip_uses_shorter_timeout()
 
         // Near-tip timeout fired: entry removed.
         assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 0);
-        assert(fix.scorer.calls.empty());
+
+        // PR6.5b.6 (Item A) owns stall misbehavior dispatch (γ topology —
+        // port's m_scorer ticks once per unique stalled peer per sweep).
+        // PR6.5b.5 anticipated this update; AMENDMENT 2026-04-30 authorizes
+        // it. One stale entry → one peer → exactly ONE Misbehaving call with
+        // MisbehaviorType::UnknownMessage (weight=1) and reason containing
+        // "stall timeout".
+        assert(fix.scorer.calls.size() == 1);
+        assert(fix.scorer.calls[0].peer == kPeerId);
+        assert(fix.scorer.calls[0].type.has_value());
+        assert(*fix.scorer.calls[0].type
+               == ::dilithion::net::MisbehaviorType::UnknownMessage);
+        assert(fix.scorer.calls[0].reason.find("stall timeout")
+               != std::string::npos);
     }
 
     // Scenario (b): bulk — 30s age does NOT exceed 60s BULK timeout.

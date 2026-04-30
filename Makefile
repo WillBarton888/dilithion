@@ -638,6 +638,17 @@ peer_manager_sync_state_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_sync
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_sync_state_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.6: misbehavior + OnOrphan/OnBlockConnected + SendMessages
+# tests (9 cases). Verifies γ topology integration invariant
+# (MisbehaviorOwnership_ExactlyOneScorerTicks_UnderFlag1), stall-misbehavior
+# dispatch via port-scorer, DisconnectNode bad-peer rotation (bulk + near-tip
+# regimes), OnOrphanBlockReceived counter increment, OnBlockConnected counter
+# resets (orphan + per-peer), and SendMessages intentional no-op.
+peer_manager_misbehavior_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_misbehavior_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ peer_manager_misbehavior_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
