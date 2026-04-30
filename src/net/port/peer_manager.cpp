@@ -60,6 +60,42 @@ CPeerManager::CPeerManager(::dilithion::net::IConnectionManager& connman,
 
 CPeerManager::~CPeerManager() = default;
 
+// ===== PR6.5b.test-hardening — clock/height injection-seam helpers =====
+//
+// Production behavior unchanged: when overrides are at their sentinel
+// defaults (0 for clock, -1 for heights), the helper returns the real
+// source. Tests inject deterministic values via the friended fixture.
+//
+// Lock-order discipline: helpers do NOT acquire any PeerManager mutex.
+// Single-writer test-only pattern — no race in production because
+// overrides are never set there.
+
+int64_t CPeerManager::Now() const {
+    if (m_test_now_override != 0) {
+        return m_test_now_override;
+    }
+    return static_cast<int64_t>(std::time(nullptr));
+}
+
+int CPeerManager::GetHeaderHeightForSync() const {
+    if (m_test_header_height_override != -1) {
+        return static_cast<int>(m_test_header_height_override);
+    }
+    // Real source: matches existing fast-out at peer_manager.cpp:285-287
+    // (null hdr_mgr → 0, never -1).
+    if (CHeadersManager* hdr_mgr = g_node_context.headers_manager.get()) {
+        return hdr_mgr->GetBestHeight();
+    }
+    return 0;
+}
+
+int CPeerManager::GetChainHeightForSync() const {
+    if (m_test_chain_height_override != -1) {
+        return static_cast<int>(m_test_chain_height_override);
+    }
+    return m_chain_selector.GetActiveHeight();
+}
+
 // ===== ISyncCoordinator overrides =====
 
 // PR6.5b.5: real body. !m_synced. Atomic acquire-load so callers see
@@ -172,14 +208,17 @@ void CPeerManager::Tick() {
 // fast-out at ibd_coordinator.cpp:360-364.
 void CPeerManager::UpdateSyncStateLocked() {
     // (a) Single read of headers_manager + chain_selector OUTSIDE any
-    // PeerManager mutex. If headers_manager is null, no-op (matches
-    // legacy fast-out at ibd_coordinator.cpp:360-364).
+    // PeerManager mutex. If headers_manager is null AND no test-side
+    // override is set, no-op (matches legacy fast-out at
+    // ibd_coordinator.cpp:360-364). The header-height override path lets
+    // tests drive UpdateSyncStateLocked deterministically without seeding
+    // CHeadersManager state.
     CHeadersManager* hdr_mgr = g_node_context.headers_manager.get();
-    if (hdr_mgr == nullptr) {
+    if (hdr_mgr == nullptr && m_test_header_height_override == -1) {
         return;
     }
-    const int header_height = hdr_mgr->GetBestHeight();
-    const int chain_height = m_chain_selector.GetActiveHeight();
+    const int header_height = GetHeaderHeightForSync();
+    const int chain_height = GetChainHeightForSync();
     const int blocks_behind = header_height - chain_height;
 
     // (b) Has any peer completed handshake? Helper takes m_peers_mutex
@@ -281,12 +320,12 @@ void CPeerManager::RetryStaleBlocksLocked() {
     // PeerManager mutex. Null-safe on headers_manager (chain_height
     // alone is insufficient — we need both to derive blocks_behind, so
     // null headers_manager forces the bulk timeout, which is the safer
-    // choice — won't aggressively re-request).
-    int header_height = 0;
-    if (CHeadersManager* hdr_mgr = g_node_context.headers_manager.get()) {
-        header_height = hdr_mgr->GetBestHeight();
-    }
-    const int chain_height = m_chain_selector.GetActiveHeight();
+    // choice — won't aggressively re-request). PR6.5b.test-hardening:
+    // route through GetHeaderHeightForSync / GetChainHeightForSync so
+    // tests can inject deterministic blocks_behind to drive the
+    // BLOCKS_NEAR_TIP_THRESHOLD selector branch.
+    const int header_height = GetHeaderHeightForSync();
+    const int chain_height = GetChainHeightForSync();
     const int blocks_behind = header_height - chain_height;
     const int timeout_seconds = (blocks_behind <= BLOCKS_NEAR_TIP_THRESHOLD)
         ? BLOCK_TIMEOUT_NEAR_TIP_SECS
@@ -294,8 +333,10 @@ void CPeerManager::RetryStaleBlocksLocked() {
 
     // Step 2: snapshot stale entries under m_blocks_in_flight_mutex
     // briefly. Copy out (hash, peer_id) so we can drop the lock before
-    // calling RemoveBlockInFlight.
-    const int64_t now_unix = static_cast<int64_t>(std::time(nullptr));
+    // calling RemoveBlockInFlight. PR6.5b.test-hardening: route through
+    // Now() so tests can inject "current time" past requested_at_unix_sec
+    // to deterministically exercise the timeout branch.
+    const int64_t now_unix = Now();
     std::vector<std::pair<uint256, NodeId>> stale;
     {
         std::lock_guard<std::mutex> bf_lk(m_blocks_in_flight_mutex);

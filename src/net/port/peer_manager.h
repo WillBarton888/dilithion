@@ -34,6 +34,12 @@ class CBlock;
 class CBlockHeader;
 class CDataStream;
 
+// PR6.5b.test-hardening — forward declaration for friend access. The fixture
+// itself is defined at global scope in src/test/peer_manager_sync_state_tests.cpp
+// (intentionally NOT in an anonymous namespace so the friend declaration on
+// CPeerManager can name it).
+struct SyncStateFixture;
+
 namespace dilithion {
 
 namespace consensus { class IChainSelector; }
@@ -67,6 +73,12 @@ struct PeerInfo {
 // --usenewpeerman=1 flag swaps this in transparently for IBDCoordinator
 // at the 37 call sites migrated in PR6.5a.
 class CPeerManager : public ::dilithion::net::port::ISyncCoordinator {
+    // PR6.5b.test-hardening — friend the test fixture so unit tests can
+    // inject deterministic clock/height values via the private override
+    // fields (m_test_now_override, m_test_header_height_override,
+    // m_test_chain_height_override). Single friend; the fixture is the
+    // ONLY entity outside CPeerManager that may set these fields.
+    friend struct ::SyncStateFixture;
 public:
     // Construction wires consumed interfaces. None are held by smart
     // pointer here; PeerManager does not own them.
@@ -207,6 +219,27 @@ private:
     // CIbdCoordinator::UpdateState:389-390 with a port-side equivalent.
     bool HasCompletedHandshakeWithAnyPeer() const;
 
+    // PR6.5b.test-hardening — clock/height injection seams.
+    //
+    // Production behavior is preserved: when the override is at its sentinel
+    // value, the helper returns the real source. Tests (via the friended
+    // SyncStateFixture) set the override to a non-sentinel value to inject
+    // deterministic time/height for hysteresis + stall-timeout assertions.
+    //
+    // Sentinel values (per contract):
+    //   * m_test_now_override == 0          → real source (std::time(nullptr))
+    //   * m_test_header_height_override == -1 → real source (g_node_context.headers_manager
+    //                                            ->GetBestHeight(), or 0 on null hdr_mgr —
+    //                                            matches existing fast-out at peer_manager.cpp:285-287)
+    //   * m_test_chain_height_override == -1 → real source (m_chain_selector.GetActiveHeight())
+    //
+    // Lock-order discipline: helpers do NOT acquire any PeerManager mutex.
+    // They read overrides as plain int64_t (single-writer test-only pattern;
+    // no race in production because overrides are never set there).
+    int64_t Now() const;
+    int     GetHeaderHeightForSync() const;
+    int     GetChainHeightForSync() const;
+
     // ===== Lock-order discipline (v1.5 §2.1.1 rule 5; Option B) =====
     //
     // Partial order:  connman_peer_lock < m_peers_mutex
@@ -274,6 +307,15 @@ private:
     ::dilithion::net::IPeerScorer& m_scorer;
     ::dilithion::consensus::IChainSelector& m_chain_selector;
     const ::Dilithion::ChainParams& m_chainparams;
+
+    // PR6.5b.test-hardening — injection-seam fields. PRIVATE, friend-gated
+    // (only ::SyncStateFixture may write). Production-default sentinels
+    // route to the real sources via Now() / GetHeaderHeightForSync() /
+    // GetChainHeightForSync(). NEVER set from production code; NEVER
+    // exposed via wire / RPC / config / public API.
+    int64_t m_test_now_override = 0;
+    int64_t m_test_header_height_override = -1;
+    int64_t m_test_chain_height_override = -1;
 };
 
 }  // namespace port

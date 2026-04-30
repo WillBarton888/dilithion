@@ -1,7 +1,8 @@
 // Copyright (c) 2026 The Dilithion Core developers
 // Distributed under the MIT software license
 //
-// Phase 6 PR6.5b.5 — Sync-state hysteresis + stall sweep tests.
+// Phase 6 PR6.5b.5 + PR6.5b.test-hardening — Sync-state hysteresis +
+// stall sweep tests.
 //
 // Per active_contract.md "Acceptance criteria", this 7-case suite verifies:
 //   1. is_ibd_default_true_at_startup
@@ -9,41 +10,44 @@
 //        IsInitialBlockDownload()==true and IsSynced()==false (now via the
 //        real hysteresis logic, not a hard-coded stub).
 //   2. is_synced_after_handshake_and_caught_up
-//      — STRUCTURAL ASSERTION: the hysteresis "become synced" branch is
-//        reachable in peer_manager.cpp. (Real fixture cannot seed
-//        CHeadersManager::nBestHeight without driving PoW-validating
-//        ProcessHeadersWithDoSProtection through to commitment, which is
-//        out of unit-test scope; per contract, structural-grep is the
-//        documented fallback.)
+//      — BEHAVIORAL ASSERTION (PR6.5b.test-hardening): set
+//        m_test_header_height_override > 0 + drive handshake +
+//        m_test_chain_height_override = header (blocks_behind = 0) +
+//        Tick() → IsSynced() flips to true via the real hysteresis branch.
 //   3. not_synced_when_no_handshake_completed
 //      — even with header_height == chain_height (within tolerance),
 //        Tick() does NOT flip m_synced to true unless any peer has
 //        m_handshake_complete. With zero handshakes, IsSynced()==false.
 //   4. unsynced_hysteresis_threshold
-//      — STRUCTURAL ASSERTION: the asymmetric hysteresis comparison
-//        (UNSYNC_THRESHOLD_BLOCKS) is present in peer_manager.cpp. Real
-//        fixture cannot toggle currently_synced=true without seeding
-//        CHeadersManager state.
+//      — BEHAVIORAL ASSERTION (PR6.5b.test-hardening): drive Test 2's path
+//        to currently_synced=true, then bump m_test_header_height_override
+//        so blocks_behind > UNSYNC_THRESHOLD_BLOCKS (10) and assert
+//        IsSynced()==false after Tick. Confirms the asymmetric hysteresis
+//        comparison is the load-bearing predicate.
 //   5. stale_in_flight_block_is_recovered
-//      — STRUCTURAL ASSERTION: RetryStaleBlocksLocked uses the timeout
-//        comparison and calls RemoveBlockInFlight; misbehavior dispatch
-//        is NOT issued (m_scorer.Misbehaving NOT called from the new
-//        code path). Real fixture cannot inject `requested_at_unix_sec
-//        = now - 65` without test seams disallowed by contract.
+//      — BEHAVIORAL ASSERTION (PR6.5b.test-hardening): MarkBlockInFlight
+//        stamps real requested_at_unix_sec; test then sets
+//        m_test_now_override = now + (BLOCK_TIMEOUT_BULK_SECS + slack);
+//        Tick() removes the entry via RetryStaleBlocksLocked and the per-peer
+//        counter decrements to 0. Negative-side assertion: scorer is NOT
+//        invoked from the new code path (PR6.5b.6 owns misbehavior dispatch).
 //   6. near_tip_uses_shorter_timeout
-//      — STRUCTURAL ASSERTION: the `(blocks_behind <=
-//        BLOCKS_NEAR_TIP_THRESHOLD) ? BLOCK_TIMEOUT_NEAR_TIP_SECS :
-//        BLOCK_TIMEOUT_BULK_SECS` selector is present.
+//      — BEHAVIORAL ASSERTION (PR6.5b.test-hardening): two scenarios share
+//        a fixture pattern:
+//          (a) blocks_behind ≤ BLOCKS_NEAR_TIP_THRESHOLD with age >
+//              BLOCK_TIMEOUT_NEAR_TIP_SECS but < BLOCK_TIMEOUT_BULK_SECS →
+//              entry is removed (near-tip threshold fires).
+//          (b) blocks_behind > BLOCKS_NEAR_TIP_THRESHOLD with same age →
+//              entry is preserved (bulk timeout NOT exceeded).
+//        Demonstrates the timeout pivot is real and routed through
+//        GetHeaderHeightForSync / GetChainHeightForSync.
 //   7. tick_does_not_request_blocks_when_synced
 //      — observable behavior: after Tick() with default state
 //        (m_synced==false), block-download dispatch fires per
 //        RequestNextBlocks; the gate at the end of Tick is verified by
-//        STRUCTURAL ASSERTION.
-//
-// Per contract: "Coding agent picks the form that compiles cleanly first;
-// the priority ordering is: (1) real fixture, (2) mock-injected behavior,
-// (3) static grep on the diff itself." — same precedent as PR6.5b.4's
-// verack co-dispatch test.
+//        STRUCTURAL ASSERTION (kept structural under §5 A8 — its purpose
+//        is the gate's existence, and the gate's effect is exercised by
+//        Tests 2/4 via the real flip).
 //
 // Test pattern: void test_*() functions + custom main(). No Boost.
 
@@ -63,6 +67,7 @@
 #include <cassert>
 #include <cstdint>
 #include <cstring>
+#include <ctime>
 #include <fstream>
 #include <iostream>
 #include <memory>
@@ -104,9 +109,32 @@ public:
     void DecayAll() override {}
 };
 
-// Test fixture. Builds CPeerManager + a real CHeadersManager on
-// g_node_context (so UpdateSyncStateLocked's null-guard goes through),
-// restoring on destruction.
+// Helper — read peer_manager.cpp for any remaining structural-style tests.
+std::string ReadPeerManagerSource() {
+    std::ifstream f("src/net/port/peer_manager.cpp");
+    if (!f) return {};
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+
+constexpr int kPeerId = 42;
+
+}  // anonymous namespace
+
+// ============================================================================
+// Test fixture. PR6.5b.test-hardening: moved OUT of anonymous namespace so
+// the friend declaration `friend struct ::SyncStateFixture;` on
+// dilithion::net::port::CPeerManager can name it. RecordingScorer stays in
+// the anonymous namespace (no friending needed).
+//
+// Builds CPeerManager + a real CHeadersManager on g_node_context (so
+// UpdateSyncStateLocked's null-guard goes through), restoring on destruction.
+//
+// Friend access lets test bodies set the three injection-seam fields
+// directly (m_test_now_override, m_test_header_height_override,
+// m_test_chain_height_override) to drive deterministic time/height.
+// ============================================================================
 struct SyncStateFixture {
     static const ::Dilithion::ChainParams chainparams;
     Dilithion::ChainParams* prev_global_chainparams;
@@ -137,23 +165,31 @@ struct SyncStateFixture {
         g_node_context.headers_manager.reset();
         Dilithion::g_chainParams = prev_global_chainparams;
     }
+
+    // ===== PR6.5b.test-hardening — friend-only setters =====
+    //
+    // These setters expose the private override fields ONLY through the
+    // friended fixture struct. No production code path can call them
+    // (production never instantiates SyncStateFixture). Sentinel values
+    // (0 for clock, -1 for heights) restore real-source behavior.
+
+    void SetNowOverride(int64_t v)    { pm.m_test_now_override = v; }
+    void SetHeaderHeightOverride(int64_t v) { pm.m_test_header_height_override = v; }
+    void SetChainHeightOverride(int64_t v)  { pm.m_test_chain_height_override = v; }
+
+    // Convenience: drive the handshake-complete bit on a peer that's
+    // already connected via OnPeerConnected. Avoids reaching into private
+    // CPeer state directly — uses the real verack codepath (matches
+    // not_synced_when_no_handshake_completed test below for symmetry).
+    void DriveVerack(::dilithion::net::NodeId peer) {
+        std::vector<uint8_t> empty;
+        CDataStream stream(empty);
+        (void)pm.ProcessMessage(peer, "verack", stream);
+    }
 };
 
 const ::Dilithion::ChainParams SyncStateFixture::chainparams =
     ::Dilithion::ChainParams::Regtest();
-
-// Helper — read peer_manager.cpp for structural-assertion-style tests.
-std::string ReadPeerManagerSource() {
-    std::ifstream f("src/net/port/peer_manager.cpp");
-    if (!f) return {};
-    std::stringstream ss;
-    ss << f.rdbuf();
-    return ss.str();
-}
-
-constexpr int kPeerId = 42;
-
-}  // anonymous namespace
 
 // ============================================================================
 // Test 1 — is_ibd_default_true_at_startup.
@@ -187,31 +223,48 @@ void test_is_ibd_default_true_at_startup()
 
 // ============================================================================
 // Test 2 — is_synced_after_handshake_and_caught_up.
-// STRUCTURAL ASSERTION (per contract: real CHeadersManager cannot be
-// seeded without driving PoW-validating ProcessHeadersWithDoSProtection
-// through to commitment, which is out of unit-test scope): the
-// hysteresis "become synced" branch is reachable in peer_manager.cpp.
+// BEHAVIORAL ASSERTION (PR6.5b.test-hardening). Fixture sets
+// m_test_header_height_override > 0 and m_test_chain_height_override
+// such that blocks_behind ≤ SYNC_TOLERANCE_BLOCKS (2). With a
+// handshake-complete peer, the three-way conjunction in
+// UpdateSyncStateLocked fires and m_synced flips to true.
+//
+// Negative-side assertion: m_scorer.Misbehaving is NOT called during
+// this happy-path Tick — UpdateSyncStateLocked must never score peers.
 // ============================================================================
 void test_is_synced_after_handshake_and_caught_up()
 {
     std::cout << "  test_is_synced_after_handshake_and_caught_up..." << std::flush;
 
-    const std::string src = ReadPeerManagerSource();
-    assert(!src.empty());
+    SyncStateFixture fix;
 
-    // The "become synced" branch must use SYNC_TOLERANCE_BLOCKS,
-    // header_height > 0, and the handshake gate.
-    assert(src.find("SYNC_TOLERANCE_BLOCKS") != std::string::npos);
-    assert(src.find("blocks_behind <= SYNC_TOLERANCE_BLOCKS") !=
-           std::string::npos);
-    assert(src.find("header_height > 0") != std::string::npos);
-    assert(src.find("has_peer_info") != std::string::npos);
-    assert(src.find("HasCompletedHandshakeWithAnyPeer") !=
-           std::string::npos);
+    // Connect peer + drive handshake-complete via verack codepath
+    // (HasCompletedHandshakeWithAnyPeer needs CPeer.m_handshake_complete).
+    fix.pm.OnPeerConnected(kPeerId);
+    fix.DriveVerack(kPeerId);
 
-    // The atomic store with release semantics must be present.
-    assert(src.find("m_synced.store(") != std::string::npos);
-    assert(src.find("memory_order_release") != std::string::npos);
+    // Inject deterministic heights: header > 0 (gate), chain at the same
+    // value so blocks_behind = 0 ≤ SYNC_TOLERANCE_BLOCKS (2).
+    fix.SetHeaderHeightOverride(100);
+    fix.SetChainHeightOverride(100);
+
+    // Pre-condition: not synced yet (Tick hasn't run with overrides).
+    assert(fix.pm.IsSynced() == false);
+
+    fix.pm.Tick();
+
+    // Hysteresis "become synced" branch fires:
+    //   blocks_behind (0) <= SYNC_TOLERANCE_BLOCKS (2)  ✓
+    //   header_height (100) > 0                          ✓
+    //   has_peer_info (handshake complete)               ✓
+    assert(fix.pm.IsSynced() == true);
+    assert(fix.pm.IsInitialBlockDownload() == false);
+
+    // Negative-side assertion: UpdateSyncStateLocked never scores peers.
+    // The verack handler in HandleVerack also doesn't score on the happy
+    // path (no second VERSION, no missing peer), so the scorer queue
+    // stays empty for this whole sequence.
+    assert(fix.scorer.calls.empty());
 
     std::cout << " OK\n";
 }
@@ -265,157 +318,213 @@ void test_not_synced_when_no_handshake_completed()
 
 // ============================================================================
 // Test 4 — unsynced_hysteresis_threshold.
-// STRUCTURAL ASSERTION (per contract: real CHeadersManager cannot be
-// seeded to currently_synced=true without test-only seams disallowed by
-// contract): the asymmetric hysteresis using UNSYNC_THRESHOLD_BLOCKS is
-// present in peer_manager.cpp.
+// BEHAVIORAL ASSERTION (PR6.5b.test-hardening). First drive Test 2's path
+// to currently_synced=true; then bump m_test_header_height_override so
+// blocks_behind > UNSYNC_THRESHOLD_BLOCKS (10), Tick(), and assert that
+// IsSynced() flipped to false. Demonstrates the asymmetric comparison
+// (UNSYNC_THRESHOLD_BLOCKS, not SYNC_TOLERANCE_BLOCKS) is the load-bearing
+// predicate on the synced→unsynced transition.
+//
+// Negative-side assertion: scorer not invoked during this transition.
 // ============================================================================
 void test_unsynced_hysteresis_threshold()
 {
     std::cout << "  test_unsynced_hysteresis_threshold..." << std::flush;
 
-    const std::string src = ReadPeerManagerSource();
-    assert(!src.empty());
-
-    // The "currently_synced && blocks_behind > UNSYNC_THRESHOLD_BLOCKS"
-    // path must be present.
-    assert(src.find("UNSYNC_THRESHOLD_BLOCKS") != std::string::npos);
-    assert(src.find("blocks_behind > UNSYNC_THRESHOLD_BLOCKS") !=
-           std::string::npos);
-
-    // Hysteresis is asymmetric: SYNC_TOLERANCE != UNSYNC_THRESHOLD.
-    // Verify the literal values via header source (constants are private,
-    // per contract — declared `static constexpr int` private members).
-    std::ifstream hf("src/net/port/peer_manager.h");
-    assert(hf);
-    std::stringstream hs;
-    hs << hf.rdbuf();
-    const std::string hdr = hs.str();
-    assert(hdr.find("SYNC_TOLERANCE_BLOCKS = 2") != std::string::npos);
-    assert(hdr.find("UNSYNC_THRESHOLD_BLOCKS = 10") != std::string::npos);
-
-    std::cout << " OK\n";
-}
-
-// ============================================================================
-// Test 5 — stale_in_flight_block_is_recovered.
-// STRUCTURAL ASSERTION (per contract: cannot inject
-// requested_at_unix_sec=now-65 without test seams disallowed by
-// contract): RetryStaleBlocksLocked uses the timeout comparison +
-// RemoveBlockInFlight callout, and does NOT call m_scorer.Misbehaving
-// (deferred to PR6.5b.6).
-//
-// This test ALSO observes the negative case: with FRESH entries
-// (just-added MarkBlockInFlight), Tick() does NOT remove them (timeout
-// not exceeded), so per-peer counter remains.
-// ============================================================================
-void test_stale_in_flight_block_is_recovered()
-{
-    std::cout << "  test_stale_in_flight_block_is_recovered..." << std::flush;
-
-    // (a) Structural side: the timeout comparison + RemoveBlockInFlight
-    // callout must be present in RetryStaleBlocksLocked.
-    const std::string src = ReadPeerManagerSource();
-    assert(!src.empty());
-
-    assert(src.find("RetryStaleBlocksLocked") != std::string::npos);
-    assert(src.find("requested_at_unix_sec") != std::string::npos);
-    assert(src.find("BLOCK_TIMEOUT_NEAR_TIP_SECS") != std::string::npos);
-    assert(src.find("BLOCK_TIMEOUT_BULK_SECS") != std::string::npos);
-    assert(src.find("RemoveBlockInFlight(sp.second, sp.first)") !=
-           std::string::npos);
-
-    // The CRITICAL drift assertion: misbehavior dispatch is NOT issued
-    // from RetryStaleBlocksLocked. We grep that the function body contains
-    // no `m_scorer.Misbehaving(` call. This pins the "deferred to
-    // PR6.5b.6" invariant.
-    const auto retry_pos = src.find("CPeerManager::RetryStaleBlocksLocked()");
-    assert(retry_pos != std::string::npos);
-    // Find next function boundary (next `void CPeerManager::` or end).
-    const auto next_func = src.find("\nvoid CPeerManager::", retry_pos + 1);
-    const auto next_func_alt = src.find("\nbool CPeerManager::", retry_pos + 1);
-    const auto retry_end = std::min(
-        next_func == std::string::npos ? src.size() : next_func,
-        next_func_alt == std::string::npos ? src.size() : next_func_alt);
-    const std::string retry_body = src.substr(retry_pos, retry_end - retry_pos);
-    assert(retry_body.find("m_scorer.Misbehaving(") == std::string::npos);
-    assert(retry_body.find("DisconnectNode") == std::string::npos);
-
-    // (b) Observable side: with FRESH entries, Tick() does NOT remove
-    // them. Per-peer counter survives a Tick.
     SyncStateFixture fix;
-    fix.pm.OnPeerConnected(kPeerId);
 
-    uint256 h1, h2;
-    h1.data[0] = 0x11;
-    h2.data[0] = 0x22;
-    fix.pm.MarkBlockInFlight(kPeerId, h1);
-    fix.pm.MarkBlockInFlight(kPeerId, h2);
-    assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 2);
+    // Step 1: get to currently_synced=true (mirrors Test 2).
+    fix.pm.OnPeerConnected(kPeerId);
+    fix.DriveVerack(kPeerId);
+    fix.SetHeaderHeightOverride(100);
+    fix.SetChainHeightOverride(100);
+    fix.pm.Tick();
+    assert(fix.pm.IsSynced() == true);
+
+    // Step 2: drive blocks_behind > UNSYNC_THRESHOLD_BLOCKS (10). Bump
+    // header height while leaving chain height at 100 → blocks_behind = 11.
+    fix.SetHeaderHeightOverride(111);
+    // chain stays at 100.
 
     fix.pm.Tick();
 
-    // Fresh entries (within the timeout window) are preserved.
-    assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 2);
+    // The "currently_synced && blocks_behind > UNSYNC_THRESHOLD_BLOCKS"
+    // branch fires: IsSynced() flips back to false.
+    assert(fix.pm.IsSynced() == false);
+    assert(fix.pm.IsInitialBlockDownload() == true);
 
-    // No scorer dispatch from the new code paths added in PR6.5b.5
-    // (the test's only ProcessMessage calls are the lifecycle ones above
-    // — none of which tick the scorer in the happy path).
-    for (const auto& call : fix.scorer.calls) {
-        // Pre-existing dispatch arms (PR6.5b.2/3/4) may tick on bad
-        // input but our test input is happy-path; assert nothing.
-        (void)call;
+    // Confirm asymmetry: a value just above SYNC_TOLERANCE (3-10) would NOT
+    // have flipped if currently synced. Re-set fixture for this sub-case.
+    {
+        SyncStateFixture fix2;
+        fix2.pm.OnPeerConnected(kPeerId);
+        fix2.DriveVerack(kPeerId);
+        fix2.SetHeaderHeightOverride(100);
+        fix2.SetChainHeightOverride(100);
+        fix2.pm.Tick();
+        assert(fix2.pm.IsSynced() == true);
+
+        // Bump only 5 blocks behind — within the asymmetric "stay synced"
+        // window (>SYNC_TOLERANCE_BLOCKS but <=UNSYNC_THRESHOLD_BLOCKS).
+        fix2.SetHeaderHeightOverride(105);
+        fix2.pm.Tick();
+        // STILL SYNCED. This is the hysteresis dead-band.
+        assert(fix2.pm.IsSynced() == true);
     }
-    // Stronger: zero scorer calls in this happy-path Tick scenario.
+
+    // Negative-side assertion: scorer never called from
+    // UpdateSyncStateLocked across either transition.
     assert(fix.scorer.calls.empty());
 
     std::cout << " OK\n";
 }
 
 // ============================================================================
+// Test 5 — stale_in_flight_block_is_recovered.
+// BEHAVIORAL ASSERTION (PR6.5b.test-hardening). MarkBlockInFlight stamps
+// the entry with real std::time(nullptr); test then sets
+// m_test_now_override = now + (BLOCK_TIMEOUT_BULK_SECS + slack). Tick →
+// RetryStaleBlocksLocked computes age via Now() and removes the entry.
+//
+// Negative-side assertion: m_scorer.Misbehaving is NOT called from
+// RetryStaleBlocksLocked (deferred to PR6.5b.6).
+// ============================================================================
+void test_stale_in_flight_block_is_recovered()
+{
+    std::cout << "  test_stale_in_flight_block_is_recovered..." << std::flush;
+
+    SyncStateFixture fix;
+    fix.pm.OnPeerConnected(kPeerId);
+
+    // Force the bulk-timeout branch by leaving header/chain heights at
+    // their default sentinels (override=-1 → real source via genesis-seeded
+    // CHeadersManager + ChainSelectorAdapter, blocks_behind=0). Actually
+    // blocks_behind=0 is near-tip, so the timeout = BLOCK_TIMEOUT_NEAR_TIP_SECS
+    // (15). We use 15+slack as the offset.
+
+    // Mark two block hashes in-flight. Both are stamped with real
+    // std::time(nullptr) inside MarkBlockInFlight.
+    uint256 h1, h2;
+    h1.data[0] = 0x11;
+    h2.data[0] = 0x22;
+
+    const int64_t real_now_at_mark = static_cast<int64_t>(std::time(nullptr));
+    fix.pm.MarkBlockInFlight(kPeerId, h1);
+    fix.pm.MarkBlockInFlight(kPeerId, h2);
+    assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 2);
+
+    // Inject "now" 100 seconds into the future. With near-tip timeout
+    // (15s) AND bulk timeout (60s), 100s exceeds both. Belt-and-braces.
+    fix.SetNowOverride(real_now_at_mark + 100);
+
+    fix.pm.Tick();
+
+    // Both stale entries removed; per-peer counter back to zero.
+    assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 0);
+
+    // Negative-side: scorer not called from RetryStaleBlocksLocked
+    // (PR6.5b.6 owns misbehavior dispatch on stalled peers).
+    assert(fix.scorer.calls.empty());
+
+    // Belt-and-braces: a fresh-entry case (no override) preserves entries.
+    {
+        SyncStateFixture fix2;
+        fix2.pm.OnPeerConnected(kPeerId);
+        fix2.pm.MarkBlockInFlight(kPeerId, h1);
+        assert(fix2.pm.GetBlocksInFlightForPeer(kPeerId) == 1);
+        fix2.pm.Tick();
+        // Within the timeout window — preserved.
+        assert(fix2.pm.GetBlocksInFlightForPeer(kPeerId) == 1);
+        assert(fix2.scorer.calls.empty());
+    }
+
+    std::cout << " OK\n";
+}
+
+// ============================================================================
 // Test 6 — near_tip_uses_shorter_timeout.
-// STRUCTURAL ASSERTION: the `(blocks_behind <= BLOCKS_NEAR_TIP_THRESHOLD)
-// ? BLOCK_TIMEOUT_NEAR_TIP_SECS : BLOCK_TIMEOUT_BULK_SECS` selector is
-// present, matching ibd_coordinator.cpp:2174's `(blocks_behind <= 20)
-// ? 15 : 60`.
+// BEHAVIORAL ASSERTION (PR6.5b.test-hardening). Two scenarios verify the
+// `(blocks_behind <= BLOCKS_NEAR_TIP_THRESHOLD) ? BLOCK_TIMEOUT_NEAR_TIP_SECS
+// : BLOCK_TIMEOUT_BULK_SECS` selector at runtime — using the height
+// overrides to pin blocks_behind on each side of the threshold:
+//
+//   Scenario (a): blocks_behind = 5 (≤ 20 = NEAR_TIP_THRESHOLD), age = 30s
+//     → 30 ≥ NEAR_TIP timeout (15s) → entry IS removed.
+//   Scenario (b): blocks_behind = 50 (> 20), age = 30s
+//     → 30 < BULK timeout (60s) → entry IS preserved.
+//
+// Same age, different blocks_behind → opposite outcomes. This is the
+// behavioral signature of the timeout pivot.
+//
+// Negative-side assertion: scorer not called in either scenario.
 // ============================================================================
 void test_near_tip_uses_shorter_timeout()
 {
     std::cout << "  test_near_tip_uses_shorter_timeout..." << std::flush;
 
-    const std::string src = ReadPeerManagerSource();
-    assert(!src.empty());
+    // Scenario (a): near tip — 30s age exceeds 15s NEAR_TIP timeout.
+    {
+        SyncStateFixture fix;
+        fix.pm.OnPeerConnected(kPeerId);
 
-    // The selector must use the three named constants.
-    assert(src.find("BLOCKS_NEAR_TIP_THRESHOLD") != std::string::npos);
-    assert(src.find("BLOCK_TIMEOUT_NEAR_TIP_SECS") != std::string::npos);
-    assert(src.find("BLOCK_TIMEOUT_BULK_SECS") != std::string::npos);
+        uint256 h;
+        h.data[0] = 0xAA;
 
-    // The constants match the legacy literals at ibd_coordinator.cpp:2174.
-    // (Constants are private static constexpr members; verify via
-    // header source per contract.)
-    std::ifstream hf("src/net/port/peer_manager.h");
-    assert(hf);
-    std::stringstream hs;
-    hs << hf.rdbuf();
-    const std::string hdr = hs.str();
-    assert(hdr.find("BLOCKS_NEAR_TIP_THRESHOLD = 20") != std::string::npos);
-    assert(hdr.find("BLOCK_TIMEOUT_NEAR_TIP_SECS = 15") != std::string::npos);
-    assert(hdr.find("BLOCK_TIMEOUT_BULK_SECS = 60") != std::string::npos);
+        const int64_t real_now = static_cast<int64_t>(std::time(nullptr));
+        fix.pm.MarkBlockInFlight(kPeerId, h);
+        assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 1);
+
+        // Pin blocks_behind = 5 (≤ NEAR_TIP_THRESHOLD = 20).
+        fix.SetHeaderHeightOverride(105);
+        fix.SetChainHeightOverride(100);
+        // Advance "now" by 30s. Exceeds NEAR_TIP timeout (15s) but NOT
+        // BULK timeout (60s) — the differentiator.
+        fix.SetNowOverride(real_now + 30);
+
+        fix.pm.Tick();
+
+        // Near-tip timeout fired: entry removed.
+        assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 0);
+        assert(fix.scorer.calls.empty());
+    }
+
+    // Scenario (b): bulk — 30s age does NOT exceed 60s BULK timeout.
+    {
+        SyncStateFixture fix;
+        fix.pm.OnPeerConnected(kPeerId);
+
+        uint256 h;
+        h.data[0] = 0xBB;
+
+        const int64_t real_now = static_cast<int64_t>(std::time(nullptr));
+        fix.pm.MarkBlockInFlight(kPeerId, h);
+        assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 1);
+
+        // Pin blocks_behind = 50 (> NEAR_TIP_THRESHOLD = 20).
+        fix.SetHeaderHeightOverride(150);
+        fix.SetChainHeightOverride(100);
+        // Same 30s age. Bulk timeout (60s) NOT exceeded.
+        fix.SetNowOverride(real_now + 30);
+
+        fix.pm.Tick();
+
+        // Bulk timeout NOT fired: entry preserved.
+        assert(fix.pm.GetBlocksInFlightForPeer(kPeerId) == 1);
+        assert(fix.scorer.calls.empty());
+    }
 
     std::cout << " OK\n";
 }
 
 // ============================================================================
 // Test 7 — tick_does_not_request_blocks_when_synced.
-// STRUCTURAL ASSERTION: the Tick() body's final dispatch is gated by
-// m_synced. Real fixture cannot toggle m_synced=true without seeding
-// CHeadersManager state; structural-grep is the documented fallback.
+// STRUCTURAL ASSERTION (kept structural per contract §5 A8 — Test 7's
+// purpose is to pin the gate's existence; the gate's effect is exercised
+// behaviorally by Tests 2/4 via the real m_synced flip).
 //
-// Observable side: with default state (m_synced=false), Tick() does
-// invoke RequestNextBlocks but with no peers / no peer with positive
-// n_best_known_height, no entries are added — still observable as
-// in-flight count == 0.
+// Observable side: with default state (m_synced=false) and no peers,
+// Tick() does invoke RequestNextBlocks but with no peers, no entries
+// are added — still observable as in-flight count == 0.
 // ============================================================================
 void test_tick_does_not_request_blocks_when_synced()
 {
@@ -444,7 +553,7 @@ void test_tick_does_not_request_blocks_when_synced()
 // ============================================================================
 int main()
 {
-    std::cout << "Phase 6 PR6.5b.5 — Sync-state hysteresis + stall sweep tests\n";
+    std::cout << "Phase 6 PR6.5b.5 + test-hardening — Sync-state tests\n";
     std::cout << "  (7-test suite per active_contract.md)\n\n";
 
     // Initialize RandomX (light mode) so genesis hashing works inside the
