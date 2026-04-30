@@ -95,11 +95,14 @@ Dilithion stores blocks keyed by hash in leveldb, not in flat files --
    1283-1285 and 1460-1462 claiming "We don't hold cs_main during callbacks"
    is correct ONLY for the disconnect path).
 3. **Reindex thread** (owned by `CTxIndex::m_sync_thread`). Spawned by
-   `StartBackgroundSync()`; walks `pnext` from `last_indexed + 1` to the
-   tip-snapshot taken at thread entry, reads each block from the block
-   store, and writes the corresponding tx records. Holds `m_mutex` only
-   inside `WriteBlock` (never while calling into `CChainState`). Honors
-   `m_interrupt` between blocks.
+   `StartBackgroundSync()`; iterates heights from `last_indexed + 1` to
+   the tip-height snapshot taken once at thread entry, resolving each
+   height to a block hash via `g_chainstate.GetBlocksAtHeight(h)` (and
+   preferring the on-main-chain block via `IsOnMainChain()` when more
+   than one block exists at that height), reads each block from the
+   block store, and writes the corresponding tx records. Holds `m_mutex`
+   only inside `WriteBlock` (never while calling into `CChainState`).
+   Honors `m_interrupt` between blocks.
 
 ### The `cs_main` asymmetry
 
@@ -114,9 +117,10 @@ within it:
   reaches into `CChainState`.
 * `m_mutex` is **never** held while calling into `CChainState`. The reindex
   thread reads `chain.GetTip()->nHeight` once at thread start (atomic
-  pointer load), then walks `pnext` and `mapBlockIndex` snapshots without
-  acquiring `m_mutex` in the read path. Mid-walk reorgs are tolerated by
-  the live-callback gating below.
+  pointer load), then resolves each height to a block hash via
+  `GetBlocksAtHeight` / `GetBlockIndex` (both of which acquire `cs_main`
+  internally) without acquiring `m_mutex` in the read path. Mid-walk
+  reorgs are tolerated by the live-callback gating below.
 * `FindTx` (called from RPC) takes `m_mutex` only. It does not touch
   `CChainState`. The RPC caller takes any chain locks separately, after
   `FindTx` returns.
@@ -234,10 +238,9 @@ increments via `IncrementMismatches`):
 [txindex] WARN paranoia mismatch txid=<16hex>... indexed_block=<16hex>... -- falling through to scan
 ```
 
-Note: the production source currently emits the WARN with a UTF-8 em-dash
-(`--` rendered as a single em-dash character at `src/rpc/server.cpp:5622`).
-PR-7b will replace the em-dash with an ASCII double-hyphen for log-parser
-compatibility (see Known follow-ups).
+The WARN literal uses ASCII double-hyphen (`--`) per `feedback_no_unicode_in_logs.md`;
+PR-7b made the swap in `src/rpc/server.cpp` and PR-7d completed it across
+`src/index/tx_index.cpp`.
 
 Shutdown:
 
@@ -288,11 +291,6 @@ re-acknowledge the rebuild.
 
 ## Known follow-ups
 
-* **PR-7b (production em-dash fix):** the paranoia WARN in
-  `src/rpc/server.cpp:5622` currently emits a UTF-8 em-dash. The Dilithion
-  log convention is ASCII-only (per
-  `feedback_no_unicode_in_logs.md`). PR-7b will replace the em-dash with
-  an ASCII double-hyphen and revise the plan section 6 wording to match.
 * **TC2 fall-through-success path** (red-team CONCERN PR6-C1, addressed
   in PR-7a): the original TC2 covered the WARN substring and counter delta
   but did not exercise the success-via-fall-through path. PR-7a adds the

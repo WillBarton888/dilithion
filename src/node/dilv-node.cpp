@@ -2816,7 +2816,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (g_tx_index && !g_tx_index->WriteBlock(b, h, hh)) {
                         std::cerr << "[txindex] WriteBlock failed at height " << h
                                   << " (hash " << hh.GetHex().substr(0, 16) << "...) "
-                                  << "— index now lagging chain" << std::endl;
+                                  << "-- index now lagging chain" << std::endl;
                     }
                 });
             g_chainstate.RegisterBlockDisconnectCallback(
@@ -2824,7 +2824,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     if (g_tx_index && !g_tx_index->EraseBlock(b, h, hh)) {
                         std::cerr << "[txindex] EraseBlock failed at height " << h
                                   << " (hash " << hh.GetHex().substr(0, 16) << "...) "
-                                  << "— index may contain stale entries" << std::endl;
+                                  << "-- index may contain stale entries" << std::endl;
                     }
                 });
             g_tx_index->StartBackgroundSync();
