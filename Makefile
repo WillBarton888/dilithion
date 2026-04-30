@@ -131,6 +131,25 @@ DILITHIUM_OBJECTS := $(DILITHIUM_SOURCES:.c=.o)
 BUILD_DIR := build
 OBJ_DIR := $(BUILD_DIR)/obj
 
+# Phase 6 sub-stream (b) — Thread Sanitizer build mode.
+# Usage:   make TSAN=1 <target>
+# Example: make TSAN=1 peer_manager_misbehavior_tests
+# Run the resulting binary directly; TSAN prints a race report on stderr
+# and exits non-zero if a data race is detected. TSAN-built objects go to
+# build-tsan/ to keep them separate from the normal build artifacts. To
+# switch between TSAN and non-TSAN cleanly, run `make clean` first
+# (dilithium .o files live in depends/dilithium/ref/ and are shared
+# across modes — clean rebuilds them with the correct flags).
+# Requires GCC 4.8+ (Linux) with libtsan; NOT supported on MSYS2 mingw64.
+ifdef TSAN
+    TSAN_FLAGS := -fsanitize=thread -fno-omit-frame-pointer
+    CXXFLAGS += $(TSAN_FLAGS)
+    CFLAGS += $(TSAN_FLAGS)
+    LDFLAGS += $(TSAN_FLAGS)
+    BUILD_DIR := build-tsan
+    OBJ_DIR := $(BUILD_DIR)/obj
+endif
+
 # Colors for output
 COLOR_RESET := \033[0m
 COLOR_GREEN := \033[32m
