@@ -69,6 +69,20 @@ const std::map<std::string, CRateLimiter::MethodRateLimit> CRateLimiter::METHOD_
 
     // === LOW: Read-Only Info (default 1000/min applies to unconfigured methods) ===
     // getbalance, getblockchaininfo, getblockcount, etc. - use DEFAULT_METHOD_LIMIT
+
+    // === LONG-POLL: wait-* RPCs (10/min) ===
+    // PR #38 red-team C4: the wait-* RPCs hold an RPC worker thread for
+    // up to 5 minutes (their max timeout). With ~8 worker threads in the
+    // dispatcher pool, a single misbehaving caller could exhaust the
+    // pool with a 10-request burst and lock out other RPC traffic.
+    // 10/min per IP keeps legitimate explorer / wallet usage flowing
+    // (tip-change polling at 1-2 calls/sec is normal for actively-used
+    // explorers) while bounding the worker-pool exposure. The default
+    // 1000/min from DEFAULT_METHOD_LIMIT is too permissive for blocking
+    // RPCs.
+    {"waitfornewblock",        {10.0, 0.167, 1.0}},
+    {"waitforblock",           {10.0, 0.167, 1.0}},
+    {"waitforblockheight",     {10.0, 0.167, 1.0}},
 };
 
 bool CRateLimiter::AllowRequest(const std::string& ipAddress) {
