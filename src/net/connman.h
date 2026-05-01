@@ -457,6 +457,17 @@ public:
         m_port_peer_manager = pm;
     }
 
+    // Phase 9 PR9.3: read-only accessor for telemetry RPCs (getpeerinfo
+    // manager_class field, getsyncstatus, getblockdownloadstats). Returns
+    // true when γ dual-dispatch is active (--usenewpeerman=1, both legacy
+    // + port managers see every peer event); false when only legacy is
+    // active (--usenewpeerman=0, default). Single-pointer non-atomic
+    // read; safe under the same conditions as the dispatch-site reads
+    // at connman.cpp:91 / :104.
+    bool HasPortPeerManager() const {
+        return m_port_peer_manager != nullptr;
+    }
+
     // Test-only: set the legacy m_peer_manager pointer without going through
     // Start(). Production code wires this via Start(peer_mgr, msg_proc, options).
     // Phase 6 PR6.5b.1b dual-dispatch tests need legacy wired without spinning

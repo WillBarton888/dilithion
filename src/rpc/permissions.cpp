@@ -38,6 +38,9 @@ void CRPCPermissions::InitializeMethodPermissions() {
     m_methodPermissions["decoderawtransaction"] = readBlockchain;
     m_methodPermissions["getnetworkinfo"]     = readBlockchain;
     m_methodPermissions["getpeerinfo"]        = readBlockchain;
+    // Phase 9 PR9.3: --usenewpeerman burn-in telemetry (read-only).
+    m_methodPermissions["getsyncstatus"]      = readBlockchain;
+    m_methodPermissions["getblockdownloadstats"] = readBlockchain;
 
     // ========================================================================
     // Wallet Read Methods (READ_WALLET = 0x0002)

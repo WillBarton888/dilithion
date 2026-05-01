@@ -248,6 +248,9 @@ CRPCServer::CRPCServer(uint16_t port)
     // Network and general
     m_handlers["getnetworkinfo"] = [this](const std::string& p) { return RPC_GetNetworkInfo(p); };
     m_handlers["getpeerinfo"] = [this](const std::string& p) { return RPC_GetPeerInfo(p); };
+    // Phase 9 PR9.3: --usenewpeerman burn-in telemetry (read-only views).
+    m_handlers["getsyncstatus"] = [this](const std::string& p) { return RPC_GetSyncStatus(p); };
+    m_handlers["getblockdownloadstats"] = [this](const std::string& p) { return RPC_GetBlockDownloadStats(p); };
     m_handlers["getconnectioncount"] = [this](const std::string& p) { return RPC_GetConnectionCount(p); };
     m_handlers["help"] = [this](const std::string& p) { return RPC_Help(p); };
     m_handlers["stop"] = [this](const std::string& p) { return RPC_Stop(p); };
@@ -5176,6 +5179,14 @@ std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
     // Get all connected peers
     auto peers = g_node_context.peer_manager->GetConnectedPeers();
 
+    // Phase 9 PR9.3: per-response manager_class is uniform under current γ
+    // dispatch design (every peer event fires in both managers when
+    // port-pm is registered). Per-peer placement preserves space for
+    // future per-peer routing if γ ever splits.
+    const char* manager_class = (g_node_context.connman && g_node_context.connman->HasPortPeerManager())
+                                    ? "both"
+                                    : "legacy";
+
     std::ostringstream oss;
     oss << "[";
 
@@ -5217,7 +5228,9 @@ std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
         oss << "\"relaytxes\":" << (peer->relay ? "true" : "false") << ",";
         // Phase 2 port: misbehavior score moved into CPeerScorer; query via
         // the manager's accessor.
-        oss << "\"misbehavior\":" << g_node_context.peer_manager->GetMisbehaviorScore(peer->id);
+        oss << "\"misbehavior\":" << g_node_context.peer_manager->GetMisbehaviorScore(peer->id) << ",";
+        // Phase 9 PR9.3: additive field; "legacy" or "both" (γ dual-dispatch).
+        oss << "\"manager_class\":\"" << manager_class << "\"";
         oss << "}";
     }
 
@@ -5237,6 +5250,96 @@ std::string CRPCServer::RPC_GetConnectionCount(const std::string& params) {
 
     size_t count = g_node_context.peer_manager->GetConnectionCount();
     return std::to_string(count);
+}
+
+// ============================================================================
+// Phase 9 PR9.3: --usenewpeerman burn-in telemetry RPCs
+// ============================================================================
+//
+// Schemas locked in port_phase_9_implementation_plan.md v0.1.2 §PR9.3.
+// Read-only views of existing CHeadersManager + CBlockFetcher + CConnman
+// state — no new tracking infrastructure, no new locking surface.
+//
+// Permission tier: readBlockchain (same as getpeerinfo / getblockchaininfo).
+// ============================================================================
+
+std::string CRPCServer::RPC_GetSyncStatus(const std::string& params) {
+    extern NodeContext g_node_context;
+    if (!g_node_context.headers_manager) {
+        return "{\"error\":\"headers_manager not initialized\"}";
+    }
+
+    // All getters below are existing public CHeadersManager surface.
+    double progress = g_node_context.headers_manager->GetSyncProgress();
+    int best_height = g_node_context.headers_manager->GetBestHeight();
+    uint256 best_hash = g_node_context.headers_manager->GetBestHeaderHash();
+
+    const char* manager_class = (g_node_context.connman && g_node_context.connman->HasPortPeerManager())
+                                    ? "both"
+                                    : "legacy";
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"headers_progress\":" << progress << ",";
+    oss << "\"best_header_height\":" << best_height << ",";
+    oss << "\"best_header_hash\":\"" << best_hash.GetHex() << "\",";
+    oss << "\"manager_class\":\"" << manager_class << "\"";
+    oss << "}";
+    return oss.str();
+}
+
+std::string CRPCServer::RPC_GetBlockDownloadStats(const std::string& params) {
+    extern NodeContext g_node_context;
+    if (!g_node_context.block_fetcher) {
+        return "{\"error\":\"block_fetcher not initialized\"}";
+    }
+
+    const char* manager_class = (g_node_context.connman && g_node_context.connman->HasPortPeerManager())
+                                    ? "both"
+                                    : "legacy";
+
+    size_t total_in_flight = g_node_context.block_fetcher->GetInFlightCount();
+    size_t total_pending = g_node_context.block_fetcher->GetPendingCount();
+
+    // Per-peer breakdown via existing GetPeerBlocksInFlight(NodeId).
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"total_blocks_in_flight\":" << total_in_flight << ",";
+    oss << "\"total_blocks_pending\":" << total_pending << ",";
+    oss << "\"peers\":[";
+
+    if (g_node_context.peer_manager) {
+        auto peers = g_node_context.peer_manager->GetConnectedPeers();
+        bool first = true;
+        for (const auto& peer : peers) {
+            if (!first) oss << ",";
+            first = false;
+            int blocks_in_flight = g_node_context.block_fetcher->GetPeerBlocksInFlight(peer->id);
+            oss << "{";
+            oss << "\"peer_id\":" << peer->id << ",";
+            oss << "\"blocks_in_flight\":" << blocks_in_flight << ",";
+            oss << "\"manager_class\":\"" << manager_class << "\"";
+            oss << "}";
+        }
+    }
+    oss << "],";
+
+    // Stalled blocks via existing GetStalledBlocks(60s) — non-const because
+    // the underlying CBlockTracker::CheckTimeouts mutates internal state to
+    // mark stalled entries; we surface the read-out vector at top level.
+    oss << "\"stalled_blocks\":[";
+    {
+        auto stalled = g_node_context.block_fetcher->GetStalledBlocks(std::chrono::seconds(60));
+        bool first = true;
+        for (const auto& [height, peer_id] : stalled) {
+            if (!first) oss << ",";
+            first = false;
+            oss << "{\"height\":" << height << ",\"peer_id\":" << peer_id << "}";
+        }
+    }
+    oss << "]";
+    oss << "}";
+    return oss.str();
 }
 
 std::string CRPCServer::RPC_Help(const std::string& params) {

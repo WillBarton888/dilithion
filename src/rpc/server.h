@@ -361,6 +361,13 @@ private:
     std::string RPC_GetPeerInfo(const std::string& params);
     std::string RPC_GetConnectionCount(const std::string& params);
 
+    // Phase 9 PR9.3: telemetry helpers for --usenewpeerman burn-in observability.
+    // Read-only views of existing CHeadersManager + CBlockFetcher state
+    // (no new locking surface; no new tracking infrastructure). Schemas
+    // locked in port_phase_9_implementation_plan.md v0.1.2 §PR9.3.
+    std::string RPC_GetSyncStatus(const std::string& params);
+    std::string RPC_GetBlockDownloadStats(const std::string& params);
+
     // General methods
     std::string RPC_Help(const std::string& params);
     std::string RPC_Stop(const std::string& params);
