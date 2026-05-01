@@ -829,6 +829,18 @@ validate_crypto: validate_crypto.o $(OBJ_DIR)/crypto/hmac_sha3.o $(OBJ_DIR)/cryp
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 
+# Phase 8 PR8.2: 4-node regtest harness (orchestration via bash script).
+# Boots 4 dilv-node regtest binaries in full-mesh topology, mines on Node A,
+# verifies lockstep + tip-hash equality + active-tip agreement + forbidden-
+# token GREP regression. Scenarios 2 (delay injection) + 3 (competing
+# leaves) deferred to PR8.2-followup (require Linux tc / dual-mining
+# infrastructure). Depends on dilv-node binary already built.
+.PHONY: four_node_test
+four_node_test:
+	@echo "$(COLOR_BLUE)[TEST]$(COLOR_RESET) 4-node regtest harness (scripts/four_node_local.sh)"
+	@bash scripts/four_node_local.sh smoke 10 180
+	@echo "$(COLOR_GREEN)✓ four_node_test passed$(COLOR_RESET)"
+
 # ============================================================================
 # Boost Unit Test Binaries
 # ============================================================================
