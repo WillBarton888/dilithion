@@ -7,6 +7,11 @@
 #include <cmath>
 #include <stdexcept>
 
+// Process-wide fee estimator handle. Defined in fees.cpp so the symbol
+// exists even when no node binary is linked (e.g. test_dilithion). PR-EF-2
+// wiring sets/clears this from dilithion-node.cpp / dilv-node.cpp main().
+policy::fee_estimator::CBlockPolicyEstimator* g_fee_estimator = nullptr;
+
 namespace policy {
 namespace fee_estimator {
 

@@ -110,6 +110,18 @@ private:
     // These MUST only be called while holding cs lock
     bool RemoveTxUnlocked(const uint256& txid);
     bool AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check = false);
+    // PR-EF-2: ReplaceTransaction body. Caller MUST hold cs. Returns the
+    // list of evicted txids so the public ReplaceTransaction wrapper can
+    // notify the fee estimator outside the mempool lock. (Mempool's `cs`
+    // and the estimator's internal mutex are independent; we serialize
+    // the pure-mempool work first to keep the lock release / estimator
+    // notify ordering uniform with AddTx.)
+    bool ReplaceTransactionLocked(const CTransactionRef& replacement_tx,
+                                  CAmount replacement_fee,
+                                  int64_t time,
+                                  unsigned int height,
+                                  std::string* error,
+                                  std::vector<uint256>& evicted_conflicts);
 
 public:
     CTxMemPool();

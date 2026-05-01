@@ -74,6 +74,9 @@
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
 #include <index/tx_index.h>            // PR-3: optional transaction index
 #include <node/mempool_persist.h>      // PR-MP-2: mempool persistence (DumpMempool / LoadMempool)
+#include <policy/fees.h>               // PR-EF-2: CBlockPolicyEstimator + g_fee_estimator
+#include <policy/fee_persist.h>        // PR-EF-2: fee_estimates.dat (DumpFeeEstimates / LoadFeeEstimates)
+#include <consensus/validation.h>      // PR-EF-2: DeserializeBlockTransactions for the connect callback
 #include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
 #include <util/stacktrace.h>  // Phase 2.2: Crash diagnostics
@@ -534,6 +537,7 @@ struct NodeConfig {
     bool reset_chain = false;       // --reset-chain: wipe chain-derived state, keep wallet/MIK
     bool txindex_enabled = false;   // --txindex / -txindex: enable transaction index (PR-3)
     bool persistmempool = true;     // --persistmempool=<0|1>: save/restore mempool across restarts (PR-MP-2; default ON)
+    bool feeestimates  = true;      // --feeestimates=<0|1>: enable adaptive fee estimator + persistence (PR-EF-2; default ON)
     bool yes_flag = false;          // --yes: bypass --reset-chain confirmation prompt
     bool verbose = false;           // Show debug output (hidden by default)
     bool quiet = false;             // Quiet mode: only block lifecycle, errors, and warnings
@@ -675,6 +679,20 @@ struct NodeConfig {
                      arg == "--persistmempool=true" || arg == "-persistmempool=true") {
                 persistmempool = true;
             }
+            // PR-EF-2: -feeestimates flag. Bare form / =1 enable; =0 disables
+            // both the live estimator and fee_estimates.dat persistence.
+            // Mirror of -persistmempool's parse pattern.
+            else if (arg == "--feeestimates" || arg == "-feeestimates") {
+                feeestimates = true;
+            }
+            else if (arg == "--feeestimates=0" || arg == "-feeestimates=0" ||
+                     arg == "--feeestimates=false" || arg == "-feeestimates=false") {
+                feeestimates = false;
+            }
+            else if (arg == "--feeestimates=1" || arg == "-feeestimates=1" ||
+                     arg == "--feeestimates=true" || arg == "-feeestimates=true") {
+                feeestimates = true;
+            }
             else if (arg == "--reset-chain") {
                 // Wipe chain-derived state (blocks, chainstate, headers, dna_registry),
                 // preserve wallet.dat and mik_registration.dat. Exits after reset.
@@ -793,6 +811,7 @@ struct NodeConfig {
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
         std::cout << "  --txindex             Build full transaction index (requires --reindex on warm chain)" << std::endl;
         std::cout << "  --persistmempool=<0|1> Save/restore mempool across restarts (default: 1)" << std::endl;
+        std::cout << "  --feeestimates=<0|1>  Adaptive fee estimator + fee_estimates.dat (default: 1)" << std::endl;
         std::cout << "  --reset-chain         Wipe chain state for a clean resync." << std::endl;
         std::cout << "                          Preserves wallet.dat and mik_registration.dat" << std::endl;
         std::cout << "                          so miners do NOT re-solve the registration PoW." << std::endl;
@@ -2973,6 +2992,79 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 });
             g_tx_index->StartBackgroundSync();
             std::cout << "  [OK] Transaction index initialized" << std::endl;
+        }
+
+        // PR-EF-2: Fee estimator init. Default ON. Allocate the process-wide
+        // CBlockPolicyEstimator BEFORE LoadMempool runs (LoadMempool calls
+        // AddTx with bypass_fee_check=true; my AddTx wiring then passes
+        // valid_fee_estimate=false to processTx so replayed txs do not
+        // pollute the estimator) and BEFORE P2P listens (so peers cannot
+        // relay txs while we restore on-disk estimator state). Order
+        // mirrors Bitcoin Core init.cpp Shutdown's inverse: shutdown
+        // saves AFTER P2P stop AFTER RPC stop AFTER mempool dump.
+        //
+        // The chainstate BlockConnect callback registered below walks
+        // each connected block's transactions and feeds confirmed-tx
+        // hashes to processBlock(). It runs from CChainState::ConnectTip
+        // BEFORE RemoveConfirmedTxs (BUG #109 path), so the estimator
+        // sees the confirms first; the order is irrelevant since
+        // processBlock only inspects its own tracked-set, not the mempool.
+        std::unique_ptr<policy::fee_estimator::CBlockPolicyEstimator> fee_estimator_owner;
+        if (config.feeestimates) {
+            fee_estimator_owner = std::make_unique<policy::fee_estimator::CBlockPolicyEstimator>();
+            g_fee_estimator = fee_estimator_owner.get();
+
+            // Load fee_estimates.dat. Cold-start (file missing / corrupt
+            // / version mismatch) is logged but never aborts: the
+            // estimator simply starts a fresh accumulation window.
+            const auto load_result = policy::fee_persist::LoadFeeEstimates(
+                *fee_estimator_owner, std::filesystem::path(config.datadir));
+            if (!load_result.success) {
+                std::cerr << "[fee_estimator] LoadFeeEstimates hard error: "
+                          << load_result.error_message
+                          << " -- continuing with fresh estimator" << std::endl;
+            } else if (load_result.cold_start) {
+                std::cout << "[fee_estimator] LoadFeeEstimates: "
+                          << load_result.cold_start_reason
+                          << " -- starting fresh" << std::endl;
+            } else {
+                std::cout << "[fee_estimator] LoadFeeEstimates: restored "
+                          << load_result.tracked_tx_count
+                          << " tracked txs" << std::endl;
+            }
+
+            // Register the chainstate connect callback. Runs once per
+            // ConnectTip; deserializes block.vtx, extracts non-coinbase
+            // tx hashes, calls processBlock. Coinbase txs are filtered
+            // out -- they are minted, not admitted, so they are never in
+            // the estimator's tracked set anyway, but skipping them
+            // avoids needless map lookups. height comes through as int;
+            // we cast to unsigned (height is always >= 0 for connected
+            // blocks).
+            g_chainstate.RegisterBlockConnectCallback(
+                [](const CBlock& b, int h, const uint256& /*hh*/) {
+                    if (!g_fee_estimator || h < 0) return;
+                    CBlockValidator validator;
+                    std::vector<CTransactionRef> txs;
+                    std::string err;
+                    if (!validator.DeserializeBlockTransactions(b, txs, err)) {
+                        std::cerr << "[fee_estimator] block-connect: "
+                                  << "DeserializeBlockTransactions failed at "
+                                  << "height " << h << ": " << err
+                                  << " -- estimator skips this block" << std::endl;
+                        return;
+                    }
+                    std::vector<uint256> confirmed;
+                    confirmed.reserve(txs.size());
+                    for (const auto& tx : txs) {
+                        if (!tx) continue;
+                        if (tx->IsCoinBase()) continue;
+                        confirmed.push_back(tx->GetHash());
+                    }
+                    g_fee_estimator->processBlock(static_cast<unsigned int>(h),
+                                                  confirmed);
+                });
+            std::cout << "  [OK] Fee estimator initialized" << std::endl;
         }
 
         // PR-MP-2: Mempool persistence. Default ON. Restores the saved mempool
@@ -7747,6 +7839,40 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                           << dump_result.error_message
                           << " -- prior mempool.dat retained" << std::endl;
             }
+        }
+
+        // PR-EF-2: Save fee estimator state. Runs AFTER mempool dump --
+        // mirrors Bitcoin Core init.cpp Shutdown ordering. Rationale: the
+        // estimator must never observe a tx that the mempool has already
+        // dumped (otherwise on the next start, LoadMempool would replay
+        // the tx and the estimator would see a duplicate-admit attempt).
+        // By dumping the estimator AFTER the mempool, we guarantee the
+        // estimator's tracked-tx set is a superset of (or equal to) the
+        // mempool's at the moment of the dump.
+        //
+        // Best-effort: a dump failure is logged but never blocks shutdown.
+        // Worst case the operator restarts with a fresh accumulation
+        // window; estimates simply take ~25 blocks to come back.
+        if (config.feeestimates && fee_estimator_owner) {
+            const auto dump_result = policy::fee_persist::DumpFeeEstimates(
+                *fee_estimator_owner, std::filesystem::path(config.datadir));
+            if (!dump_result.success) {
+                std::cerr << "[fee_estimator] DumpFeeEstimates failed: "
+                          << dump_result.error_message
+                          << " -- prior fee_estimates.dat retained" << std::endl;
+            } else {
+                std::cout << "[fee_estimator] DumpFeeEstimates: wrote "
+                          << dump_result.bytes_written << " bytes ("
+                          << dump_result.tracked_tx_count << " tracked txs)"
+                          << std::endl;
+            }
+            // Clear the global handle BEFORE the unique_ptr destructs so
+            // any late mempool callbacks (in flight when shutdown began)
+            // see the null and skip. P2P + RPC are already stopped above
+            // so the only realistic source is the mempool expiration
+            // thread; CTxMemPool's destructor will join it before main
+            // returns. Defensive null-set keeps the contract clean.
+            g_fee_estimator = nullptr;
         }
 
         // Remove UPnP port mapping on shutdown
