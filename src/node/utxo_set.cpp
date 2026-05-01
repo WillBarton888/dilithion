@@ -1163,3 +1163,162 @@ bool CUTXOSet::HasUndoData(const uint256& blockHash) const {
     leveldb::Status status = db->Get(leveldb::ReadOptions(), undoKey, &undoValue);
     return status.ok();
 }
+
+// ============================================================================
+// PR-BA-1: ReadUndoBlock -- structured read accessor for block-analytics.
+// ============================================================================
+// Reads the on-disk undo entry written by ApplyBlock and returns a populated
+// CBlockUndo. Mirrors the parser inside UndoBlock (utxo_set.cpp ~line 700)
+// but does NOT mutate the database or cache. SHA3-256 footer is verified
+// before parsing. See node/undo_data.h for the layout docblock and the BC
+// deviation rationale.
+
+bool CUTXOSet::ReadUndoBlock(const uint256& blockHash, CBlockUndo& undo_out) const {
+    undo_out.Clear();
+
+    if (!IsOpen()) {
+        std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Database not open" << std::endl;
+        return false;
+    }
+
+    std::lock_guard<std::recursive_mutex> lock(cs_utxo);
+
+    // Step 1: Fetch raw value from LevelDB.
+    std::string undoKey = "undo_";
+    undoKey.append(reinterpret_cast<const char*>(blockHash.data), 32);
+
+    std::string undoValue;
+    leveldb::Status status = db->Get(leveldb::ReadOptions(), undoKey, &undoValue);
+    if (!status.ok()) {
+        // Missing-block is a normal "not found" outcome (e.g. genesis on a
+        // freshly opened db, or a block that was never applied). Caller
+        // distinguishes this from corruption via the boolean return.
+        return false;
+    }
+
+    // Step 2: Verify size. Minimum is spentCount(4) + sha3-256 footer(32).
+    if (undoValue.size() < 4 + 32) {
+        std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Undo entry too small ("
+                  << undoValue.size() << " bytes) for block "
+                  << blockHash.GetHex() << std::endl;
+        return false;
+    }
+
+    const uint8_t* raw_data = reinterpret_cast<const uint8_t*>(undoValue.data());
+    size_t data_size = undoValue.size() - 32;  // excludes trailing checksum
+
+    // Step 3: Verify SHA3-256 footer.
+    const uint8_t* stored_checksum = raw_data + data_size;
+    uint8_t computed_checksum[32];
+    SHA3_256(raw_data, data_size, computed_checksum);
+    if (std::memcmp(stored_checksum, computed_checksum, 32) != 0) {
+        std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Checksum mismatch for block "
+                  << blockHash.GetHex() << std::endl;
+        return false;
+    }
+
+    // Step 4: Parse the body (same layout as ApplyBlock writer).
+    const uint8_t* ptr = raw_data;
+    const uint8_t* end = raw_data + data_size;
+
+    uint32_t spentCount = 0;
+    std::memcpy(&spentCount, ptr, 4);
+    ptr += 4;
+
+    // Sanity bound: each record is at least 32 (hash) + 4 (n) + 8 (value)
+    // + 4 (script_len) + 0 (empty script) + 4 (height) + 1 (coinbase) = 53
+    // bytes. Reject obviously-corrupt counts up front rather than malloc-
+    // bombing on a bogus length.
+    const size_t kMinRecordBytes = 32 + 4 + 8 + 4 + 4 + 1;
+    if (static_cast<uint64_t>(spentCount) * kMinRecordBytes >
+        static_cast<uint64_t>(end - ptr)) {
+        std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Spent count "
+                  << spentCount << " exceeds payload bounds for block "
+                  << blockHash.GetHex() << std::endl;
+        return false;
+    }
+
+    undo_out.vSpent.reserve(spentCount);
+
+    for (uint32_t i = 0; i < spentCount; ++i) {
+        // outpoint: hash(32) + n(4)
+        if (end - ptr < 32 + 4) {
+            std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Truncated at outpoint "
+                      << i << std::endl;
+            undo_out.Clear();
+            return false;
+        }
+        uint256 prev_hash;
+        std::memcpy(prev_hash.data, ptr, 32);
+        ptr += 32;
+        uint32_t prev_n = 0;
+        std::memcpy(&prev_n, ptr, 4);
+        ptr += 4;
+
+        // nValue (8)
+        if (end - ptr < 8) {
+            std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Truncated at nValue "
+                      << i << std::endl;
+            undo_out.Clear();
+            return false;
+        }
+        uint64_t nValue = 0;
+        std::memcpy(&nValue, ptr, 8);
+        ptr += 8;
+
+        // script length (4)
+        if (end - ptr < 4) {
+            std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Truncated at script_len "
+                      << i << std::endl;
+            undo_out.Clear();
+            return false;
+        }
+        uint32_t script_len = 0;
+        std::memcpy(&script_len, ptr, 4);
+        ptr += 4;
+
+        // script body (script_len bytes)
+        if (static_cast<uint64_t>(script_len) >
+            static_cast<uint64_t>(end - ptr)) {
+            std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Truncated at scriptPubKey "
+                      << i << " (len=" << script_len << ")" << std::endl;
+            undo_out.Clear();
+            return false;
+        }
+        std::vector<uint8_t> scriptPubKey(ptr, ptr + script_len);
+        ptr += script_len;
+
+        // height (4) + coinbase (1)
+        if (end - ptr < 4 + 1) {
+            std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Truncated at height/coinbase "
+                      << i << std::endl;
+            undo_out.Clear();
+            return false;
+        }
+        uint32_t prev_height = 0;
+        std::memcpy(&prev_height, ptr, 4);
+        ptr += 4;
+        bool fCoinBase = (*ptr != 0);
+        ptr++;
+
+        undo_out.vSpent.emplace_back(
+            COutPoint(prev_hash, prev_n),
+            CTxOut(nValue, scriptPubKey),
+            prev_height,
+            fCoinBase);
+    }
+
+    // Step 5: Trailing-bytes check. The body must consume exactly the
+    // pre-checksum region; surplus bytes between the last record and the
+    // checksum indicate corruption that the per-record bounds checks did
+    // not flag.
+    if (ptr != end) {
+        std::cerr << "[ERROR] CUTXOSet::ReadUndoBlock: Trailing bytes after "
+                  << "spentCount=" << spentCount << " for block "
+                  << blockHash.GetHex() << std::endl;
+        undo_out.Clear();
+        return false;
+    }
+
+    return true;
+}
