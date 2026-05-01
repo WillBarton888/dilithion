@@ -805,4 +805,305 @@ BOOST_AUTO_TEST_CASE(live_callback_gated_until_synced) {
 // to the integration suite; the unit-suite focuses on CCoinStatsIndex
 // invariants. See that file for the JSON schema lock.
 
+// ===========================================================================
+// H1 fix: after EraseBlock leveldb-write failure, a subsequent WriteBlock
+// at the replacement height MUST be refused. The pre-fix code decremented
+// m_last_height optimistically before the write, so a write failure left
+// m_running stuck at the after-failed-block state; the very next WriteBlock
+// at the replacement height would fold onto a stale parent and persist a
+// corrupt record. Post-fix:
+//   (a) the WriteBlock is rejected (IsCorrupted() guard at top),
+//   (b) IsCorrupted() returns true,
+//   (c) LookupStats at the replacement height returns false (no corrupt
+//       record was persisted).
+// ===========================================================================
+BOOST_AUTO_TEST_CASE(eraseblock_failure_blocks_subsequent_writes) {
+    TempDbScope scope_idx("h1idx");
+    TempDbScope scope_chain("h1chain");
+    TempDbScope scope_utxo("h1utxo");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+    CUTXOSet utxo_set;
+    BOOST_REQUIRE(utxo_set.Open(scope_utxo.path(), true));
+
+    constexpr int kN = 3;
+    ChainFixture fix;
+    fix.Build(kN, chain_db, utxo_set);
+
+    CCoinStatsIndex idx;
+    BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db, &utxo_set));
+    idx.StartBackgroundSync();
+    BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
+    BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), kN - 1);
+    BOOST_REQUIRE(!idx.IsCorrupted());
+
+    // Force an EraseBlock failure at H = kN-1 (the current tip).
+    struct ForceEraseFailureGuard {
+        ForceEraseFailureGuard()  { coin_stats_index_test_hooks::g_force_eraseblock_failure.store(true); }
+        ~ForceEraseFailureGuard() { coin_stats_index_test_hooks::g_force_eraseblock_failure.store(false); }
+    };
+    {
+        ForceEraseFailureGuard guard;
+        const bool erased = idx.EraseBlock(fix.per_height_block[kN - 1],
+                                           kN - 1,
+                                           fix.per_height_hash[kN - 1]);
+        BOOST_CHECK(!erased);
+    }
+    BOOST_CHECK(idx.IsCorrupted());
+
+    // (a) Subsequent WriteBlock at the replacement height must be rejected.
+    // We try to write a "replacement" block at height kN-1 (the tip).
+    // Pre-fix this would succeed and persist a corrupt record; post-fix
+    // the IsCorrupted() guard refuses it.
+    const bool write_ok = idx.WriteBlock(fix.per_height_block[kN - 1],
+                                         kN - 1,
+                                         fix.per_height_hash[kN - 1]);
+    BOOST_CHECK(!write_ok);
+
+    // (b) Sticky flag still set.
+    BOOST_CHECK(idx.IsCorrupted());
+
+    // (c) The original H=kN-1 record (written by reindex) is still
+    // present (the failed EraseBlock did NOT commit the rollback because
+    // the H1 fix moves rollback after the write). LookupStats at height
+    // kN-1 returns the original ORIGINAL stats, NOT a corrupted overlay.
+    CoinStats stats;
+    BOOST_REQUIRE(idx.LookupStats(kN - 1, stats));
+    BOOST_CHECK_EQUAL(stats.coinsCount, static_cast<uint64_t>(kN));
+
+    idx.Stop();
+    g_chainstate.Cleanup();
+}
+
+// ===========================================================================
+// H2 fix: hashChainCommitment is path-dependent (NOT a state hash).
+//
+// Construct two synthetic chains with DIFFERENT block orderings that both
+// produce the same FINAL UTXO set. Assert that hashChainCommitment differs
+// between them. This pins the documented chain-path-commitment behavior so
+// any future regression toward state-hash semantics is caught immediately.
+//
+// Synthetic chains:
+//   Chain A: [coinbase_X@h0, coinbase_Y@h1]   (X then Y)
+//   Chain B: [coinbase_Y@h0, coinbase_X@h1]   (Y then X)
+//
+// Both end with the same two UTXOs (X-coinbase-out, Y-coinbase-out), but
+// the height-tag in the fold record is different (X created at h=0 vs h=1),
+// AND the order of the fold differs. Either factor alone produces different
+// running hashes; together they guarantee divergence.
+// ===========================================================================
+BOOST_AUTO_TEST_CASE(hashchaincommitment_is_path_dependent) {
+    // Build TWO independent fixtures, each with the same two coinbases but
+    // applied in opposite orders.
+    constexpr uint8_t kSpkSeedA = 0xAA;
+    constexpr uint8_t kSpkSeedB = 0xBB;
+    constexpr uint64_t kRewardA = 5001;
+    constexpr uint64_t kRewardB = 5002;
+
+    auto cbA = MakeCoinbase(/*height_marker=*/100, kRewardA, kSpkSeedA);
+    auto cbB = MakeCoinbase(/*height_marker=*/200, kRewardB, kSpkSeedB);
+
+    auto run_chain = [&](const std::vector<CTransactionRef>& cbs,
+                         const std::string& tag) -> uint256 {
+        TempDbScope scope_idx("hp_" + tag + "_idx");
+        TempDbScope scope_chain("hp_" + tag + "_chain");
+        TempDbScope scope_utxo("hp_" + tag + "_utxo");
+
+        CBlockchainDB chain_db;
+        BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+        CUTXOSet utxo_set;
+        BOOST_REQUIRE(utxo_set.Open(scope_utxo.path(), true));
+
+        g_chainstate.Cleanup();
+
+        CBlockIndex* prev_idx = nullptr;
+        std::vector<CBlock> blocks;
+        std::vector<uint256> hashes;
+        for (size_t h = 0; h < cbs.size(); ++h) {
+            // Distinct per-(tag,h) block hash so the two chains do not
+            // share leveldb keys in g_chainstate.
+            uint256 block_hash;
+            std::memset(block_hash.data, 0, 32);
+            block_hash.data[0] = static_cast<uint8_t>(h);
+            block_hash.data[31] = (tag == "A") ? 0xA1 : 0xB1;
+
+            CBlock block = MakeBlock({cbs[h]});
+            block.hashPrevBlock = (h == 0) ? uint256() : hashes.back();
+            BOOST_REQUIRE(chain_db.WriteBlock(block_hash, block));
+            BOOST_REQUIRE(utxo_set.ApplyBlock(block, static_cast<int>(h), block_hash));
+            blocks.push_back(block);
+            hashes.push_back(block_hash);
+
+            auto pidx = std::make_unique<CBlockIndex>();
+            pidx->nHeight = static_cast<int>(h);
+            pidx->phashBlock = block_hash;
+            pidx->pprev = prev_idx;
+            pidx->nStatus = CBlockIndex::BLOCK_VALID_HEADER |
+                            CBlockIndex::BLOCK_HAVE_DATA;
+            CBlockIndex* raw = pidx.get();
+            BOOST_REQUIRE(g_chainstate.AddBlockIndex(block_hash, std::move(pidx)));
+            if (prev_idx != nullptr) prev_idx->pnext = raw;
+            prev_idx = raw;
+        }
+        if (prev_idx != nullptr) g_chainstate.SetTipForTest(prev_idx);
+        BOOST_REQUIRE(utxo_set.Flush());
+
+        CCoinStatsIndex idx;
+        BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db, &utxo_set));
+        idx.StartBackgroundSync();
+        BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
+        BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), static_cast<int>(cbs.size()) - 1);
+
+        CoinStats final_stats;
+        BOOST_REQUIRE(idx.LookupStats(static_cast<int>(cbs.size()) - 1, final_stats));
+
+        idx.Stop();
+        return final_stats.hashChainCommitment;
+    };
+
+    const uint256 commit_AB = run_chain({cbA, cbB}, "A");
+    const uint256 commit_BA = run_chain({cbB, cbA}, "B");
+
+    // Path dependence: same final UTXO set, different orderings, different
+    // commitments. (If this test ever starts failing because the two values
+    // are EQUAL, it means someone changed the design to be order-invariant
+    // -- in which case the docblock in src/kernel/coinstats.h MUST be
+    // updated to match, and PR-BA-3's fast-path expectations re-evaluated.)
+    BOOST_CHECK(commit_AB != commit_BA);
+
+    g_chainstate.Cleanup();
+}
+
+// ===========================================================================
+// H3 fix: parent-mismatch detection during reindex.
+//
+// Simulate a reorg between successive WriteBlock calls: build a chain
+// 0..2, advance the index to height=1 via reindex, then forge a
+// chainstate inconsistency by replacing the height=1 main-chain block
+// with a different hash. WriteBlock at height=2 should detect the
+// mismatch (block.hashPrevBlock != chainstate's main-chain hash at h=1)
+// and set IsCorrupted() rather than persisting onto a stale parent.
+// ===========================================================================
+BOOST_AUTO_TEST_CASE(writeblock_parent_mismatch_sets_corrupt) {
+    TempDbScope scope_idx("h3idx");
+    TempDbScope scope_chain("h3chain");
+    TempDbScope scope_utxo("h3utxo");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+    CUTXOSet utxo_set;
+    BOOST_REQUIRE(utxo_set.Open(scope_utxo.path(), true));
+
+    constexpr int kN = 3;
+    ChainFixture fix;
+    fix.Build(kN, chain_db, utxo_set);
+
+    CCoinStatsIndex idx;
+    BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db, &utxo_set));
+
+    // Manually drive WriteBlock to height=1 (skip background reindex).
+    BOOST_REQUIRE(idx.WriteBlock(fix.per_height_block[0], 0, fix.per_height_hash[0]));
+    BOOST_REQUIRE(idx.WriteBlock(fix.per_height_block[1], 1, fix.per_height_hash[1]));
+    BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), 1);
+    BOOST_REQUIRE(!idx.IsCorrupted());
+
+    // Synthetic "reorg": construct a forged block at height=2 whose
+    // hashPrevBlock points to a different hash than what chainstate has
+    // at height=1. The H3 guard should catch this.
+    CBlock forged_block_at_2 = fix.per_height_block[2];
+    uint256 wrong_prev;
+    std::memset(wrong_prev.data, 0xDD, 32);
+    forged_block_at_2.hashPrevBlock = wrong_prev;
+
+    const bool write_ok = idx.WriteBlock(forged_block_at_2, 2,
+                                         fix.per_height_hash[2]);
+    BOOST_CHECK(!write_ok);
+    BOOST_CHECK(idx.IsCorrupted());
+
+    // Subsequent honest WriteBlock at height=2 is also refused (the
+    // sticky corrupt flag wins, per the H1 IsCorrupted guard).
+    const bool retry_ok = idx.WriteBlock(fix.per_height_block[2], 2,
+                                         fix.per_height_hash[2]);
+    BOOST_CHECK(!retry_ok);
+
+    // No record at height=2 was persisted.
+    CoinStats junk;
+    BOOST_CHECK(!idx.LookupStats(2, junk));
+
+    idx.Stop();
+    g_chainstate.Cleanup();
+}
+
+// ===========================================================================
+// M3 fix: meta corruption (record at recorded-height missing or undecodable)
+// triggers a FULL WipeIndex, not a soft in-memory reset. Pre-fix the soft
+// reset left every record at heights 0..N-1 on disk; reindex would write
+// 0..N-1 afresh but any records past the new tip would survive.
+//
+// This test writes records at heights 0..4, deletes the height=4 record
+// (so meta still says 4 but the record is missing), reopens the index,
+// and asserts that records at heights 0..4 are ALL gone.
+// ===========================================================================
+BOOST_AUTO_TEST_CASE(meta_corruption_wipes_all_records) {
+    TempDbScope scope_idx("m3idx");
+    TempDbScope scope_chain("m3chain");
+    TempDbScope scope_utxo("m3utxo");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+    CUTXOSet utxo_set;
+    BOOST_REQUIRE(utxo_set.Open(scope_utxo.path(), true));
+
+    constexpr int kN = 5;
+    ChainFixture fix;
+    fix.Build(kN, chain_db, utxo_set);
+
+    // First instance: index 0..4 normally.
+    {
+        CCoinStatsIndex idx;
+        BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db, &utxo_set));
+        idx.StartBackgroundSync();
+        BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
+        BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), kN - 1);
+        idx.Stop();
+    }
+
+    // Forge: delete the height=4 record (meta still claims height=4).
+    {
+        leveldb::DB* raw = nullptr;
+        leveldb::Options opts;
+        opts.create_if_missing = false;
+        BOOST_REQUIRE(leveldb::DB::Open(opts, scope_idx.path(), &raw).ok());
+        std::unique_ptr<leveldb::DB> raw_db(raw);
+
+        // Build the height=4 key manually: 'h' + 4-byte big-endian.
+        char height_key[5];
+        height_key[0] = 'h';
+        const uint32_t h_be = 4u;
+        height_key[1] = static_cast<char>((h_be >> 24) & 0xFF);
+        height_key[2] = static_cast<char>((h_be >> 16) & 0xFF);
+        height_key[3] = static_cast<char>((h_be >>  8) & 0xFF);
+        height_key[4] = static_cast<char>( h_be        & 0xFF);
+        BOOST_REQUIRE(raw_db->Delete(leveldb::WriteOptions(),
+                                     leveldb::Slice(height_key, 5)).ok());
+    }
+
+    // Re-open: M3 fix must trigger a full WipeIndex, not a soft reset.
+    {
+        CCoinStatsIndex idx;
+        BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db, &utxo_set));
+        BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), -1);
+
+        // ALL records at heights 0..4 must be gone after the wipe.
+        for (int h = 0; h < kN; ++h) {
+            CoinStats s;
+            BOOST_CHECK(!idx.LookupStats(h, s));
+        }
+        idx.Stop();
+    }
+
+    g_chainstate.Cleanup();
+}
+
 BOOST_AUTO_TEST_SUITE_END()
