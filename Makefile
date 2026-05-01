@@ -271,6 +271,12 @@ SCRIPT_SOURCES := src/script/interpreter.cpp \
                   src/script/htlc.cpp \
                   src/script/atomic_swap.cpp
 
+# Policy module: fee estimator + fee_estimates.dat persistence (BC port,
+# PR-EF-1). Pure module addition; mempool/chainstate hooks land in PR-EF-2,
+# RPC handlers land in PR-EF-3.
+POLICY_SOURCES := src/policy/fees.cpp \
+                  src/policy/fee_persist.cpp
+
 WALLET_SOURCES := src/wallet/wallet.cpp \
                   src/wallet/crypter.cpp \
                   src/wallet/passphrase_validator.cpp \
@@ -312,6 +318,7 @@ CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(API_SOURCES) \
                 $(X402_SOURCES) \
                 $(SCRIPT_SOURCES) \
+                $(POLICY_SOURCES) \
                 $(UTIL_SOURCES) \
                 $(WALLET_SOURCES)
 
@@ -623,6 +630,8 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/tx_index_tests.o \
 	$(OBJ_DIR)/test/tx_index_integration_tests.o \
 	$(OBJ_DIR)/test/mempool_persist_tests.o \
+	$(OBJ_DIR)/test/fee_estimator_tests.o \
+	$(OBJ_DIR)/test/fee_persist_tests.o \
 	$(CRYPTO_PROPERTY_OBJECTS)
 
 # Link test objects + full library (CORE_OBJECTS) to avoid hand-picked object drift
@@ -729,6 +738,7 @@ $(OBJ_DIR)/vdf \
 $(OBJ_DIR)/chiavdf \
 $(OBJ_DIR)/digital_dna \
 $(OBJ_DIR)/script \
+$(OBJ_DIR)/policy \
 $(OBJ_DIR)/tools \
 $(OBJ_DIR)/x402 \
 $(OBJ_DIR)/test \
@@ -736,7 +746,7 @@ $(OBJ_DIR)/test/fuzz:
 	@mkdir -p $@
 
 # Compile C++ source files
-$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/index $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/test
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/index $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/policy $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/test
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
