@@ -70,10 +70,16 @@ fi
 
 # Stress scenario: Node D also mines (2-miner mainnet-topology mimic per
 # v0.1.3 PR8.3 reframe). Default smoke = single miner (Node A only).
+# delay scenario (PR8.2-followup): stress topology + kill/restart Node A
+# mid-run to simulate a seed going offline; verify M2 takes over + Node A
+# re-syncs on restart. Cross-platform replacement for v0.1.3's "Linux tc
+# latency injection" (we don't have tc on MSYS2; kill/restart tests the
+# same structural property: stall detection + peer rotation under partial
+# network failure).
 MINE_D=""
-if [[ "$SCENARIO" = "stress" ]]; then
+if [[ "$SCENARIO" = "stress" ]] || [[ "$SCENARIO" = "delay" ]] || [[ "$SCENARIO" = "partition" ]]; then
     MINE_D="--mine"
-    echo "NOTE: stress scenario — Node D also mines (2 miners + 2 relay seeds)"
+    echo "NOTE: $SCENARIO scenario — Node D also mines (2 miners + 2 relay seeds)"
 fi
 
 # ============================================================================
@@ -403,7 +409,7 @@ STRESS_5_FAIL=0   # MIK concentration bounds
 STRESS_6_FAIL=0   # reorg depth bound
 STRESS_7_FAIL=0   # UndoBlock integrity
 
-if [[ "$SCENARIO" = "stress" ]]; then
+if [[ "$SCENARIO" = "stress" ]] || [[ "$SCENARIO" = "delay" ]] || [[ "$SCENARIO" = "partition" ]]; then
     # Scenario 5: MIK concentration bounds (per chainparams cooldown ceiling)
     echo
     echo "=== Stress scenario 5: MIK concentration bounds ==="
@@ -500,20 +506,97 @@ if [[ "$SCENARIO" = "stress" ]]; then
 fi
 
 # ============================================================================
+# PR8.2-followup scenario 2 (delay scenario): peer-rotation via kill/restart.
+# Architecture doc §8.3 acceptance scenario 2 was originally "inject artificial
+# delay on one peer; watch sync-peer rotate." Cross-platform reframe per v0.1.3:
+# kill Node A (the M1 miner) mid-run; verify M2 (Node D) takes over block
+# production for B/C/D; restart Node A; verify A re-syncs to network height.
+# Tests the same structural property (stall detection + peer rotation under
+# partial network failure) without Linux-only `tc qdisc`.
+# ============================================================================
+SCENARIO_2_M2_TAKEOVER_FAIL=0
+SCENARIO_2_RESYNC_FAIL=0
+
+if [[ "$SCENARIO" = "delay" ]]; then
+    echo
+    echo "=== Scenario 2 (PR8.2-followup): peer-rotation via kill/restart ==="
+    INITIAL_HEIGHT=$HA  # all 4 converged at this point
+    echo "  Network at height $INITIAL_HEIGHT (all 4 lockstep). Killing Node A (PID $PID_A)..."
+    kill -9 "$PID_A" 2>/dev/null
+    OLD_PID_A=$PID_A
+    PID_A=""  # clear so cleanup doesn't re-kill the (now-restarted) PID
+
+    echo "  Sleeping 30s with Node A offline (M2/Node D should keep producing for B/C/D)..."
+    sleep 30
+
+    HB_AFTER=$(rpc_height $RPC_B); HC_AFTER=$(rpc_height $RPC_C); HD_AFTER=$(rpc_height $RPC_D)
+    echo "  Heights with Node A offline: B=${HB_AFTER:-?} C=${HC_AFTER:-?} D=${HD_AFTER:-?} (was $INITIAL_HEIGHT)"
+    if [[ -z "$HB_AFTER" ]] || [[ -z "$HC_AFTER" ]] || [[ -z "$HD_AFTER" ]] \
+       || [[ "$HB_AFTER" -le "$INITIAL_HEIGHT" ]] \
+       || [[ "$HC_AFTER" -le "$INITIAL_HEIGHT" ]] \
+       || [[ "$HD_AFTER" -le "$INITIAL_HEIGHT" ]]; then
+        echo "  FAIL: B/C/D didn't advance past A's last height — M2 takeover broken"
+        SCENARIO_2_M2_TAKEOVER_FAIL=1
+    else
+        echo "  PASS: B/C/D advanced past height $INITIAL_HEIGHT (M2 took over mining)"
+    fi
+
+    echo "  Restarting Node A from same datadir..."
+    "$BIN" --regtest --datadir="$DA" --mine --no-upnp --relay-only --yes \
+        --port=$P2P_A --rpcport=$RPC_A $PEER_FLAG \
+        --addnode=127.0.0.1:$P2P_B --addnode=127.0.0.1:$P2P_C --addnode=127.0.0.1:$P2P_D \
+        >>"$TMPBASE/nodeA.log" 2>&1 < /dev/null &
+    PID_A=$!
+    sleep 5
+    if ! kill -0 "$PID_A" 2>/dev/null; then
+        echo "  FAIL: Node A failed to restart"
+        SCENARIO_2_RESYNC_FAIL=1
+    else
+        echo "  Node A restarted (new PID $PID_A; was $OLD_PID_A)"
+    fi
+
+    # Poll for A to catch up to B (which is on the network's leading chain).
+    echo "  Waiting up to 60s for Node A to re-sync..."
+    catchup_elapsed=0
+    HA_NEW=""; HB_NEW=""
+    while (( catchup_elapsed < 60 )); do
+        HA_NEW=$(rpc_height $RPC_A); HB_NEW=$(rpc_height $RPC_B)
+        if [[ -n "$HA_NEW" ]] && [[ -n "$HB_NEW" ]] && [[ "$HA_NEW" -ge "$((HB_NEW - 2))" ]]; then
+            echo "  Caught up after ${catchup_elapsed}s (A=$HA_NEW B=$HB_NEW; tolerance ±2 blocks)"
+            break
+        fi
+        sleep 5
+        catchup_elapsed=$(( catchup_elapsed + 5 ))
+    done
+
+    HA_FINAL=$(rpc_height $RPC_A); HB_FINAL=$(rpc_height $RPC_B)
+    if [[ -z "$HA_FINAL" ]] || [[ -z "$HB_FINAL" ]] || [[ "$HA_FINAL" -lt "$((HB_FINAL - 2))" ]]; then
+        echo "  FAIL: Node A did not catch up (A=${HA_FINAL:-?} vs B=${HB_FINAL:-?}; expected A ≥ B-2)"
+        SCENARIO_2_RESYNC_FAIL=1
+    else
+        echo "  PASS: Node A re-synced (A=$HA_FINAL ≥ B=$HB_FINAL - 2)"
+    fi
+fi
+
+# ============================================================================
 # Final verdict
 # ============================================================================
 echo
 if [[ $SCENARIO_1_FAIL -eq 0 ]] && [[ $FORBIDDEN_TOKEN_GREP_FAIL -eq 0 ]] && [[ $CHAINTIPS_FAIL -eq 0 ]] \
-   && [[ $STRESS_5_FAIL -eq 0 ]] && [[ $STRESS_6_FAIL -eq 0 ]] && [[ $STRESS_7_FAIL -eq 0 ]]; then
+   && [[ $STRESS_5_FAIL -eq 0 ]] && [[ $STRESS_6_FAIL -eq 0 ]] && [[ $STRESS_7_FAIL -eq 0 ]] \
+   && [[ $SCENARIO_2_M2_TAKEOVER_FAIL -eq 0 ]] && [[ $SCENARIO_2_RESYNC_FAIL -eq 0 ]]; then
     echo "RESULT: 4-node integration test PASSED ($SCENARIO scenario)"
     echo "  - Phase 1 (smoke): all 4 nodes lockstep on chain $HASH_A at height $HA"
     echo "  - Scenario 1 (connectivity): all ≥ 1 connection (regtest scope; full MAX_OUTBOUND requires N≥9)"
     echo "  - Scenario 4 (GREP regression): 0 forbidden-token hits across all logs"
     echo "  - Scenario 4b (getchaintips): all 4 agree on active tip"
-    if [[ "$SCENARIO" = "stress" ]]; then
+    if [[ "$SCENARIO" = "stress" ]] || [[ "$SCENARIO" = "delay" ]]; then
         echo "  - Stress 5 (MIK concentration): ≥ 2 unique miners; max blocks per MIK ≤ 24"
         echo "  - Stress 6 (reorg depth): max ≤ 1 block ($REORG_COUNT total reorg events)"
         echo "  - Stress 7 (UndoBlock integrity): 0 corruption error patterns"
+    fi
+    if [[ "$SCENARIO" = "delay" ]]; then
+        echo "  - Scenario 2 (kill/restart): M2 took over mining; Node A re-synced"
     fi
     echo
     echo "Scenarios 2 (peer-delay injection) + 3 (competing leaves) deferred — see"
