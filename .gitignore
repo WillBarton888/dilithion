@@ -667,3 +667,8 @@ src/digital_dna/fingerprint_run*.json
 /test-security-fixes.bat
 /run-test-simple.bat
 /build_tests.bat
+
+# Local working drafts (cross-session handoff docs not for tracked history)
+docs/EXPLORER-TXINDEX-HANDOFF-FOR-ZACH.md
+docs/ROADMAP-MAINNET-PRODUCTION-PARITY.md
+docs/WALLET-INTEGRATION-QUESTIONS-FOR-ZACH.md
