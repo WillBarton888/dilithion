@@ -31,6 +31,36 @@
 
 BOOST_AUTO_TEST_SUITE(zmq_tests)
 
+// IPv6 detection heuristic -- exercises zmq_util::IsZMQAddressIPV6 against the
+// red-team's 10-address corpus from the F1 finding. The heuristic strips
+// tcp:// then any trailing :digits port, and treats remaining colons (or any
+// '[') as IPv6. See zmq_util::IsZMQAddressIPV6 for the design rationale.
+BOOST_AUTO_TEST_CASE(zmq_util_ipv6_detection)
+{
+    // Bracketed IPv6 -- canonical form.
+    BOOST_CHECK(zmq_util::IsZMQAddressIPV6("tcp://[::1]:28332"));
+    BOOST_CHECK(zmq_util::IsZMQAddressIPV6("tcp://[2001:db8::1]:5555"));
+    BOOST_CHECK(zmq_util::IsZMQAddressIPV6("tcp://[fe80::1]:8332"));
+
+    // Bare IPv6 -- the case F1 calls out as silently mis-classified by the
+    // old textual '[' check.
+    BOOST_CHECK(zmq_util::IsZMQAddressIPV6("tcp://2001:db8::1:5555"));
+    BOOST_CHECK(zmq_util::IsZMQAddressIPV6("tcp://fe80::1:5555"));
+    BOOST_CHECK(zmq_util::IsZMQAddressIPV6("tcp://::1:5555"));
+
+    // IPv4 dotted-quad with port.
+    BOOST_CHECK(!zmq_util::IsZMQAddressIPV6("tcp://127.0.0.1:28332"));
+    BOOST_CHECK(!zmq_util::IsZMQAddressIPV6("tcp://0.0.0.0:8332"));
+
+    // Hostname with port -- after stripping :port there are 0 colons in host.
+    BOOST_CHECK(!zmq_util::IsZMQAddressIPV6("tcp://localhost:5555"));
+    BOOST_CHECK(!zmq_util::IsZMQAddressIPV6("tcp://example.com:8332"));
+
+    // Non-tcp prefix -- IsZMQAddressIPV6 only handles tcp://, returns false.
+    BOOST_CHECK(!zmq_util::IsZMQAddressIPV6("ipc:///tmp/dilithion.sock"));
+    BOOST_CHECK(!zmq_util::IsZMQAddressIPV6("inproc://test"));
+}
+
 namespace {
 
 // Pick a high TCP port for the test bind. Hardcoding works for a single-

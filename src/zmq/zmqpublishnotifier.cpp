@@ -80,20 +80,6 @@ static int zmq_send_multipart(void* sock, const void* data, size_t size, ...)
     return 0;
 }
 
-// Detect IPv6 TCP addresses of the form tcp://[::1]:28332 so we can flip
-// ZMQ_IPV6 on the publisher socket. PR-Z-1 keeps the simpler textual check
-// from Bitcoin Core: the address contains a literal '[' between the tcp://
-// prefix and the final ':'. PR-Z-2 may want to call into Dilithion's
-// netaddress LookupHost for parity with BC's resolver-based check, but that
-// pulls in the entire net subsystem and is out of scope for the skeleton.
-static bool IsZMQAddressIPV6(const std::string& zmq_address)
-{
-    const std::string tcp_prefix = "tcp://";
-    if (zmq_address.rfind(tcp_prefix, 0) != 0) return false;
-    // Bracketed IPv6 literals are the canonical form: tcp://[addr]:port
-    return zmq_address.find('[') != std::string::npos;
-}
-
 bool CZMQAbstractPublishNotifier::Initialize(void* pcontext)
 {
     assert(!psocket);
@@ -136,8 +122,9 @@ bool CZMQAbstractPublishNotifier::Initialize(void* pcontext)
         }
 
         // ZMQ_IPV6 must only be enabled if the address is actually IPv6;
-        // some platforms (notably OpenBSD) refuse otherwise.
-        const int enable_ipv6{IsZMQAddressIPV6(address) ? 1 : 0};
+        // some platforms (notably OpenBSD) refuse otherwise. See zmq_util::
+        // IsZMQAddressIPV6 for the heuristic and its rationale.
+        const int enable_ipv6{zmq_util::IsZMQAddressIPV6(address) ? 1 : 0};
         rc = zmq_setsockopt(psocket, ZMQ_IPV6, &enable_ipv6, sizeof(enable_ipv6));
         if (rc != 0) {
             zmq_util::zmqError("Failed to set ZMQ_IPV6");

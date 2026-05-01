@@ -23,6 +23,12 @@ void zmqError(const std::string& str);
 // expected to use tcp:// only on Windows.
 extern const std::string ADDR_PREFIX_IPC;  // "ipc://"
 
+// Heuristic detection of IPv6 endpoints in a tcp://... ZMQ address. Used by
+// the publish notifier to decide whether to set ZMQ_IPV6 on the socket. See
+// the implementation comment for the algorithm and its limits relative to
+// Bitcoin Core's resolver-based check. Exposed for unit testing.
+bool IsZMQAddressIPV6(const std::string& zmq_address);
+
 }  // namespace zmq_util
 
 #endif  // DILITHION_ZMQ_ZMQUTIL_H
