@@ -580,6 +580,14 @@ chain_selector_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/chain_selector_tests.o $(D
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ chain_selector_tests built successfully$(COLOR_RESET)"
 
+# Phase 7 PR7.2: fork-staging legacy-path regression tests (state-machine
+# level; PreValidateBlock + TriggerChainSwitch + ProcessNewBlock end-to-end
+# deferred to Phase 8). 4 cases (3 required + 1 optional).
+fork_staging_legacy_path_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fork_staging_legacy_path_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ fork_staging_legacy_path_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.1: HeadersManager → chain_selector wiring tests (5 cases).
 # Verifies happy-path, idempotency, orphan, rejected-parent flood,
 # cap-saturation per v1.5 plan §4 PR6.1.

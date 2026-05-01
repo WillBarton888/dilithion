@@ -23,7 +23,7 @@ namespace Dilithion {
 /**
  * @brief Singleton manager for fork validation and chain switching
  *
- * ## Port-survival note (Phase 7 v0.2.1, 2026-05-01)
+ * ## Port-survival note (Phase 7 v0.3, 2026-05-01)
  *
  * The ForkManager + ForkCandidate pair is a Dilithion-specific
  * consensus-adjacent layer that wraps chain_selector. It is NOT present
@@ -33,15 +33,22 @@ namespace Dilithion {
  * scale and miner topology. Validate-Before-Disconnect (this class) is
  * how Dilithion mitigates that.
  *
- * This file SURVIVES the v4.1 port. Its retirement clusters with
+ * This file SURVIVES the v4.1 port via the LEGACY block-receive path.
+ * Fork-staging fires when block_processing::ProcessNewBlock is invoked
+ * (9 sites: dilithion-node.cpp x3, dilv-node.cpp x3, ibd_coordinator.cpp x3).
+ * The port path (CPeerManager::HandleBlock -> ChainSelectorAdapter::
+ * ProcessNewBlock -> CChainState::ActivateBestChain) BYPASSES fork-staging.
+ * Today (--usenewpeerman=0 default) all operational paths use the legacy
+ * entry points, so fork-staging is fully operational. At Phase 9+ default
+ * flip + ibd_coordinator retirement, an explicit Track A decision is
+ * required: re-implement fork-staging in the port adapter (Path A1) or
+ * accept the bypass (Path A2). Both are consensus-adjacent. Until that
+ * decision lands, do not retire ibd_coordinator or change the
+ * --usenewpeerman default. Retirement of this file clusters with
  * `ibd_coordinator` retirement at Phase 9+ (post `--usenewpeerman`
  * default flip + burn-in window per consensus_activation_policy.md).
- * At that point a project decision is required between (a) re-implement
- * Validate-Before-Disconnect on top of chain_selector primitives, or
- * (b) drop fork-staging in favor of pure max-cumulative-work selection.
- * That choice is Track A / consensus-adjacent and explicitly out of
- * Phase 7 scope. See `.claude/contracts/port_phase_7_implementation_plan.md`
- * v0.2.1 for the current Phase 7 framing.
+ * See `.claude/contracts/port_phase_7_implementation_plan.md` v0.3 for
+ * the current Phase 7 framing.
  *
  * ## What ForkManager does
  *
