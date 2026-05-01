@@ -407,6 +407,7 @@ fi
 # ============================================================================
 STRESS_5_FAIL=0   # MIK concentration bounds
 STRESS_6_FAIL=0   # reorg depth bound
+STRESS_6B_FAIL=0  # PR10.3: block_fetcher fork-bias path mechanism-isolation
 STRESS_7_FAIL=0   # UndoBlock integrity
 
 if [[ "$SCENARIO" = "stress" ]] || [[ "$SCENARIO" = "delay" ]] || [[ "$SCENARIO" = "partition" ]]; then
@@ -477,6 +478,44 @@ if [[ "$SCENARIO" = "stress" ]] || [[ "$SCENARIO" = "delay" ]] || [[ "$SCENARIO"
         STRESS_6_FAIL=1
     else
         echo "  Stress scenario 6 PASSED: max reorg depth ≤ 1 block"
+    fi
+
+    # Scenario 6b (Phase 10 PR10.3): block_fetcher fork-bias path
+    # mechanism-isolation. Closes Phase 8 PR8.6-RT-MEDIUM-3 carryover
+    # (mechanism-vs-outcome coverage gap).
+    #
+    # Asserts the fork-bias branch at block_fetcher.cpp:117-118
+    # (start_height = fork_point + 1 when HasActiveFork()) was
+    # specifically exercised — by grepping the FORK-BIAS-ACTIVATED
+    # transition marker emitted in PR10.3.
+    #
+    # If REORG_COUNT > 0 from scenario 6 above, the harness ran
+    # competing miners on different chains AND at least one node
+    # reorged → block_fetcher's fork-bias path SHOULD have fired
+    # at least once. If REORG_COUNT == 0 (transient single-miner
+    # bursts only), fork-bias may not have activated; downgrade
+    # to SOFT-PASS in that case rather than FAIL.
+    echo
+    echo "=== Stress scenario 6b (PR10.3): block_fetcher fork-bias path mechanism-isolation ==="
+    FORK_BIAS_HITS=0
+    for n in A B C D; do
+        H=$(grep -c "FORK-BIAS-ACTIVATED\|FORK-BIAS-CHANGED" "$TMPBASE/node${n}.log" 2>/dev/null || true)
+        H=${H:-0}
+        if [[ "$H" -gt 0 ]] 2>/dev/null; then
+            echo "  Node $n: $H fork-bias activation event(s)"
+            FORK_BIAS_HITS=$(( FORK_BIAS_HITS + H ))
+        else
+            echo "  Node $n: 0 fork-bias activation events"
+        fi
+    done
+    echo "  Total fork-bias activations across all 4 nodes: $FORK_BIAS_HITS"
+    if [[ "$FORK_BIAS_HITS" -gt 0 ]] 2>/dev/null; then
+        echo "  Stress scenario 6b PASSED: fork-bias path mechanism-isolated (FORK-BIAS-ACTIVATED markers found)"
+    elif [[ "$REORG_COUNT" -gt 0 ]] 2>/dev/null; then
+        echo "  FAIL: REORG_COUNT=$REORG_COUNT > 0 but FORK_BIAS_HITS=0 — reorgs occurred without fork-bias activation; investigate"
+        STRESS_6B_FAIL=1
+    else
+        echo "  Stress scenario 6b SOFT-PASS: REORG_COUNT=0 and FORK_BIAS_HITS=0 — no fork-resolution events to mechanism-isolate this run; non-deterministic on multi-miner stress, fork-bias path coverage will fire on subsequent runs that produce reorgs"
     fi
 
     # Scenario 7: UndoBlock integrity (zero corruption error patterns).
@@ -633,7 +672,7 @@ fi
 # ============================================================================
 echo
 if [[ $SCENARIO_1_FAIL -eq 0 ]] && [[ $FORBIDDEN_TOKEN_GREP_FAIL -eq 0 ]] && [[ $CHAINTIPS_FAIL -eq 0 ]] \
-   && [[ $STRESS_5_FAIL -eq 0 ]] && [[ $STRESS_6_FAIL -eq 0 ]] && [[ $STRESS_7_FAIL -eq 0 ]] \
+   && [[ $STRESS_5_FAIL -eq 0 ]] && [[ $STRESS_6_FAIL -eq 0 ]] && [[ $STRESS_6B_FAIL -eq 0 ]] && [[ $STRESS_7_FAIL -eq 0 ]] \
    && [[ $SCENARIO_2_M2_TAKEOVER_FAIL -eq 0 ]] && [[ $SCENARIO_2_RESYNC_FAIL -eq 0 ]]; then
     echo "RESULT: 4-node integration test PASSED ($SCENARIO scenario)"
     echo "  - Phase 1 (smoke): all 4 nodes lockstep on chain $HASH_A at height $HA"
@@ -643,6 +682,7 @@ if [[ $SCENARIO_1_FAIL -eq 0 ]] && [[ $FORBIDDEN_TOKEN_GREP_FAIL -eq 0 ]] && [[ 
     if [[ "$SCENARIO" = "stress" ]] || [[ "$SCENARIO" = "delay" ]]; then
         echo "  - Stress 5 (MIK concentration): ≥ 2 unique miners; max blocks per MIK ≤ 24"
         echo "  - Stress 6 (reorg depth): max ≤ 1 block ($REORG_COUNT total reorg events)"
+        echo "  - Stress 6b (PR10.3 fork-bias mechanism): $FORK_BIAS_HITS activation events across all 4 nodes"
         echo "  - Stress 7 (UndoBlock integrity): 0 corruption error patterns"
         echo "  - Scenario 3 (FindMostWorkChain): organic observation; $REORG_COUNT reorg events + scenario 4b convergence"
     fi

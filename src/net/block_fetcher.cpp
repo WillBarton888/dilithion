@@ -106,7 +106,23 @@ std::vector<int> CBlockFetcher::GetNextBlocksToRequest(int max_blocks, int chain
     // - New code: if fork active, request from fork_point+1=1068
     int start_height = chain_height + 1;
 
-    // Check if there's an active fork that starts earlier
+    // Check if there's an active fork that starts earlier.
+    //
+    // Phase 10 PR10.3 — fork-bias activation transition logging.
+    // Closes Phase 8 PR8.6-RT-MEDIUM-3: previously the harness covered
+    // this path only at outcome-level (convergence + reorg ≤ 1 + Undo
+    // Block grep), with no mechanism-isolation. We now emit a unique
+    // marker line "[BlockFetcher] FORK-BIAS-ACTIVATED" on transitions
+    // (first activation; fork_point change; deactivation) — the
+    // four_node_local.sh stress scenario greps this marker to assert
+    // the fork-bias path was specifically exercised, not just the
+    // overall convergence outcome.
+    //
+    // State transitions logged once each (no per-cycle spam):
+    //   inactive    -> fork_point=N    : "ACTIVATED fork_point=N"
+    //   fork_point=A -> fork_point=B (A != B) : "CHANGED A -> B"
+    //   fork_point=N -> inactive       : "DEACTIVATED last_fork_point=N"
+    int observed_fork_point = -1;  // -1 = no fork-bias active this cycle
     ForkManager& forkMgr = ForkManager::GetInstance();
     if (forkMgr.HasActiveFork()) {
         auto fork = forkMgr.GetActiveFork();
@@ -116,10 +132,33 @@ std::vector<int> CBlockFetcher::GetNextBlocksToRequest(int max_blocks, int chain
             // This includes the block at chain_height if fork_point < chain_height
             if (fork_point < chain_height) {
                 start_height = fork_point + 1;
-                std::cout << "[BlockFetcher] Fork active: requesting from height " << start_height
-                          << " (fork_point=" << fork_point << ", chain_height=" << chain_height << ")"
+                observed_fork_point = fork_point;
+            }
+        }
+    }
+
+    // Transition-log under cs_fetcher to avoid log-storm if multiple
+    // threads enter GetNextBlocksToRequest concurrently.
+    {
+        std::lock_guard<std::mutex> lock(cs_fetcher);
+        if (observed_fork_point != m_last_fork_bias_logged_fork_point) {
+            if (observed_fork_point >= 0 && m_last_fork_bias_logged_fork_point < 0) {
+                std::cout << "[BlockFetcher] FORK-BIAS-ACTIVATED fork_point="
+                          << observed_fork_point << " chain_height="
+                          << chain_height << " start_height=" << start_height
+                          << std::endl;
+            } else if (observed_fork_point >= 0 && m_last_fork_bias_logged_fork_point >= 0) {
+                std::cout << "[BlockFetcher] FORK-BIAS-CHANGED prev_fork_point="
+                          << m_last_fork_bias_logged_fork_point
+                          << " new_fork_point=" << observed_fork_point
+                          << std::endl;
+            } else {
+                // observed_fork_point == -1 && m_last_... >= 0
+                std::cout << "[BlockFetcher] FORK-BIAS-DEACTIVATED last_fork_point="
+                          << m_last_fork_bias_logged_fork_point
                           << std::endl;
             }
+            m_last_fork_bias_logged_fork_point = observed_fork_point;
         }
     }
 

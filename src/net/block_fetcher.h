@@ -119,6 +119,24 @@ private:
     std::chrono::time_point<std::chrono::steady_clock> lastBlockReceived;
     int nBlocksReceivedTotal;
 
+    // Phase 10 PR10.3 — fork-bias activation transition tracking.
+    // Closes Phase 8 PR8.6-RT-MEDIUM-3 carryover (mechanism-vs-outcome
+    // coverage gap for block_fetcher.cpp:109-124 fork-bias path).
+    //
+    // GetNextBlocksToRequest() is called on every download cycle (every
+    // few seconds during IBD / fork resolution). Logging "fork-bias
+    // activated" on every call would spam the log during fork
+    // resolution. Instead, we log ONLY on transitions: log once when
+    // fork_point first activates, log once again if fork_point changes
+    // (different fork takes over), log once when fork-bias deactivates
+    // (no active fork after one was active).
+    //
+    // Sentinel: -1 means "no fork-bias currently logged active";
+    // any non-negative value is the last fork_point we logged.
+    // Updated under cs_fetcher to avoid concurrent log-storm if multiple
+    // threads call GetNextBlocksToRequest simultaneously.
+    int m_last_fork_bias_logged_fork_point = -1;
+
     // Thread safety
     mutable std::mutex cs_fetcher;
 };
