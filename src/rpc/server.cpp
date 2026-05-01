@@ -59,6 +59,7 @@
 #include <net/block_tracker.h>  // For block tracker diagnostics
 #include <net/block_fetcher.h>  // For CBlockFetcher
 #include <net/headers_manager.h>  // For CHeadersManager
+#include <net/serialize.h>  // T1.B: CDataStream for partial-Merkle-tree serialization
 
 #include <array>
 #include <sstream>
@@ -310,6 +311,17 @@ CRPCServer::CRPCServer(uint16_t port)
 
     // Seed attestation (Phase 2+3)
     m_handlers["getmikattestation"] = [this](const std::string& p) { return RPC_GetMIKAttestation(p); };
+
+    // T1.B: small RPCs cluster (Bitcoin Core port v28.0).
+    // getblockstats + gettxoutproof are instance methods (need m_blockchain
+    // / m_chainstate access). The wait-* family + verifytxoutproof are
+    // static -- they read only g_chainstate or are pure-input.
+    m_handlers["getblockstats"]      = [this](const std::string& p) { return RPC_GetBlockStats(p); };
+    m_handlers["waitfornewblock"]    = [](const std::string& p) { return RPC_WaitForNewBlock(p); };
+    m_handlers["waitforblock"]       = [](const std::string& p) { return RPC_WaitForBlock(p); };
+    m_handlers["waitforblockheight"] = [](const std::string& p) { return RPC_WaitForBlockHeight(p); };
+    m_handlers["gettxoutproof"]      = [this](const std::string& p) { return RPC_GetTxOutProof(p); };
+    m_handlers["verifytxoutproof"]   = [](const std::string& p) { return RPC_VerifyTxOutProof(p); };
 }
 
 CRPCServer::~CRPCServer() {
@@ -5366,6 +5378,14 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"acceptswap - Accept a swap by creating a matching HTLC on our chain\",";
     oss << "\"listswaps - List all known atomic swaps and their states\",";
 
+    // T1.B: small RPCs cluster (Bitcoin Core port v28.0)
+    oss << "\"getblockstats - Per-block analytics (size, fees, subsidy, utxo delta)\",";
+    oss << "\"waitfornewblock - Block until a new tip is connected (timeout_ms default 30000, max 300000)\",";
+    oss << "\"waitforblock - Block until tip equals supplied hash (timeout_ms default 30000)\",";
+    oss << "\"waitforblockheight - Block until tip reaches supplied height (timeout_ms default 30000)\",";
+    oss << "\"gettxoutproof - Return a partial-merkle-tree proof witnessing inclusion of given txids\",";
+    oss << "\"verifytxoutproof - Decode a partial-merkle-tree proof and return the witnessed txids\",";
+
     oss << "\"help - This help message\",";
     oss << "\"stop - Stop the Dilithion node\"";
 
@@ -8394,4 +8414,775 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
            << "}";
 
     return result.str();
+}
+
+// ============================================================================
+// Small RPCs cluster (T1.B) -- Bitcoin Core port v28.0
+// ----------------------------------------------------------------------------
+//   getblockstats           src/rpc/blockchain.cpp v28.0
+//   waitfornewblock         src/rpc/blockchain.cpp v28.0
+//   waitforblock            src/rpc/blockchain.cpp v28.0
+//   waitforblockheight      src/rpc/blockchain.cpp v28.0
+//   gettxoutproof           src/rpc/rawtransaction.cpp v28.0
+//   verifytxoutproof        src/rpc/rawtransaction.cpp v28.0
+//
+// All six are read-only / preview-only -- no consensus, no P2P, no storage
+// schema changes. Worst case for a buggy handler is wrong RPC output; no
+// fund loss, no data corruption. (See contract: LOW risk class.)
+//
+// Threading model for the wait-* family:
+//   A single process-wide std::condition_variable + mutex pair lives in this
+//   translation unit. CChainState's existing block-connect callback array
+//   gets a tiny lambda registered at node startup that calls
+//   CRPCServer::NotifyBlockTipChanged(); that function broadcasts the CV.
+//   Each wait-* handler grabs the mutex, polls its tip predicate, and
+//   waits on the CV with a bounded timeout (default 30s, capped at 300s).
+//   The default cap exists to bound how long an RPC worker thread is tied
+//   up by any single client; without it a malicious caller could DoS the
+//   ~8-worker thread-pool by opening N>8 long-poll requests.
+// ============================================================================
+
+extern CChainState g_chainstate;
+
+namespace {
+
+// Process-wide synchronization for the wait-* RPCs. Lives in an anonymous
+// namespace so external translation units never reach in. Mutex is plain
+// std::mutex (default seq_cst) per project convention.
+std::mutex              g_wait_cluster_mtx;
+std::condition_variable g_wait_cluster_cv;
+
+// ---- Object-style param parsing helpers (Dilithion uses object params) ----
+
+// Returns true and writes hex string to `out` if `params` contains
+// `"key":"<hex>"`. False otherwise.
+bool TryParseStringParam(const std::string& params,
+                         const std::string& key,
+                         std::string& out) {
+    std::string needle = "\"" + key + "\"";
+    size_t key_pos = params.find(needle);
+    if (key_pos == std::string::npos) return false;
+    size_t colon = params.find(":", key_pos + needle.size());
+    if (colon == std::string::npos) return false;
+    size_t q1 = params.find("\"", colon);
+    if (q1 == std::string::npos) return false;
+    size_t q2 = params.find("\"", q1 + 1);
+    if (q2 == std::string::npos) return false;
+    out = params.substr(q1 + 1, q2 - q1 - 1);
+    return true;
+}
+
+// Returns true and writes integer to `out` if `params` contains
+// `"key":<int>`. False otherwise. Accepts negative integers.
+bool TryParseIntParam(const std::string& params,
+                      const std::string& key,
+                      int64_t& out) {
+    std::string needle = "\"" + key + "\"";
+    size_t key_pos = params.find(needle);
+    if (key_pos == std::string::npos) return false;
+    size_t colon = params.find(":", key_pos + needle.size());
+    if (colon == std::string::npos) return false;
+    size_t i = colon + 1;
+    while (i < params.size() && std::isspace(static_cast<unsigned char>(params[i]))) ++i;
+    size_t start = i;
+    if (i < params.size() && params[i] == '-') ++i;
+    while (i < params.size() && std::isdigit(static_cast<unsigned char>(params[i]))) ++i;
+    if (i == start || (i == start + 1 && params[start] == '-')) return false;
+    try {
+        out = std::stoll(params.substr(start, i - start));
+        return true;
+    } catch (...) {
+        return false;
+    }
+}
+
+// Strict 64-char hex validation (block hash / txid). Anything else throws so
+// the RPC layer translates to a proper JSON error.
+uint256 ParseHash64(const std::string& hex, const char* label) {
+    if (hex.size() != 64) {
+        throw std::runtime_error(std::string(label) +
+                                 " must be 64 hex characters");
+    }
+    for (char c : hex) {
+        if (!std::isxdigit(static_cast<unsigned char>(c))) {
+            throw std::runtime_error(std::string(label) +
+                                     " contains non-hex characters");
+        }
+    }
+    uint256 h;
+    h.SetHex(hex);
+    return h;
+}
+
+// Resolve the optional / capped wait-* timeout. Defaults to 30s; clamps to
+// [1ms, 300s]. A caller-supplied timeout_ms <= 0 is rejected.
+int ResolveWaitTimeoutMs(const std::string& params) {
+    int64_t requested = CRPCServer::kDefaultWaitTimeoutMs;
+    int64_t parsed = 0;
+    if (TryParseIntParam(params, "timeout_ms", parsed)) {
+        if (parsed <= 0) {
+            throw std::runtime_error("timeout_ms must be positive");
+        }
+        requested = parsed;
+    } else if (TryParseIntParam(params, "timeout", parsed)) {
+        // Bitcoin Core uses `timeout`; accept that alias for caller convenience.
+        if (parsed <= 0) {
+            throw std::runtime_error("timeout must be positive");
+        }
+        requested = parsed;
+    }
+    if (requested > CRPCServer::kMaxWaitTimeoutMs) {
+        requested = CRPCServer::kMaxWaitTimeoutMs;
+    }
+    return static_cast<int>(requested);
+}
+
+// Format a wait-* response body. Bitcoin Core returns {"hash":..., "height":...}
+// when condition met, OR {"hash":"<current_tip>", "height":<current_tip_height>}
+// after a timeout. We keep that exact shape for compatibility.
+std::string FormatTipResponse(const uint256& hash, int height) {
+    std::ostringstream oss;
+    oss << "{\"hash\":\"" << hash.GetHex() << "\","
+        << "\"height\":" << height << "}";
+    return oss.str();
+}
+
+// Compute the SHA3-256 of two concatenated 32-byte hashes -- the inner
+// node combiner used by Dilithion's merkle tree. Mirrors
+// CBlockValidator::BuildMerkleRoot's combiner exactly so partial-merkle
+// proofs validate against the on-chain merkle root.
+uint256 CombineHashes(const uint256& left, const uint256& right) {
+    uint8_t buf[64];
+    std::memcpy(buf, left.data, 32);
+    std::memcpy(buf + 32, right.data, 32);
+    uint256 out;
+    SHA3_256(buf, 64, out.data);
+    return out;
+}
+
+// Tree-height for a block of N leaves. Dilithion duplicates the last leaf
+// at odd levels (BuildMerkleRoot does levelSize = (levelSize + 1) / 2),
+// so the height is ceil(log2(N)) for N >= 2 and 0 for N <= 1.
+int MerkleTreeHeight(uint32_t nTransactions) {
+    int height = 0;
+    while ((1u << height) < nTransactions) ++height;
+    return height;
+}
+
+// Number of nodes at level `height` (0 = leaves). Mirrors Bitcoin Core's
+// CalcTreeWidth().
+uint32_t MerkleTreeWidth(uint32_t nTransactions, int height) {
+    return (nTransactions + (1u << height) - 1) >> height;
+}
+
+// Recurse the merkle tree, computing the hash at (height, pos). At the
+// leaf level returns the txid directly. Used to fill in the partial
+// merkle tree's "extra" hashes (interior nodes whose subtrees contain
+// no matched leaves).
+uint256 MerkleHashAt(const std::vector<uint256>& leaves,
+                     uint32_t nTransactions,
+                     int height,
+                     uint32_t pos) {
+    if (height == 0) {
+        return leaves[pos];
+    }
+    uint256 left = MerkleHashAt(leaves, nTransactions, height - 1, pos * 2);
+    uint256 right;
+    if (pos * 2 + 1 < MerkleTreeWidth(nTransactions, height - 1)) {
+        right = MerkleHashAt(leaves, nTransactions, height - 1, pos * 2 + 1);
+    } else {
+        // Odd-leaf case: duplicate the left child (matches BuildMerkleRoot).
+        right = left;
+    }
+    return CombineHashes(left, right);
+}
+
+// Build the partial merkle tree's flag-bit + hash stream by traversing the
+// full tree top-down. At each interior node:
+//   - if any descendant is matched, recurse and emit a 1-bit (no hash)
+//   - otherwise emit a 0-bit and the subtree-root hash (terminator)
+// At a leaf:
+//   - emit a 1-bit if matched, 0-bit otherwise; always emit the leaf hash
+//
+// `matched[i]` indicates whether leaf i should be included in the proof.
+void TraverseAndBuild(int height,
+                      uint32_t pos,
+                      const std::vector<uint256>& leaves,
+                      const std::vector<bool>& matched,
+                      uint32_t nTransactions,
+                      std::vector<bool>& bits,
+                      std::vector<uint256>& hashes) {
+    bool parentOfMatch = false;
+    for (uint32_t p = pos << height;
+         p < ((pos + 1) << height) && p < nTransactions;
+         ++p) {
+        if (matched[p]) { parentOfMatch = true; break; }
+    }
+    bits.push_back(parentOfMatch);
+
+    if (height == 0 || !parentOfMatch) {
+        hashes.push_back(MerkleHashAt(leaves, nTransactions, height, pos));
+    } else {
+        TraverseAndBuild(height - 1, pos * 2, leaves, matched, nTransactions,
+                         bits, hashes);
+        if (pos * 2 + 1 < MerkleTreeWidth(nTransactions, height - 1)) {
+            TraverseAndBuild(height - 1, pos * 2 + 1, leaves, matched,
+                             nTransactions, bits, hashes);
+        }
+    }
+}
+
+// Reverse of TraverseAndBuild. Walks the partial tree using the supplied
+// bits + hashes, and on success returns the merkle root, plus the txids
+// at matched leaves in `matched_txids`. Throws on under/over-run.
+uint256 TraverseAndExtract(int height,
+                           uint32_t pos,
+                           uint32_t nTransactions,
+                           const std::vector<bool>& bits,
+                           const std::vector<uint256>& hashes,
+                           size_t& bit_pos,
+                           size_t& hash_pos,
+                           std::vector<uint256>& matched_txids) {
+    if (bit_pos >= bits.size()) {
+        throw std::runtime_error("partial merkle tree: ran out of flag bits");
+    }
+    bool parentOfMatch = bits[bit_pos++];
+    if (height == 0 || !parentOfMatch) {
+        if (hash_pos >= hashes.size()) {
+            throw std::runtime_error("partial merkle tree: ran out of hashes");
+        }
+        uint256 h = hashes[hash_pos++];
+        if (height == 0 && parentOfMatch) {
+            matched_txids.push_back(h);
+        }
+        return h;
+    }
+    uint256 left = TraverseAndExtract(height - 1, pos * 2, nTransactions,
+                                      bits, hashes, bit_pos, hash_pos,
+                                      matched_txids);
+    uint256 right;
+    if (pos * 2 + 1 < MerkleTreeWidth(nTransactions, height - 1)) {
+        right = TraverseAndExtract(height - 1, pos * 2 + 1, nTransactions,
+                                   bits, hashes, bit_pos, hash_pos,
+                                   matched_txids);
+        if (right == left) {
+            // Bitcoin Core CVE-2012-2459 guard: an interior node with two
+            // identical children indicates a malleated tree.
+            throw std::runtime_error(
+                "partial merkle tree: duplicate child hashes detected");
+        }
+    } else {
+        right = left;
+    }
+    return CombineHashes(left, right);
+}
+
+} // anonymous namespace
+
+// ----------------------------------------------------------------------------
+// CRPCServer::NotifyBlockTipChanged
+// ----------------------------------------------------------------------------
+// Wakes any RPC worker parked on g_wait_cluster_cv. Registered once per
+// process from the node's startup path. Idempotent and noexcept-equivalent --
+// the chainstate's outer try/catch already protects the loop, but we keep
+// the body trivial so even pathological CV state cannot raise.
+void CRPCServer::NotifyBlockTipChanged() {
+    // No need to acquire the mutex for notify_all -- waiters re-check their
+    // predicate under the mutex on wake, and notify_all has well-defined
+    // memory ordering w.r.t. wait_for. Avoids contention if many block
+    // connects fire in quick succession during IBD.
+    g_wait_cluster_cv.notify_all();
+}
+
+// ----------------------------------------------------------------------------
+// CRPCServer::RPC_GetBlockStats
+// ----------------------------------------------------------------------------
+// Per-block analytics for explorers. Bitcoin Core port; some segwit-only
+// fields are intentionally omitted because Dilithion is non-segwit:
+//
+//   omitted: swtotal_size, swtotal_weight, swtxs, total_weight
+//
+// Per-tx fee fields (avgfee, medianfee, maxfee, minfee, feerate_percentiles,
+// avgfeerate, maxfeerate, minfeerate) are also omitted: Bitcoin Core
+// computes these via prevout lookups against an undo file, which Dilithion
+// does not currently expose at this layer. `totalfee` IS reported, derived
+// from the coinbase output sum minus the block subsidy -- the same formula
+// Bitcoin Core uses as a fallback when undo data is unavailable.
+//
+// Field set (alphabetical):
+//   avgtxsize, blockhash, height, ins, maxtxsize, mediantime, mediantxsize,
+//   mintxsize, outs, subsidy, time, total_out, total_size, totalfee, txs,
+//   utxo_increase
+//
+// Param: object {"hash_or_height": <hex|int>}. Either form accepted (the
+// hash field name is `hash`, the height field name is `height`; supplying
+// both is rejected).
+std::string CRPCServer::RPC_GetBlockStats(const std::string& params) {
+    if (!m_blockchain) throw std::runtime_error("Blockchain not initialized");
+    if (!m_chainstate) throw std::runtime_error("Chain state not initialized");
+
+    // Resolve target block.
+    std::string hash_str;
+    int64_t height_param = -1;
+    bool have_hash = TryParseStringParam(params, "hash", hash_str);
+    bool have_height = TryParseIntParam(params, "height", height_param);
+    // Convenience alias: hash_or_height accepts either.
+    std::string hor;
+    if (!have_hash && !have_height && TryParseStringParam(params, "hash_or_height", hor)) {
+        if (hor.size() == 64) { hash_str = hor; have_hash = true; }
+        else {
+            try { height_param = std::stoll(hor); have_height = true; }
+            catch (...) { throw std::runtime_error("hash_or_height must be a 64-char hex hash or an integer height"); }
+        }
+    }
+    if (have_hash && have_height) {
+        throw std::runtime_error("Specify either hash or height, not both");
+    }
+    if (!have_hash && !have_height) {
+        throw std::runtime_error("Missing hash or height parameter");
+    }
+
+    uint256 target_hash;
+    if (have_height) {
+        if (height_param < 0) throw std::runtime_error("height must be non-negative");
+        CBlockIndex* pTip = m_chainstate->GetTip();
+        if (!pTip || height_param > pTip->nHeight) {
+            throw std::runtime_error("Block height out of range");
+        }
+        CBlockIndex* pBlock = pTip->GetAncestor(static_cast<int>(height_param));
+        if (!pBlock) throw std::runtime_error("No block at that height");
+        target_hash = pBlock->GetBlockHash();
+    } else {
+        target_hash = ParseHash64(hash_str, "hash");
+    }
+
+    CBlock block;
+    if (!m_blockchain->ReadBlock(target_hash, block)) {
+        throw std::runtime_error("Block not found");
+    }
+
+    CBlockIndex blockIndex;
+    int height = -1;
+    if (m_blockchain->ReadBlockIndex(target_hash, blockIndex)) {
+        height = blockIndex.nHeight;
+    }
+    if (height < 0) {
+        // Fallback: walk ancestors via active tip.
+        CBlockIndex* pTip = m_chainstate->GetTip();
+        if (pTip) {
+            for (CBlockIndex* p = pTip; p; p = p->pprev) {
+                if (p->GetBlockHash() == target_hash) { height = p->nHeight; break; }
+            }
+        }
+    }
+    if (height < 0) throw std::runtime_error("Block index missing for given block");
+
+    CBlockValidator validator;
+    std::vector<CTransactionRef> transactions;
+    std::string deserializeError;
+    if (!validator.DeserializeBlockTransactions(block, transactions, deserializeError)) {
+        throw std::runtime_error("Failed to deserialize block transactions: " + deserializeError);
+    }
+
+    // Aggregates -- per-tx size + per-block input/output totals.
+    std::vector<size_t> tx_sizes;
+    tx_sizes.reserve(transactions.size());
+    uint64_t total_size = block.vtx.size();      // serialized tx-array size
+    uint64_t total_out  = 0;                      // total non-coinbase output value
+    uint64_t coinbase_out = 0;                    // sum of coinbase outputs (subsidy + fees)
+    uint64_t ins  = 0;
+    uint64_t outs = 0;
+    for (size_t i = 0; i < transactions.size(); ++i) {
+        const auto& tx = transactions[i];
+        size_t sz = tx->GetSerializedSize();
+        tx_sizes.push_back(sz);
+        if (i == 0) {
+            // Coinbase: the only TX whose inputs aren't real outpoints.
+            for (const auto& vo : tx->vout) coinbase_out += vo.nValue;
+            outs += tx->vout.size();
+        } else {
+            ins  += tx->vin.size();
+            outs += tx->vout.size();
+            for (const auto& vo : tx->vout) total_out += vo.nValue;
+        }
+    }
+
+    uint64_t subsidy = CBlockValidator::CalculateBlockSubsidy(static_cast<uint32_t>(height));
+    // totalfee = coinbase_out - subsidy (clamped at 0; under-paid coinbase
+    // would be a consensus failure, but we report 0 rather than overflow).
+    uint64_t totalfee = (coinbase_out >= subsidy) ? (coinbase_out - subsidy) : 0;
+
+    // Median txsize via std::nth_element (KISS, no helper header).
+    uint64_t mintxsize = 0, maxtxsize = 0, mediantxsize = 0;
+    double avgtxsize = 0.0;
+    if (!tx_sizes.empty()) {
+        auto minmax = std::minmax_element(tx_sizes.begin(), tx_sizes.end());
+        mintxsize = *minmax.first;
+        maxtxsize = *minmax.second;
+        size_t mid = tx_sizes.size() / 2;
+        std::nth_element(tx_sizes.begin(), tx_sizes.begin() + mid, tx_sizes.end());
+        mediantxsize = tx_sizes[mid];
+        uint64_t sum = 0;
+        for (size_t s : tx_sizes) sum += s;
+        avgtxsize = static_cast<double>(sum) / tx_sizes.size();
+    }
+
+    // mediantime: median nTime of the last 11 blocks (chain median past time)
+    // -- standard explorer field. Fallback to block.nTime when ancestors are
+    // unavailable.
+    uint64_t mediantime = block.nTime;
+    {
+        CBlockIndex* pTip = m_chainstate->GetTip();
+        if (pTip) {
+            CBlockIndex* p = pTip->GetAncestor(height);
+            if (p) {
+                std::vector<uint32_t> times;
+                CBlockIndex* it = p;
+                for (int i = 0; i < 11 && it; ++i) {
+                    times.push_back(it->nTime);
+                    it = it->pprev;
+                }
+                if (!times.empty()) {
+                    size_t mid = times.size() / 2;
+                    std::nth_element(times.begin(), times.begin() + mid, times.end());
+                    mediantime = times[mid];
+                }
+            }
+        }
+    }
+
+    // utxo_increase = (outputs created in this block) - (inputs consumed).
+    // Coinbase always creates outputs without consuming any prevouts.
+    int64_t utxo_increase = static_cast<int64_t>(outs) - static_cast<int64_t>(ins);
+
+    std::ostringstream oss;
+    oss << "{";
+    oss << "\"avgtxsize\":" << avgtxsize << ",";
+    oss << "\"blockhash\":\"" << target_hash.GetHex() << "\",";
+    oss << "\"height\":" << height << ",";
+    oss << "\"ins\":" << ins << ",";
+    oss << "\"maxtxsize\":" << maxtxsize << ",";
+    oss << "\"mediantime\":" << mediantime << ",";
+    oss << "\"mediantxsize\":" << mediantxsize << ",";
+    oss << "\"mintxsize\":" << mintxsize << ",";
+    oss << "\"outs\":" << outs << ",";
+    oss << "\"subsidy\":" << subsidy << ",";
+    oss << "\"time\":" << block.nTime << ",";
+    oss << "\"total_out\":" << total_out << ",";
+    oss << "\"total_size\":" << total_size << ",";
+    oss << "\"totalfee\":" << totalfee << ",";
+    oss << "\"txs\":" << transactions.size() << ",";
+    oss << "\"utxo_increase\":" << utxo_increase;
+    oss << "}";
+    return oss.str();
+}
+
+// ----------------------------------------------------------------------------
+// CRPCServer::RPC_WaitForNewBlock
+// ----------------------------------------------------------------------------
+// Block until a new tip is connected (or the timeout expires). Param:
+// optional {"timeout_ms": <int>}. Default 30s; capped at 300s.
+//
+// Behavior matches Bitcoin Core: returns the tip whether or not the
+// condition was satisfied (timeouts return the current tip rather than
+// raising an error).
+std::string CRPCServer::RPC_WaitForNewBlock(const std::string& params) {
+    int timeout_ms = ResolveWaitTimeoutMs(params);
+
+    auto get_tip = []() -> std::pair<uint256, int> {
+        CBlockIndex* p = g_chainstate.GetTip();
+        if (!p) return {uint256{}, -1};
+        return {p->GetBlockHash(), p->nHeight};
+    };
+
+    auto initial = get_tip();
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(timeout_ms);
+
+    std::unique_lock<std::mutex> lock(g_wait_cluster_mtx);
+    g_wait_cluster_cv.wait_until(lock, deadline, [&]() {
+        return get_tip().first != initial.first;
+    });
+    auto current = get_tip();
+    return FormatTipResponse(current.first, current.second);
+}
+
+// ----------------------------------------------------------------------------
+// CRPCServer::RPC_WaitForBlock
+// ----------------------------------------------------------------------------
+// Block until the chain tip equals the supplied block hash (or timeout).
+// Param: {"hash": "<64-char hex>", "timeout_ms": <int>?}.
+std::string CRPCServer::RPC_WaitForBlock(const std::string& params) {
+    std::string hash_str;
+    if (!TryParseStringParam(params, "hash", hash_str) &&
+        !TryParseStringParam(params, "blockhash", hash_str)) {
+        throw std::runtime_error("Missing hash parameter");
+    }
+    uint256 wanted = ParseHash64(hash_str, "hash");
+    int timeout_ms = ResolveWaitTimeoutMs(params);
+
+    auto get_tip = []() -> std::pair<uint256, int> {
+        CBlockIndex* p = g_chainstate.GetTip();
+        if (!p) return {uint256{}, -1};
+        return {p->GetBlockHash(), p->nHeight};
+    };
+
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(timeout_ms);
+
+    std::unique_lock<std::mutex> lock(g_wait_cluster_mtx);
+    g_wait_cluster_cv.wait_until(lock, deadline, [&]() {
+        return get_tip().first == wanted;
+    });
+    auto current = get_tip();
+    return FormatTipResponse(current.first, current.second);
+}
+
+// ----------------------------------------------------------------------------
+// CRPCServer::RPC_WaitForBlockHeight
+// ----------------------------------------------------------------------------
+// Block until the chain tip is at least the supplied height (or timeout).
+// Param: {"height": <int>, "timeout_ms": <int>?}.
+std::string CRPCServer::RPC_WaitForBlockHeight(const std::string& params) {
+    int64_t target = -1;
+    if (!TryParseIntParam(params, "height", target)) {
+        throw std::runtime_error("Missing height parameter");
+    }
+    if (target < 0) throw std::runtime_error("height must be non-negative");
+    int timeout_ms = ResolveWaitTimeoutMs(params);
+
+    auto get_tip = []() -> std::pair<uint256, int> {
+        CBlockIndex* p = g_chainstate.GetTip();
+        if (!p) return {uint256{}, -1};
+        return {p->GetBlockHash(), p->nHeight};
+    };
+
+    auto deadline = std::chrono::steady_clock::now() +
+                    std::chrono::milliseconds(timeout_ms);
+
+    std::unique_lock<std::mutex> lock(g_wait_cluster_mtx);
+    g_wait_cluster_cv.wait_until(lock, deadline, [&]() {
+        return get_tip().second >= target;
+    });
+    auto current = get_tip();
+    return FormatTipResponse(current.first, current.second);
+}
+
+// ----------------------------------------------------------------------------
+// CRPCServer::RPC_GetTxOutProof
+// ----------------------------------------------------------------------------
+// Returns a hex-encoded partial-merkle-tree proof for the supplied set of
+// txids, embedded in the format:
+//
+//   [block_hash : 32]              -- which block these txids live in
+//   [num_transactions : varint]    -- total tx count in the block
+//   [hashes : varint + 32 each]    -- partial-merkle-tree hashes
+//   [flag_bits : varint + bytes]   -- packed traversal flag bits
+//
+// Mirrors Bitcoin Core's CMerkleBlock serialization (BIP 37 partial merkle
+// tree wire format) but uses Dilithion's SHA3-256 inner combiner.
+//
+// Param: {"txids": ["<hex>", ...], "blockhash": "<hex>"}. The blockhash is
+// optional iff txindex is enabled and all txids resolve to the same block.
+std::string CRPCServer::RPC_GetTxOutProof(const std::string& params) {
+    if (!m_blockchain) throw std::runtime_error("Blockchain not initialized");
+
+    // Parse txids array. We only accept the explicit object-style array
+    // form: "txids":["...","..."].
+    size_t arr_pos = params.find("\"txids\"");
+    if (arr_pos == std::string::npos) {
+        throw std::runtime_error("Missing txids parameter");
+    }
+    size_t lb = params.find('[', arr_pos);
+    size_t rb = params.find(']', arr_pos);
+    if (lb == std::string::npos || rb == std::string::npos || rb < lb) {
+        throw std::runtime_error("Invalid txids parameter (expect array)");
+    }
+    std::string array_body = params.substr(lb + 1, rb - lb - 1);
+    std::vector<uint256> wanted_txids;
+    {
+        size_t i = 0;
+        while (i < array_body.size()) {
+            size_t q1 = array_body.find('"', i);
+            if (q1 == std::string::npos) break;
+            size_t q2 = array_body.find('"', q1 + 1);
+            if (q2 == std::string::npos) break;
+            wanted_txids.push_back(
+                ParseHash64(array_body.substr(q1 + 1, q2 - q1 - 1), "txid"));
+            i = q2 + 1;
+        }
+    }
+    if (wanted_txids.empty()) {
+        throw std::runtime_error("txids array is empty");
+    }
+
+    // Resolve blockhash: explicit param, else look up the first txid via
+    // txindex and require the rest to match.
+    std::string bh_str;
+    bool have_bh = TryParseStringParam(params, "blockhash", bh_str);
+    uint256 block_hash;
+    if (have_bh) {
+        block_hash = ParseHash64(bh_str, "blockhash");
+    } else {
+        if (!g_tx_index) {
+            throw std::runtime_error(
+                "blockhash required (txindex not enabled)");
+        }
+        uint32_t pos_unused = 0;
+        if (!g_tx_index->FindTx(wanted_txids[0], block_hash, pos_unused)) {
+            throw std::runtime_error("First txid not found in any block");
+        }
+        for (size_t i = 1; i < wanted_txids.size(); ++i) {
+            uint256 other_block;
+            if (!g_tx_index->FindTx(wanted_txids[i], other_block, pos_unused)) {
+                throw std::runtime_error(
+                    "txid not found in any block (txindex)");
+            }
+            if (!(other_block == block_hash)) {
+                throw std::runtime_error(
+                    "all txids must belong to the same block");
+            }
+        }
+    }
+
+    CBlock block;
+    if (!m_blockchain->ReadBlock(block_hash, block)) {
+        throw std::runtime_error("Block not found");
+    }
+    CBlockValidator validator;
+    std::vector<CTransactionRef> transactions;
+    std::string err;
+    if (!validator.DeserializeBlockTransactions(block, transactions, err)) {
+        throw std::runtime_error("Failed to deserialize block: " + err);
+    }
+    if (transactions.empty()) {
+        throw std::runtime_error("Block has no transactions");
+    }
+
+    // Build leaf hash array + matched bitmap.
+    std::vector<uint256> leaves;
+    leaves.reserve(transactions.size());
+    for (const auto& tx : transactions) leaves.push_back(tx->GetHash());
+
+    std::vector<bool> matched(leaves.size(), false);
+    {
+        std::set<uint256> wanted_set(wanted_txids.begin(), wanted_txids.end());
+        size_t found = 0;
+        for (size_t i = 0; i < leaves.size(); ++i) {
+            if (wanted_set.count(leaves[i])) {
+                matched[i] = true;
+                ++found;
+            }
+        }
+        if (found != wanted_set.size()) {
+            throw std::runtime_error(
+                "Not all requested txids are present in the block");
+        }
+    }
+
+    int height = MerkleTreeHeight(static_cast<uint32_t>(leaves.size()));
+    std::vector<bool> bits;
+    std::vector<uint256> hashes;
+    TraverseAndBuild(height, 0, leaves, matched,
+                     static_cast<uint32_t>(leaves.size()), bits, hashes);
+
+    // Serialize: blockhash + nTransactions + hash array + flag bytes.
+    CDataStream stream;
+    stream.WriteUint256(block_hash);
+    stream.WriteUint32(static_cast<uint32_t>(leaves.size()));
+    stream.WriteCompactSize(hashes.size());
+    for (const auto& h : hashes) stream.WriteUint256(h);
+    // Pack bits LSB-first per byte (matches BIP 37 wire format).
+    std::vector<uint8_t> packed((bits.size() + 7) / 8, 0);
+    for (size_t i = 0; i < bits.size(); ++i) {
+        if (bits[i]) packed[i / 8] |= (1u << (i % 8));
+    }
+    stream.WriteCompactSize(packed.size());
+    stream.write(packed.data(), packed.size());
+
+    std::string hex = HexStr(stream.GetData());
+    return "\"" + hex + "\"";
+}
+
+// ----------------------------------------------------------------------------
+// CRPCServer::RPC_VerifyTxOutProof
+// ----------------------------------------------------------------------------
+// Inverse of RPC_GetTxOutProof: deserializes the proof, walks the partial
+// merkle tree, and returns the txids that the proof witnesses inclusion
+// for. Returns an empty array if the proof is structurally valid but
+// witnesses no transactions; throws if malformed.
+//
+// Note this is a pure-input function -- it does NOT verify that the
+// reconstructed merkle root matches any block's on-chain root. Callers
+// who need that step should compare the returned root to a block they
+// independently fetched. (This matches Bitcoin Core's split between
+// verifytxoutproof and gettxoutproof's caller-side merkle-root check.)
+//
+// Param: {"proof": "<hex>"}.
+std::string CRPCServer::RPC_VerifyTxOutProof(const std::string& params) {
+    std::string hex;
+    if (!TryParseStringParam(params, "proof", hex)) {
+        throw std::runtime_error("Missing proof parameter");
+    }
+    if (!IsHex(hex)) {
+        throw std::runtime_error("proof is not valid hex");
+    }
+    auto bytes = ParseHex(hex);
+    if (bytes.empty()) {
+        throw std::runtime_error("proof is empty");
+    }
+
+    CDataStream stream(bytes);
+    uint256 block_hash = stream.ReadUint256();
+    uint32_t nTransactions = stream.ReadUint32();
+    if (nTransactions == 0) {
+        throw std::runtime_error("proof: nTransactions must be > 0");
+    }
+    uint64_t nHashes = stream.ReadCompactSize();
+    if (nHashes > nTransactions) {
+        throw std::runtime_error("proof: too many hashes");
+    }
+    std::vector<uint256> hashes;
+    hashes.reserve(static_cast<size_t>(nHashes));
+    for (uint64_t i = 0; i < nHashes; ++i) {
+        hashes.push_back(stream.ReadUint256());
+    }
+    uint64_t nFlagBytes = stream.ReadCompactSize();
+    if (nFlagBytes > nTransactions) {
+        // Each leaf consumes exactly one flag bit on the way down; interior
+        // nodes add at most one more. nFlagBytes > nTransactions is a fast
+        // rejection of grossly oversized proofs.
+        throw std::runtime_error("proof: flag-byte count exceeds tx count");
+    }
+    std::vector<uint8_t> packed = stream.read(static_cast<size_t>(nFlagBytes));
+    std::vector<bool> bits(nFlagBytes * 8);
+    for (size_t i = 0; i < bits.size(); ++i) {
+        bits[i] = (packed[i / 8] & (1u << (i % 8))) != 0;
+    }
+
+    int height = MerkleTreeHeight(nTransactions);
+    std::vector<uint256> matched_txids;
+    size_t bit_pos = 0;
+    size_t hash_pos = 0;
+    uint256 root = TraverseAndExtract(height, 0, nTransactions, bits, hashes,
+                                      bit_pos, hash_pos, matched_txids);
+    if (hash_pos != hashes.size()) {
+        throw std::runtime_error("proof: trailing hashes were not consumed");
+    }
+    // Stray high-end bits beyond the last full byte are allowed (padding),
+    // but every bit consumed up to bit_pos must be valid.
+    if (bit_pos > bits.size()) {
+        throw std::runtime_error("proof: walked past end of flag bits");
+    }
+
+    std::ostringstream oss;
+    oss << "{\"merkleroot\":\"" << root.GetHex() << "\","
+        << "\"blockhash\":\"" << block_hash.GetHex() << "\","
+        << "\"txids\":[";
+    for (size_t i = 0; i < matched_txids.size(); ++i) {
+        if (i) oss << ",";
+        oss << "\"" << matched_txids[i].GetHex() << "\"";
+    }
+    oss << "]}";
+    return oss.str();
 }

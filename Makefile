@@ -623,6 +623,7 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/tx_index_tests.o \
 	$(OBJ_DIR)/test/tx_index_integration_tests.o \
 	$(OBJ_DIR)/test/mempool_persist_tests.o \
+	$(OBJ_DIR)/test/rpc_small_cluster_tests.o \
 	$(CRYPTO_PROPERTY_OBJECTS)
 
 # Link test objects + full library (CORE_OBJECTS) to avoid hand-picked object drift

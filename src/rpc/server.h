@@ -635,6 +635,41 @@ public:
     // process-wide `g_tx_index` global. Public + static lets tests exercise the formatter
     // directly without standing up a full HTTP server (schema-lock-in coverage).
     static std::string RPC_GetIndexInfo(const std::string& params);
+
+    // ------------------------------------------------------------------------
+    // Small RPCs cluster (T1.B) -- Bitcoin Core port v28.0.
+    //
+    // The wait-* RPCs and `verifytxoutproof` are STATIC + PUBLIC for the
+    // same reason as RPC_GetIndexInfo: they read only process-wide
+    // globals (g_chainstate / cluster condition variable) or operate on
+    // pure-input hex, neither of which is CRPCServer instance state.
+    // Static exposure also keeps them callable from unit tests without
+    // standing up an HTTP server.
+    //
+    // `getblockstats` and `gettxoutproof` are instance methods because
+    // they need to reach into m_blockchain / m_utxo_set / m_chainstate.
+    //
+    // Default timeout 30s, cap 300s (DoS guard -- worker threads in the
+    // RPC thread-pool would otherwise be tied up by an unbounded number
+    // of long-poll clients).
+    std::string RPC_GetBlockStats(const std::string& params);
+    static std::string RPC_WaitForNewBlock(const std::string& params);
+    static std::string RPC_WaitForBlock(const std::string& params);
+    static std::string RPC_WaitForBlockHeight(const std::string& params);
+    std::string RPC_GetTxOutProof(const std::string& params);
+    static std::string RPC_VerifyTxOutProof(const std::string& params);
+
+    // Hook for the chainstate block-connect callback to wake any RPC worker
+    // currently parked on the cluster's condition variable. Registered once
+    // from each node's startup path (dilithion-node.cpp / dilv-node.cpp)
+    // alongside the existing wallet / index callbacks. Idempotent and
+    // exception-safe so a callback storm never trips the chainstate's
+    // outer try/catch loop.
+    static void NotifyBlockTipChanged();
+
+    // Default and maximum wait-* timeouts in milliseconds. Exposed for tests.
+    static constexpr int kDefaultWaitTimeoutMs = 30000;   // 30 seconds
+    static constexpr int kMaxWaitTimeoutMs     = 300000;  // 5 minutes
 };
 
 #endif // DILITHION_RPC_SERVER_H
