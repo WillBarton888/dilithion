@@ -1011,8 +1011,8 @@ depends:
 	@echo "$(COLOR_YELLOW)Building dependencies...$(COLOR_RESET)"
 	@echo "$(COLOR_BLUE)[RandomX]$(COLOR_RESET) Building RandomX library..."
 	@cd depends/randomx && mkdir -p build-windows && cd build-windows && cmake -DCMAKE_SYSTEM_PROCESSOR=x86_64 -G "MSYS Makefiles" .. && make
-	@echo "$(COLOR_BLUE)[Dilithium]$(COLOR_RESET) Building Dilithium library..."
-	@cd depends/dilithium/ref && make
+	@echo "$(COLOR_BLUE)[Dilithium]$(COLOR_RESET) Building Dilithium reference C objects..."
+	@$(MAKE) --no-print-directory $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_GREEN)✓ Dependencies built$(COLOR_RESET)"
 
 # Include auto-generated header dependency files (-MMD -MP)
