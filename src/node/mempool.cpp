@@ -682,7 +682,7 @@ bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, uns
 // - Atomic replacement (all or nothing)
 //
 
-bool CTxMemPool::ReplaceTransaction(const CTransactionRef& replacement_tx, CAmount replacement_fee, int64_t time, unsigned int height, std::string* error) {
+bool CTxMemPool::ReplaceTransaction(const CTransactionRef& replacement_tx, CAmount replacement_fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) {
     bool ok = false;
     size_t tx_vsize = 0;
     uint256 txhash;
@@ -715,7 +715,10 @@ bool CTxMemPool::ReplaceTransaction(const CTransactionRef& replacement_tx, CAmou
             est->removeTx(evicted_txid, /*in_block=*/false);
         }
         if (ok && replacement_tx) {
-            est->processTx(txhash, height, replacement_fee, tx_vsize, /*valid_fee_estimate=*/true);
+            // PR-EF-2 fixup F#8: map bypass_fee_check to
+            // !valid_fee_estimate, mirroring AddTx semantics.
+            est->processTx(txhash, height, replacement_fee, tx_vsize,
+                           /*valid_fee_estimate=*/!bypass_fee_check);
         }
     }
     return ok;

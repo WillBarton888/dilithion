@@ -144,7 +144,16 @@ public:
     ~CTxMemPool();  // MEMPOOL-007 FIX: Destructor to stop expiration thread
     bool AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error = nullptr, bool bypass_fee_check = false);
     bool RemoveTx(const uint256& txid);
-    bool ReplaceTransaction(const CTransactionRef& replacement_tx, CAmount replacement_fee, int64_t time, unsigned int height, std::string* error = nullptr);  // MEMPOOL-008 FIX: RBF support
+    // MEMPOOL-008 FIX: RBF support.
+    //
+    // PR-EF-2 fixup F#8: bypass_fee_check defaults to false for live RBF.
+    // Set true on mempool replay paths so the estimator records the
+    // replacement with valid_fee_estimate=false, mirroring AddTx and
+    // Bitcoin Core's validFeeEstimate flag. No production callers pass
+    // true today; the parameter exists for symmetry with AddTx and to
+    // give future replay/restore paths a clean way to opt out of
+    // estimator pollution.
+    bool ReplaceTransaction(const CTransactionRef& replacement_tx, CAmount replacement_fee, int64_t time, unsigned int height, std::string* error = nullptr, bool bypass_fee_check = false);
     bool Exists(const uint256& txid) const;
     bool GetTx(const uint256& txid, CTxMemPoolEntry& entry) const;
     std::optional<CTxMemPoolEntry> GetTxIfExists(const uint256& txid) const;  // MEMPOOL-010 FIX: TOCTOU-safe API
