@@ -2908,7 +2908,13 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
     // PR-5: txindex fast-path. Same semantics as the RPC_GetRawTransaction
     // wiring — verified hit returns immediately, paranoia mismatch logs and
     // falls through to the legacy tip-walk below.
-    if (g_tx_index) {
+    //
+    // PR-7G R2: an EraseBlock failure leaves the index in a known-stale
+    // state until the operator runs --reindex. Skip the fast-path entirely
+    // when m_corrupted is set — the legacy tip-walk produces the correct
+    // answer for every txid and avoids serving orphaned-block records.
+    // Cheap atomic load before the leveldb lookup; rare path in practice.
+    if (g_tx_index && !g_tx_index->IsCorrupted()) {
         uint256 indexedBlockHash;
         uint32_t txPos = 0;
         if (g_tx_index->FindTx(txid, indexedBlockHash, txPos)) {
@@ -2917,18 +2923,19 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
                 std::vector<CTransactionRef> txs;
                 std::string err;
                 CBlockValidator validator;
-                if (validator.DeserializeBlockTransactions(block, txs, err)
+                CBlockIndex* pIdx = m_chainstate->GetBlockIndex(indexedBlockHash);
+                if (pIdx != nullptr
+                    && validator.DeserializeBlockTransactions(block, txs, err)
                     && txPos < txs.size()
                     && txs[txPos]->GetHash() == txid) {
-                    CBlockIndex* pIdx = m_chainstate->GetBlockIndex(indexedBlockHash);
                     // SEC-MD-1: bound confirmations to >=0. pIdx is a free-form
                     // mapBlockIndex lookup, not a pprev walk from pTip — under
                     // reorg the indexed block may sit at a height above the
                     // post-reorg tip, which would produce a negative result.
-                    int conf = (pIdx && pIdx->nHeight <= pTip->nHeight)
+                    int conf = (pIdx->nHeight <= pTip->nHeight)
                                ? (pTip->nHeight - pIdx->nHeight + 1)
                                : 0;
-                    int height = pIdx ? pIdx->nHeight : 0;
+                    int height = pIdx->nHeight;
 
                     std::cout << "[RPC] Found transaction " << txid.GetHex()
                               << " in block " << indexedBlockHash.GetHex()
@@ -2937,6 +2944,12 @@ std::string CRPCServer::RPC_GetTransaction(const std::string& params) {
 
                     return buildTxJSON(txs[txPos], indexedBlockHash, height, conf);
                 }
+                // PR-7G L3: pIdx == nullptr is treated as a paranoia
+                // mismatch (defense in depth — mapBlockIndex never
+                // removes entries today, but an indexed hash that
+                // chainstate doesn't know would silently report
+                // height=0/conf=0 in the prior code; surface and fall
+                // through instead).
                 std::cerr << "[txindex] WARN paranoia mismatch txid=" << txid.GetHex().substr(0,16)
                           << " indexed_block=" << indexedBlockHash.GetHex().substr(0,16)
                           << " -- falling through to scan" << std::endl;
@@ -4700,7 +4713,7 @@ std::string CRPCServer::RPC_StartMining(const std::string& params) {
                 if (wait_sec % 30 == 0) {
                     auto status = mgr->GetStatusForUI();
                     std::cout << "[RPC] Waiting for registration (" << status.phase
-                              << " — " << status.message << ")" << std::endl;
+                              << " -- " << status.message << ")" << std::endl;
                 }
                 std::this_thread::sleep_for(std::chrono::seconds(1));
                 wait_sec++;
@@ -5591,7 +5604,10 @@ std::string CRPCServer::RPC_GetRawTransaction(const std::string& params) {
     // verified hit. On any failure (paranoia guard, block read, deserialize),
     // log a WARN, increment the mismatch counter, and fall through to the
     // existing tip-walk so behavior is bounded by the legacy scan.
-    if (g_tx_index) {
+    //
+    // PR-7G R2: m_corrupted check before FindTx — see the matching note in
+    // RPC_GetTransaction above.
+    if (g_tx_index && !g_tx_index->IsCorrupted()) {
         uint256 indexedBlockHash;
         uint32_t txPos = 0;
         if (g_tx_index->FindTx(txid, indexedBlockHash, txPos)) {
@@ -5600,23 +5616,26 @@ std::string CRPCServer::RPC_GetRawTransaction(const std::string& params) {
                 std::vector<CTransactionRef> txs;
                 std::string err;
                 CBlockValidator validator;
-                if (validator.DeserializeBlockTransactions(block, txs, err)
+                CBlockIndex* pIdx = m_chainstate->GetBlockIndex(indexedBlockHash);
+                if (pIdx != nullptr
+                    && validator.DeserializeBlockTransactions(block, txs, err)
                     && txPos < txs.size()
                     && txs[txPos]->GetHash() == txid) {
-                    CBlockIndex* pIdx = m_chainstate->GetBlockIndex(indexedBlockHash);
                     // SEC-MD-1: bound confirmations to >=0. pIdx is a free-form
                     // mapBlockIndex lookup, not a pprev walk from pTip — under
                     // reorg the indexed block may sit at a height above the
                     // post-reorg tip, which would produce a negative result.
-                    int conf = (pIdx && pIdx->nHeight <= pTip->nHeight)
+                    int conf = (pIdx->nHeight <= pTip->nHeight)
                                ? (pTip->nHeight - pIdx->nHeight + 1)
                                : 0;
                     if (!verbose) {
                         return "\"" + HexStr(txs[txPos]->Serialize()) + "\"";
                     }
                     return txToJSON(txs[txPos], indexedBlockHash.GetHex(),
-                                    pIdx ? pIdx->nHeight : 0, conf);
+                                    pIdx->nHeight, conf);
                 }
+                // PR-7G L3: pIdx == nullptr is treated as a paranoia
+                // mismatch (see matching note in RPC_GetTransaction).
                 std::cerr << "[txindex] WARN paranoia mismatch txid=" << txid.GetHex().substr(0,16)
                           << " indexed_block=" << indexedBlockHash.GetHex().substr(0,16)
                           << " -- falling through to scan" << std::endl;

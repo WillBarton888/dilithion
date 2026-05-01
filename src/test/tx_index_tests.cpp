@@ -22,6 +22,7 @@
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <limits>
 #include <memory>
 #include <random>
 #include <string>
@@ -33,6 +34,8 @@ extern CChainState g_chainstate;
 
 namespace tx_index_test_hooks {
 extern std::atomic<uint64_t> g_wipe_write_count;
+extern std::atomic<uint64_t> g_walk_iteration_count;
+extern std::atomic<bool>     g_force_eraseblock_failure;
 }
 
 BOOST_AUTO_TEST_SUITE(tx_index_tests)
@@ -798,6 +801,12 @@ BOOST_AUTO_TEST_CASE(reindex_resume_across_destruct) {
 
 // C7 wipe atomicity: meta says height=4 with mismatched truncated hash;
 // chainstate has a different real hash at height 4. Init must wipe + reset.
+//
+// PR-7G A1: kN bumped from 5 to 10. With kN=5 the forged meta height (4)
+// equaled the chain tip's height, which masked an earlier off-by-one when
+// validating the wipe path; raising kN to 10 forges meta at a height
+// strictly below tip, exercising the more interesting "indexed too far"
+// shape. The U3 counter assertion (`post - pre == 1`) is unaffected.
 BOOST_AUTO_TEST_CASE(c7_wipe_on_mismatch_resets_to_minus_one) {
     TempDbScope scope_idx("c7_wipe_idx");
     TempDbScope scope_chain("c7_wipe_chain");
@@ -805,7 +814,7 @@ BOOST_AUTO_TEST_CASE(c7_wipe_on_mismatch_resets_to_minus_one) {
     CBlockchainDB chain_db;
     BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
 
-    constexpr int kN = 5;
+    constexpr int kN = 10;
     ChainFixture fix;
     fix.Build(kN, chain_db);
 
@@ -1009,10 +1018,10 @@ BOOST_AUTO_TEST_CASE(stop_mid_walk_completes_promptly) {
     BOOST_CHECK_LT(elapsed.count(), 5000);
 
     // Non-vacuity: prove the thread was actually mid-walk, not done. With
-    // kN=10000 synthesized blocks each requiring a chain_db ReadBlock plus
+    // kN=5000 synthesized blocks each requiring a chain_db ReadBlock plus
     // deserialize plus leveldb write, the loop cannot complete in the 50ms
     // sleep window above on any reasonable hardware (empirically: ~tens of
-    // microseconds per block; 10000 blocks ~> hundreds of ms minimum). If
+    // microseconds per block; 5000 blocks ~> hundreds of ms minimum). If
     // Stop() were a no-op or Interrupt() were broken, the thread would run
     // to natural completion and this assertion would fire.
     BOOST_CHECK_LT(idx.LastIndexedHeight(), kN - 1);
@@ -1173,6 +1182,504 @@ BOOST_AUTO_TEST_CASE(concurrent_start_no_double_spawn) {
     BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), kN - 1);
 
     idx.Stop();
+    g_chainstate.Cleanup();
+}
+
+// ===========================================================================
+// PR-7G: BaseIndex-pattern tests (R1) and defensive-fix tests (R2-R6, L3).
+// ===========================================================================
+
+// PR-7G E.1: live connect callback gated on IsSynced. With m_synced=false,
+// firing a connect callback for height H must NOT write the index. The
+// callback path is deliberately mimicked here (the lambda body is small
+// and lives in dilithion-node.cpp / dilv-node.cpp). Without the IsSynced
+// gate, FindTx(txid_in_H) would return true after the simulated callback.
+BOOST_AUTO_TEST_CASE(live_callback_gated_until_synced) {
+    TempDbScope scope_idx("e1_idx");
+    TempDbScope scope_chain("e1_chain");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+
+    constexpr int kN = 5;
+    ChainFixture fix;
+    fix.Build(kN, chain_db);
+
+    CTxIndex idx;
+    BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db));
+
+    // m_synced is false at Init time; verify the gate.
+    BOOST_REQUIRE_EQUAL(idx.IsSynced(), false);
+
+    // Simulate the live connect callback for height 0. The lambda's body
+    // (see dilithion-node.cpp PR-7G R1 callback) is:
+    //     if (g_tx_index && g_tx_index->IsSynced() &&
+    //         !g_tx_index->WriteBlock(b, h, hh)) { ... }
+    // We mimic the gate at the test boundary so the test exercises the
+    // semantic, not the lambda's literal text.
+    const int h_gated = 0;
+    CBlock blk0 = MakeBlock({fix.per_height_tx[h_gated]});
+    blk0.hashPrevBlock = uint256();
+    if (idx.IsSynced()) {
+        BOOST_REQUIRE(idx.WriteBlock(blk0, h_gated, fix.per_height_hash[h_gated]));
+    }
+    // After the gated callback, FindTx must return false — the index has
+    // not yet seen this tx.
+    {
+        uint256 fb;
+        uint32_t fp = 0;
+        BOOST_CHECK(!idx.FindTx(fix.per_height_tx[h_gated]->GetHash(), fb, fp));
+    }
+
+    // Now run the reindex thread to completion so m_synced flips to true.
+    idx.StartBackgroundSync();
+    BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
+    BOOST_REQUIRE(idx.IsSynced());
+    BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), kN - 1);
+
+    // Synthesize a NEW block at height kN and fire the (now ungated)
+    // callback. The gate should now be open; FindTx must succeed.
+    auto tx_kN = MakeUniqueTx(0xAB, 0xCD);
+    CBlock blk_kN = MakeBlock({tx_kN});
+    blk_kN.hashPrevBlock = fix.per_height_hash[kN - 1];
+    uint256 hash_kN = HashForHeight(kN);
+
+    if (idx.IsSynced()) {
+        BOOST_REQUIRE(idx.WriteBlock(blk_kN, kN, hash_kN));
+    }
+    {
+        uint256 fb;
+        uint32_t fp = 0;
+        BOOST_CHECK(idx.FindTx(tx_kN->GetHash(), fb, fp));
+        BOOST_CHECK(fb == hash_kN);
+    }
+
+    idx.Stop();
+    g_chainstate.Cleanup();
+}
+
+// PR-7G E.2: outer loop catches a tip advance during the inner walk.
+// Use the g_walk_iteration_count test seam to detect when the walk has
+// started; inject M new blocks at that point; assert all N+M blocks end
+// up in the index. Without R1's outer loop, the second batch would be
+// missed because the inner walk would never re-read the tip.
+BOOST_AUTO_TEST_CASE(reindex_outer_loop_catches_tip_advance) {
+    TempDbScope scope_idx("e2_idx");
+    TempDbScope scope_chain("e2_chain");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+
+    // Use enough blocks that the inner walk takes long enough for the
+    // test thread to inject more blocks BEFORE the walk completes. On
+    // fast hardware (~tens of microseconds per block via leveldb +
+    // deserialize), kN_initial=2000 yields ~tens of ms of walk work,
+    // ample for the test to extend chainstate mid-walk. The exact
+    // threshold doesn't matter as long as the determinism mechanism
+    // (inject after walk_count advances, before walk completes)
+    // succeeds — the load-bearing assertion is that all N+M txs are
+    // findable, NOT that the injection landed at any specific count.
+    constexpr int kN_initial = 2000;
+    constexpr int kM_extra   = 50;
+    ChainFixture fix;
+    fix.Build(kN_initial, chain_db);
+
+    CTxIndex idx;
+    BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db));
+
+    const uint64_t pre_walk_count =
+        tx_index_test_hooks::g_walk_iteration_count.load();
+    idx.StartBackgroundSync();
+
+    // Wait for the inner walk to start (counter advances). Then extend the
+    // chain. The outer loop must re-read the tip after the inner walk
+    // completes and walk the newly-visible range.
+    auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+    while (std::chrono::steady_clock::now() < deadline) {
+        if (tx_index_test_hooks::g_walk_iteration_count.load() > pre_walk_count + 5) {
+            // Walk is well underway; inject new blocks now.
+            break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+    BOOST_REQUIRE(tx_index_test_hooks::g_walk_iteration_count.load()
+                  > pre_walk_count + 5);
+
+    // Extend chainstate by kM_extra blocks. ChainFixture::Build wipes prior
+    // state, so we manually append below — preserving the tx_index's
+    // already-running thread state.
+    {
+        // Find current tip pointer.
+        CBlockIndex* prev_idx =
+            g_chainstate.GetBlockIndex(fix.per_height_hash[kN_initial - 1]);
+        BOOST_REQUIRE(prev_idx != nullptr);
+
+        for (int h = kN_initial; h < kN_initial + kM_extra; ++h) {
+            uint256 block_hash = HashForHeight(h);
+            fix.per_height_hash.push_back(block_hash);
+            auto tx = MakeUniqueTx(static_cast<uint8_t>(h & 0xFF),
+                                   static_cast<uint8_t>((h >> 8) & 0xFF));
+            fix.per_height_tx.push_back(tx);
+
+            CBlock block = MakeBlock({tx});
+            block.hashPrevBlock = fix.per_height_hash[h - 1];
+            BOOST_REQUIRE(chain_db.WriteBlock(block_hash, block));
+
+            auto pidx = std::make_unique<CBlockIndex>();
+            pidx->nHeight = h;
+            pidx->phashBlock = block_hash;
+            pidx->pprev = prev_idx;
+            pidx->nStatus = CBlockIndex::BLOCK_VALID_HEADER |
+                            CBlockIndex::BLOCK_HAVE_DATA;
+            CBlockIndex* raw = pidx.get();
+            BOOST_REQUIRE(g_chainstate.AddBlockIndex(block_hash, std::move(pidx)));
+            prev_idx->pnext = raw;
+            prev_idx = raw;
+        }
+        g_chainstate.SetTipForTest(prev_idx);
+    }
+
+    // The outer loop must catch the tip advance. Wait for IsSynced.
+    BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(10)));
+    BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), kN_initial + kM_extra - 1);
+
+    // All N+M blocks' txs must be findable.
+    for (int h = 0; h < kN_initial + kM_extra; ++h) {
+        uint256 fb;
+        uint32_t fp = 0;
+        BOOST_REQUIRE_MESSAGE(idx.FindTx(fix.per_height_tx[h]->GetHash(), fb, fp),
+                              "missing tx at height " << h);
+        BOOST_CHECK(fb == fix.per_height_hash[h]);
+    }
+
+    idx.Stop();
+    g_chainstate.Cleanup();
+}
+
+// PR-7G E.3: meta-height resume invariant. Verifies that a reindex
+// thread spawned with m_last_height already at a non-zero seed value
+// (from prior on-disk meta) walks from m_last_height+1 to tip without
+// re-walking blocks below the seed.
+//
+// Naming history (PR-7G C3 rename): originally posed as a "leapfrog
+// regression" test, but the red-team correctly noted that THIS test
+// does not actually exercise the FA-HI-1 racing-callback vector --
+// the non-vacuous proof of R1 is E.2 (`reindex_outer_loop_catches_
+// tip_advance`), which DOES exercise the racing-tip-advance path via
+// the g_walk_iteration_count test seam. This test asserts a different
+// (also valuable) invariant: meta-height resume correctness. The
+// docstring no longer claims "would fail without R1" because the
+// scenario here would pass under both pre- and post-fix code -- the
+// pre-fix bug was the racing callback, not meta resume.
+BOOST_AUTO_TEST_CASE(reindex_resumes_from_meta_height_after_high_seed) {
+    TempDbScope scope_idx("e3_idx");
+    TempDbScope scope_chain("e3_chain");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+
+    constexpr int kN = 20;
+    constexpr int kLeapfrogHeight = 15;
+    ChainFixture fix;
+    fix.Build(kN, chain_db);
+
+    // Step 1: open the index, force-write the high-height block via
+    // direct WriteBlock to push m_last_height to 15 and persist that
+    // value in the on-disk meta. This sets up a "seeded" index whose
+    // next reindex must resume from height 16 (m_last_height + 1) and
+    // walk to tip, without re-walking heights 0..15.
+    {
+        CTxIndex idx;
+        BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db));
+
+        CBlock blk_leap;
+        BOOST_REQUIRE(chain_db.ReadBlock(fix.per_height_hash[kLeapfrogHeight], blk_leap));
+        BOOST_REQUIRE(idx.WriteBlock(blk_leap, kLeapfrogHeight,
+                                     fix.per_height_hash[kLeapfrogHeight]));
+        BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), kLeapfrogHeight);
+        // No Stop() needed — destructor closes leveldb.
+    }
+
+    // Step 2: re-open and run the reindex thread. SyncLoop must:
+    //   (a) read the persisted m_last_height (=15) from on-disk meta
+    //   (b) start the inner walk at m_last_height + 1 = 16
+    //   (c) write heights 16..tip via WalkBlockRange
+    //   (d) NOT re-walk heights 0..15 (already-indexed range)
+    //   (e) reach m_synced=true once tip is stable across a full pass
+    //
+    // Heights 0..14 are deliberately absent from the index in this
+    // test. In production the only way to reach this state is via the
+    // C7 startup integrity wipe (which would zero m_last_height) -- the
+    // gap is recoverable, not silently persistent. This test asserts
+    // the resume-mechanic, not the gap-handling policy.
+    {
+        CTxIndex idx;
+        BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db));
+        BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), kLeapfrogHeight);
+
+        idx.StartBackgroundSync();
+        BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
+        BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), kN - 1);
+
+        // Heights 16..kN-1 must be findable (walked by the reindex).
+        for (int h = kLeapfrogHeight + 1; h < kN; ++h) {
+            uint256 fb;
+            uint32_t fp = 0;
+            BOOST_REQUIRE_MESSAGE(
+                idx.FindTx(fix.per_height_tx[h]->GetHash(), fb, fp),
+                "post-resume tx missing at height " << h);
+        }
+
+        // The seed block itself (15) is findable -- we wrote it directly.
+        {
+            uint256 fb;
+            uint32_t fp = 0;
+            BOOST_CHECK(idx.FindTx(fix.per_height_tx[kLeapfrogHeight]->GetHash(),
+                                   fb, fp));
+        }
+
+        idx.Stop();
+    }
+    g_chainstate.Cleanup();
+}
+
+// PR-7G E.4: EraseBlock failure sets the sticky m_corrupted flag.
+// Uses the g_force_eraseblock_failure test-hook seam to inject a
+// leveldb write failure without filesystem fragility. Asserts:
+//   (a) IsCorrupted() flips to true after the failure;
+//   (b) IsCorrupted() is sticky across subsequent successful operations;
+//   (c) WipeIndex() (the C7 / --reindex path) clears the flag.
+BOOST_AUTO_TEST_CASE(eraseblock_failure_sets_corrupted_flag) {
+    TempDbScope scope_idx("e4_idx");
+    TempDbScope scope_chain("e4_chain");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+
+    constexpr int kN = 3;
+    ChainFixture fix;
+    fix.Build(kN, chain_db);
+
+    {
+        CTxIndex idx;
+        BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db));
+
+        // Write block at height 0 so EraseBlock has something to undo.
+        CBlock blk0 = MakeBlock({fix.per_height_tx[0]});
+        blk0.hashPrevBlock = uint256();
+        BOOST_REQUIRE(idx.WriteBlock(blk0, 0, fix.per_height_hash[0]));
+        BOOST_REQUIRE(!idx.IsCorrupted());
+
+        // Inject leveldb-failure into EraseBlock.
+        tx_index_test_hooks::g_force_eraseblock_failure.store(true);
+        const bool erased = idx.EraseBlock(blk0, 0, fix.per_height_hash[0]);
+        tx_index_test_hooks::g_force_eraseblock_failure.store(false);
+
+        BOOST_CHECK(!erased);          // EraseBlock surfaced the leveldb failure
+        BOOST_CHECK(idx.IsCorrupted()); // sticky flag is set
+
+        // Stickiness: subsequent successful WriteBlock at height 1 does NOT
+        // clear the flag. (The flag is intentionally sticky; only WipeIndex
+        // or process restart clears it.)
+        CBlock blk1 = MakeBlock({fix.per_height_tx[1]});
+        blk1.hashPrevBlock = fix.per_height_hash[0];
+        (void)idx.WriteBlock(blk1, 1, fix.per_height_hash[1]);
+        BOOST_CHECK(idx.IsCorrupted());
+
+        idx.Stop();
+        // idx destructs at scope exit, releasing the leveldb LOCK file
+        // so the raw-DB::Open below can acquire it.
+    }
+
+    // PR-7G C2: extend the test to actually exercise the C7 wipe path.
+    // The pre-fix docstring promised "WipeIndex() clears the flag" but
+    // the body never exercised it. Now we forge a deliberately-wrong
+    // truncated hash so the C7 startup integrity check
+    // (tx_index.cpp:208-296) detects mismatch on Init re-open and
+    // invokes WipeIndex(). The forged height (0) matches the chain's
+    // genesis height -- C7 only fires when chainstate has a block at
+    // the recorded height (otherwise it leaves the index untouched).
+    {
+        leveldb::DB* raw = nullptr;
+        leveldb::Options opts;
+        opts.create_if_missing = false;
+        BOOST_REQUIRE(leveldb::DB::Open(opts, scope_idx.path(), &raw).ok());
+        std::unique_ptr<leveldb::DB> raw_db(raw);
+
+        std::string meta_key("\x00meta", 5);
+        char value[13];
+        std::memset(value, 0, 13);
+        value[0] = 0x01;       // SCHEMA_VERSION
+        int32_t h = 0;
+        std::memcpy(&value[1], &h, 4);
+        std::memset(&value[5], 0xCC, 8);   // wrong truncated hash
+        BOOST_REQUIRE(raw_db->Put(leveldb::WriteOptions(),
+                                  leveldb::Slice(meta_key.data(), meta_key.size()),
+                                  leveldb::Slice(value, 13)).ok());
+    }
+
+    // Re-open via a fresh CTxIndex. Init() reads forged meta, runs C7,
+    // detects truncated-hash mismatch against chainstate, calls
+    // WipeIndex() which (per R2) sets m_corrupted=false on success.
+    // Observable proof that WipeIndex actually ran: LastIndexedHeight is
+    // reset to -1 (Init line 287). The flag-clears claim is the
+    // post-condition `!idx2.IsCorrupted()` -- on a fresh instance the
+    // flag starts false, but a buggy WipeIndex that mistakenly raised
+    // the flag (or a regression that skipped the store(false) line)
+    // would surface here.
+    {
+        CTxIndex idx2;
+        BOOST_REQUIRE(idx2.Init(scope_idx.path(), &chain_db));
+        BOOST_CHECK_EQUAL(idx2.LastIndexedHeight(), -1);
+        BOOST_CHECK(!idx2.IsCorrupted());
+        idx2.Stop();
+    }
+
+    g_chainstate.Cleanup();
+}
+
+// PR-7G E.5: Init rejects pathological INT_MAX meta height. Without the
+// R5 bound check, SyncLoop's `current = m_last_height + 1` overflows and
+// wraps to INT_MIN, causing a near-2^31-iteration hang. The R5 fix
+// detects the out-of-bounds value, wipes, and treats as cold-start.
+BOOST_AUTO_TEST_CASE(init_rejects_int_max_meta) {
+    TempDbScope scope_idx("e5_idx");
+    TempDbScope scope_chain("e5_chain");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+
+    constexpr int kN = 3;
+    ChainFixture fix;
+    fix.Build(kN, chain_db);
+
+    // Open the leveldb directly and forge a meta with last_indexed=INT_MAX.
+    {
+        leveldb::DB* raw = nullptr;
+        leveldb::Options opts;
+        opts.create_if_missing = true;
+        BOOST_REQUIRE(leveldb::DB::Open(opts, scope_idx.path(), &raw).ok());
+        std::unique_ptr<leveldb::DB> raw_db(raw);
+
+        std::string meta_key("\x00meta", 5);
+        char value[13];
+        std::memset(value, 0, 13);
+        value[0] = 0x01;
+        int32_t h = std::numeric_limits<int32_t>::max();
+        std::memcpy(&value[1], &h, 4);
+        std::memset(&value[5], 0xAB, 8);
+        BOOST_REQUIRE(raw_db->Put(leveldb::WriteOptions(),
+                                  leveldb::Slice(meta_key.data(), meta_key.size()),
+                                  leveldb::Slice(value, 13)).ok());
+    }
+
+    // Re-open via CTxIndex::Init. R5 must detect, wipe, and reset to -1.
+    {
+        CTxIndex idx;
+        BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db));
+        BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), -1);
+
+        // Run a brief reindex pass to confirm SyncLoop does not overflow
+        // / hang. With the bound check, walk_start = -1 + 1 = 0, which
+        // matches the expected cold-start path; without the check, the
+        // overflow would make the loop run for billions of iterations
+        // and the test harness would time out at 5s.
+        idx.StartBackgroundSync();
+        BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
+        BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), kN - 1);
+        idx.Stop();
+    }
+    g_chainstate.Cleanup();
+}
+
+// PR-7G E.6: WalkBlockRange skips heights with TWO competing blocks
+// where NEITHER is on main chain. Build a 3-block fixture (heights 0..2),
+// then inject a SECOND block at height 1 (alongside the existing main-
+// chain block at height 1), and clear pnext on the original height-1
+// block so neither competitor advertises IsOnMainChain. The walker
+// must encounter hashes.size()==2 at height 1 with !found_main and
+// skip rather than write the wrong block (FA-MD-5 simulation).
+BOOST_AUTO_TEST_CASE(reindex_skips_height_with_no_main_chain) {
+    TempDbScope scope_idx("e6_idx");
+    TempDbScope scope_chain("e6_chain");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+
+    constexpr int kN = 3;       // heights 0, 1, 2
+    ChainFixture fix;
+    fix.Build(kN, chain_db);
+
+    constexpr int kContested = 1;
+    CBlockIndex* prev_idx = g_chainstate.GetBlockIndex(fix.per_height_hash[0]);
+    CBlockIndex* main_at_contested =
+        g_chainstate.GetBlockIndex(fix.per_height_hash[kContested]);
+    BOOST_REQUIRE(prev_idx != nullptr);
+    BOOST_REQUIRE(main_at_contested != nullptr);
+
+    // Inject a second competing block at the contested height.
+    auto tx_competitor = MakeUniqueTx(0xA1, 0x10);
+    CBlock blk_competitor = MakeBlock({tx_competitor});
+    blk_competitor.hashPrevBlock = fix.per_height_hash[0];
+
+    uint256 hash_competitor = MakeBlockHash(0x71);
+    BOOST_REQUIRE(chain_db.WriteBlock(hash_competitor, blk_competitor));
+
+    auto pidx_competitor = std::make_unique<CBlockIndex>();
+    pidx_competitor->nHeight = kContested;
+    pidx_competitor->phashBlock = hash_competitor;
+    pidx_competitor->pprev = prev_idx;
+    pidx_competitor->pnext = nullptr;       // !IsOnMainChain
+    pidx_competitor->nStatus = CBlockIndex::BLOCK_VALID_HEADER |
+                               CBlockIndex::BLOCK_HAVE_DATA;
+    BOOST_REQUIRE(g_chainstate.AddBlockIndex(hash_competitor,
+                                              std::move(pidx_competitor)));
+
+    // Clear pnext on the original height-1 block so it ALSO reports
+    // !IsOnMainChain. Now both blocks at height 1 have pnext=nullptr.
+    main_at_contested->pnext = nullptr;
+
+    // Tip is still the height-2 block (its pnext is null naturally).
+    g_chainstate.SetTipForTest(
+        g_chainstate.GetBlockIndex(fix.per_height_hash[kN - 1]));
+
+    // Run the reindex. WalkBlockRange will:
+    //   - height 0: single hash, write it (m_last_height = 0)
+    //   - height 1: TWO hashes (main + competitor), neither has pnext;
+    //               !found_main && hashes.size() > 1 → bail walk
+    // The walk returns false; SyncLoop returns without setting m_synced.
+    // m_last_height stays at 0 (NOT advanced past contested height).
+    CTxIndex idx;
+    BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db));
+    idx.StartBackgroundSync();
+
+    // Wait briefly for the walk to bail. Without success there is no
+    // m_synced=true to wait for; we just need the thread to complete.
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    idx.Stop();
+
+    // The contested-height records (both candidates) must NOT be found.
+    {
+        uint256 fb;
+        uint32_t fp = 0;
+        BOOST_CHECK(!idx.FindTx(tx_competitor->GetHash(), fb, fp));
+        BOOST_CHECK(!idx.FindTx(fix.per_height_tx[kContested]->GetHash(),
+                                fb, fp));
+    }
+
+    // Height 0 IS findable (it was unambiguous and walked first).
+    {
+        uint256 fb;
+        uint32_t fp = 0;
+        BOOST_CHECK(idx.FindTx(fix.per_height_tx[0]->GetHash(), fb, fp));
+    }
+
+    // m_last_height was NOT advanced past the contested height.
+    BOOST_CHECK_LT(idx.LastIndexedHeight(), kContested);
+
+    // The walk bailed; m_synced stays false so operators detect.
+    BOOST_CHECK(!idx.IsSynced());
+
     g_chainstate.Cleanup();
 }
 

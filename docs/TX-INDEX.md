@@ -82,27 +82,35 @@ Dilithion stores blocks keyed by hash in leveldb, not in flat files --
 
 1. **Connect callback thread** (chain validator). Fires from
    `CChainState::ActivateBestChain` after each successful block connect.
-   Calls `g_tx_index->WriteBlock(block, height, hash)`. **Holds `cs_main`**
-   when the callback fires (verified at `src/consensus/chain.cpp:1289`,
-   contract reference line 1474). The recursive nature of `cs_main` means
-   the callback's thread already owns the lock; `WriteBlock` therefore must
-   not call any function that re-enters `CChainState`.
+   Calls `g_tx_index->WriteBlock(block, height, hash)` **only when
+   `IsSynced()` is true** (PR-7G R1: live callbacks are gated until the
+   reindex thread has caught up). **Holds `cs_main`** when the callback
+   fires (verified at the connect callback firing site in
+   `src/consensus/chain.cpp`'s `ConnectTip`). The recursive nature of
+   `cs_main` means the callback's thread already owns the lock;
+   `WriteBlock` therefore must not call any function that re-enters
+   `CChainState`.
 2. **Disconnect callback thread** (chain validator). Fires from
    `CChainState::DisconnectTip` after a successful disconnect. Calls
-   `g_tx_index->EraseBlock(block, height, hash)`. **Does NOT hold `cs_main`**
-   when the callback fires (verified at `src/consensus/chain.cpp:1465`,
-   contract reference line 1656; the in-tree comment at chain.cpp lines
-   1283-1285 and 1460-1462 claiming "We don't hold cs_main during callbacks"
-   is correct ONLY for the disconnect path).
+   `g_tx_index->EraseBlock(block, height, hash)` **only when
+   `IsSynced()` is true** (same PR-7G gate). **Does NOT hold `cs_main`**
+   when the callback fires (verified at the disconnect callback firing
+   site in `src/consensus/chain.cpp`'s `DisconnectTip`; the in-tree
+   comment claiming "We don't hold cs_main during callbacks" is correct
+   ONLY for the disconnect path).
 3. **Reindex thread** (owned by `CTxIndex::m_sync_thread`). Spawned by
-   `StartBackgroundSync()`; iterates heights from `last_indexed + 1` to
-   the tip-height snapshot taken once at thread entry, resolving each
-   height to a block hash via `g_chainstate.GetBlocksAtHeight(h)` (and
-   preferring the on-main-chain block via `IsOnMainChain()` when more
-   than one block exists at that height), reads each block from the
-   block store, and writes the corresponding tx records. Holds `m_mutex`
-   only inside `WriteBlock` (never while calling into `CChainState`).
-   Honors `m_interrupt` between blocks.
+   `StartBackgroundSync()`; runs `SyncLoop` which wraps an outer loop
+   around `WalkBlockRange`. The outer loop walks heights from
+   `m_last_height + 1` to a snapshotted tip, then re-reads
+   `g_chainstate.GetTip()->nHeight`. If the tip advanced during the
+   walk, the outer loop bumps `current_target` and walks again.
+   `m_synced` is set to `true` (release ordering) ONLY when the tip is
+   stable across a full walk pass. Inside `WalkBlockRange`: each height
+   is resolved to a block hash via `g_chainstate.GetBlocksAtHeight(h)`
+   (preferring the on-main-chain block via `IsOnMainChain()`); blocks
+   are read from `m_chain_db` and written via `WriteBlock`. Holds
+   `m_mutex` only inside `WriteBlock` (never while calling into
+   `CChainState`). Honors `m_interrupt` at every iteration.
 
 ### The `cs_main` asymmetry
 
@@ -125,14 +133,85 @@ within it:
   `CChainState`. The RPC caller takes any chain locks separately, after
   `FindTx` returns.
 
-### Live-vs-reindex gating
+### Live-vs-reindex gating (Bitcoin Core BaseIndex pattern)
 
-Without gating, the reindex thread and the live callback could race on the
-same block (reindex catching up while IBD progresses). The fix is in
-`CTxIndex::WriteBlock`: under `m_mutex`, it short-circuits if
-`height <= m_last_height`. Strict monotonic meta. This makes both writers
-safe regardless of arrival order and makes the operation idempotent under
-the legitimate retry case (e.g., disconnect-reconnect cycle).
+The reindex thread and live callbacks are temporally separated, not
+concurrently serialized. While the reindex thread is catching up
+(`m_synced=false`), the live connect/disconnect callback lambdas
+short-circuit:
+
+```cpp
+if (g_tx_index && g_tx_index->IsSynced() &&
+    !g_tx_index->WriteBlock(b, h, hh)) { ... }
+```
+
+This is the Bitcoin Core BaseIndex pattern. The reindex thread is the
+SOLE writer to the index until catchup completes. After that, the
+reindex thread has exited and only the live callbacks update the index.
+
+The C1 monotonicity guard in `WriteBlock` (`if (height <=
+m_last_height) return true`) is **preserved** as defense-in-depth. Under
+the new gating, it can only fire on legitimate same-height duplicates
+(e.g., an idempotent disconnect+reconnect at the same height). The
+"leapfrog" failure mode that the original "both writers race" strategy
+exposed (see plan §4 historical context) is closed by the gate, not by
+changing the C1 guard.
+
+#### Outer-loop tip rebase (R1)
+
+`SyncLoop` wraps an outer loop around `WalkBlockRange`. Each pass
+walks `[m_last_height+1, current_target]`, then re-reads
+`g_chainstate.GetTip()->nHeight`. If the tip advanced during the walk,
+the outer loop bumps `current_target` and walks the newly-visible
+range. `m_synced.store(true)` happens ONLY when the tip is stable
+across a full walk pass (no advancement during the most recent walk).
+
+This guarantees: if `IsSynced()` returns true, every block at heights
+`[0, current_target]` is in the index. The loop cannot be blindsided
+by a tip advance during its walk because it always re-reads after
+walking.
+
+#### Failure modes that leave `m_synced=false`
+
+Operators detect incomplete state by polling `IsSynced()`:
+
+- **R4 — WriteBlock failure during reindex.** Inside
+  `WalkBlockRange`, a `WriteBlock` failure (e.g. disk full) returns
+  false. SyncLoop returns without setting `m_synced=true`.
+- **R6 — contested-height with no main-chain block.** When
+  `GetBlocksAtHeight(h)` returns multiple candidates and NONE is on
+  the main chain (mid-reorg), `WalkBlockRange` returns false. Same
+  effect. After the reorg settles, a subsequent
+  `StartBackgroundSync` re-walks cleanly.
+- **EraseBlock failure (post-sync).** `EraseBlock` failure during
+  normal operation sets the sticky `m_corrupted` flag (R2). The RPC
+  fast-path checks `IsCorrupted()` before `FindTx` and falls through
+  to the legacy tip-walk if true. The flag is sticky until
+  `WipeIndex()` succeeds (the `--reindex` path) or process restart.
+
+#### Known limitation: single-candidate chain-recession during reindex
+
+R6's bail logic only fires on **multi-candidate** contested heights
+(`hashes.size() > 1 && !found_main`). The single-candidate non-main-
+chain case still falls through to `hashes.front()` because the
+genuine current tip block reads as `!IsOnMainChain()` (its `pnext`
+is null until something extends it) and the reindex must be able to
+write the tip.
+
+Edge case: if the chain RECEDES during a walk (a deep reorg drops
+the tip below `current_target`), heights between the new tip and
+`current_target` may have orphaned single-candidate blocks. The
+walker writes those records, and SyncLoop's tip-rebase
+(`if (tip_now <= current_target) m_synced=true`) then sets
+`m_synced=true` with the now-stale records on disk. The records
+will surface as `MismatchCount` increments at RPC paranoia-check
+time (L3), but they persist until the next `--reindex`.
+
+This is **pre-existing behavior** (not regressed by the FA-HI-1
+fix). Operators concerned about reorg-during-reindex correctness
+should re-run with `--reindex` after any deep reorg observed during
+the initial sync. Filed as `TXINDEX-FA-LO-4` for follow-up
+hardening.
 
 ## Lifecycle
 
@@ -270,9 +349,12 @@ re-acknowledge the rebuild.
 * `src/rpc/server.cpp` -- surgical fast-path branch in
   `RPC_GetRawTransaction` and `RPC_GetTransaction`: `FindTx`, `ReadBlock`,
   paranoia check, fall-through to legacy tip-walk on any anomaly.
-* `src/consensus/chain.cpp` -- callback hook sites at lines 1289 (connect)
-  and 1465 (disconnect); the `cs_main` asymmetry documented in the
-  Threading model section above.
+* `src/consensus/chain.cpp` -- the connect callback firing site
+  (`ConnectTip`) and the disconnect callback firing site
+  (`DisconnectTip`); the `cs_main` asymmetry documented in the
+  Threading model section above. Anchor strings rather than literal
+  line numbers (PR-7G L1) — line numbers drift when chain.cpp is
+  edited; greppable site names do not.
 * `src/test/tx_index_tests.cpp` -- 26 unit cases covering Init, schema
   versioning, monotonicity, reindex happy path, reindex resume across
   destruct, C7 wipe atomicity, stale-LOCK error path, stop-mid-walk
