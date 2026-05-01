@@ -38,6 +38,12 @@ void CRPCPermissions::InitializeMethodPermissions() {
     m_methodPermissions["decoderawtransaction"] = readBlockchain;
     m_methodPermissions["getnetworkinfo"]     = readBlockchain;
     m_methodPermissions["getpeerinfo"]        = readBlockchain;
+    // T1.B-2 (testmempoolaccept BC v28.0 port): read-only-equivalent. Does NOT
+    // mutate mempool (CTxMemPool::TestAccept is const + lock-protected). PR #39
+    // lesson: missing a permission entry is a HIGH-severity DoS surface --
+    // explicitly admit testmempoolaccept here so unknown-method fallback never
+    // applies.
+    m_methodPermissions["testmempoolaccept"]  = readBlockchain;
 
     // ========================================================================
     // Wallet Read Methods (READ_WALLET = 0x0002)
