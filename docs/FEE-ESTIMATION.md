@@ -61,6 +61,14 @@ between chainstate load and P2P listen activation:
   the estimator already saw the confirmations via the connect
   callback and does not need to be re-notified.
 
+  Ordering note: at `consensus/chain.cpp:1287->1311` the connect
+  callback fires FIRST, then `RemoveConfirmedTxs` cleans the
+  mempool. This ordering is significant for clarity. Reordering
+  would not break the estimator -- `processBlock` only inspects
+  its own tracked-set, not the mempool, so the confirms are
+  independent of mempool state at the time of the call -- but is
+  worth noting so future refactors don't trip over it.
+
 ### Shutdown
 
 Mirrors Bitcoin Core's `init.cpp Shutdown()` ordering exactly:
