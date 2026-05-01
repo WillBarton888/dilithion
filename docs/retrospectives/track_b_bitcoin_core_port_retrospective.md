@@ -1,7 +1,7 @@
 # Track B — Bitcoin Core Peer/IBD/Chain-Selection Port: Engineering Retrospective
 
 **Branch:** `port/bitcoin-core-peer-ibd`
-**Phases:** 0–10 (CLOSED 2026-04-26 → 2026-05-01)
+**Phases:** 0–10. Phases 0–9 CLOSED 2026-04-26 → 2026-05-01. Phase 10 close-readiness GO-WITH-CONCERNS pending PR10.6 close-stamp (Cursor Layer-1 + Layer-2 reviews complete; CONCERNs addressed in this revision). **Track B engineering substrate complete; three named operational follow-ups pending — see §7.5 below.** This retrospective is authored to support the close-stamp decision; it is itself part of the PR10.6 close gate, not a post-stamp artifact.
 **Scope:** port the peer-management, IBD, and chain-selection layer from Bitcoin Core v28.0 to Dilithion, replacing the in-house implementation that surfaced the 2026-04-25 incident.
 **Author:** engineering team (Will + Claude Opus 4.7).
 
@@ -82,7 +82,7 @@ Phase 7 published the **A1-vs-A2 decision callout**: at Phase 9+ default flip, t
 
 7 sub-PRs. Per-RPC unit tests (PR10.1) + atomic-snapshot getter APIs eliminating both Phase 9 race windows (PR10.2 — joint snapshot shipped per user direction "don't leave for later"; PR10.2-DEFERRAL-1 retracted) + block_fetcher fork-bias mechanism-isolation log + harness assertion (PR10.3) + production-grade aggregator script (PR10.5a, discharges 8-bullet item 2a) + registration manager regtest fast-path (PR10.5b, discharges 8-bullet item 2b after v0.1.5 hypothesis-falsification reframe) + this retrospective (PR10.4) + Phase 10 close brief (PR10.6).
 
-After Phase 10 close: 8-bullet pre-condition list items #1 + #2a + #2b discharged; item #2c (production run execution) + items #3-#8 remain Track A.
+After Phase 10 close: 8-bullet pre-condition list items #1 + #2a discharged; item #2b engineering substrate ✅ + operational validation ⏳ (deferred to Linux CI canonical sequencing or follow-up sub-PR per `phase_10_deferred_findings.md`); item #2c (production run execution) + items #3-#8 remain Track A.
 
 ---
 
@@ -207,7 +207,7 @@ The **8-bullet cumulative pre-condition list** for the Phase 9+ A1-vs-A2 Track A
 1. ✅ Phase 8 close — orchestration + harness + demo data published.
 2. ⏳ Production-grade bypass quantification run:
    - **2a.** ✅ Aggregator script (Phase 10 PR10.5a, commit `4f4137b`).
-   - **2b.** ✅ Regtest MIK parsing fix — registration manager regtest fast-path (Phase 10 PR10.5b).
+   - **2b.** ◐ Regtest MIK injection — engineering substrate ✅ (registration manager fast-path with chain-identity guard + wallet auto-create + harness flag changes; Phase 10 PR10.5b commits `f649d06` + `2f83e23`); operational harness validation ⏳ (deferred to Linux CI canonical sequencing or follow-up sub-PR per `phase_10_deferred_findings.md`).
    - **2c.** ⏳ Production-grade run executed (Linux CI + N=30+ + MIN_HEIGHT=150) + Layer-1 (Cursor) + Layer-2 (red-team) reviews on resulting decision-grade comparison.
 3. ⏳ `consensus_activation_policy.md` gate (14-day pre-announcement, 75% version-signaling threshold).
 4. ⏳ User + community review.
@@ -216,11 +216,21 @@ The **8-bullet cumulative pre-condition list** for the Phase 9+ A1-vs-A2 Track A
 7. ⏳ Wallet + exchange impact assessment.
 8. ⏳ Explorer reindex policy.
 
-**After Phase 10 close: items #1 + #2a + #2b discharged. Items #2c + #3-#8 remain Track A.**
+**After Phase 10 close: items #1 + #2a discharged; item #2b engineering substrate ✅ + operational validation ⏳; items #2c + #3-#8 remain Track A.**
 
 The Track A pickup point is concrete: the next decision-grade input needed is the production-grade run executed on Linux CI per the production-grade checklist in `phase_8_bypass_quantification_results.md`, with results aggregated by `tools/aggregate_phase8_bypass_quantification.py` and reviewed by Cursor + red-team agent. After that, items #3-#8 are operational/governance work that user + community + miners + integrators conduct directly.
 
-**Track B is DONE.** No further engineering deliverables remain in scope.
+## §7.5 — Explicit Track B follow-ups (NOT Phase 11+)
+
+**Track B engineering substrate is COMPLETE; three named operational follow-ups pending Linux CI canonical sequencing:**
+
+1. PR10.5b operational harness validation (full chain: registration manager → wallet → mining → MIK-bearing coinbase → MIK concentration measurement) — runs naturally as part of item #2c production-grade run on Linux CI; OR via a dedicated follow-up sub-PR contract.
+2. Stress scenario 6b mechanism-isolation distinction (single-block reorg via chain_selector vs multi-block competing fork via ForkManager) — deferred to follow-up sub-PR per `four_node_local.sh:540-552`.
+3. PR10.2-RT-INFO-2 TSAN sweep on the joint-snapshot path against the stress harness — deferred to Linux CI per `phase_10_deferred_findings.md`.
+
+**These three follow-ups are explicit Track B engineering items, NOT Phase 11+ unscoped work.** They require either Linux CI execution (which runs alongside item #2c) or a dedicated follow-up sub-PR contract. They do NOT require additional plan-revision cycles — the engineering substrate they validate is already shipped.
+
+After these three follow-ups discharge, Track B is genuinely DONE. Until then, the honest framing is **"substrate complete; three named follow-ups pending."**
 
 ---
 

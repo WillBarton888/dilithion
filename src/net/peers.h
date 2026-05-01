@@ -297,12 +297,13 @@ public:
      * the locked region — producing a joint atomic snapshot.
      *
      * **Lock-ordering safety (audited PR10.2 2026-05-01; refined per
-     * Layer-2 PR10.2-RT-LOW-1):** the established Dilithion order is
+     * Layer-2 PR10.2-RT-LOW-1; line numbers corrected per Layer-2
+     * PR10.6-RT-LOW-1):** the established Dilithion order is
      * `cs_peers → block_tracker.m_mutex` at TWO genuinely-nested
-     * precedent sites (`MarkBlockAsInFlight` at peers.cpp:1098,
-     * `GetBlocksInFlightForPeer` at peers.cpp:1240). `OnPeerDisconnected`
-     * is sequential, not nested, so it is not a precedent for this
-     * pattern.
+     * precedent sites (`MarkBlockAsInFlight` defined at peers.cpp:1085,
+     * `GetBlocksInFlightForPeer` defined at peers.cpp:1242).
+     * `OnPeerDisconnected` is sequential, not nested, so it is not a
+     * precedent for this pattern.
      *
      * The inverse order is structurally impossible per block_tracker's
      * encapsulation invariant: `CBlockTracker` only acquires `m_mutex`

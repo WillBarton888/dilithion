@@ -431,7 +431,8 @@ private:
     //   state touch INTO this class from inside m_mutex's locked scope
     //   would silently break PR10.2's safety claim and could introduce
     //   deadlock with CPeerManager::GetBlockDownloadSnapshot or
-    //   peers.cpp:1098 / :1240 nested-lock sites. Don't.
+    //   peers.cpp:1085 / :1242 nested-lock sites (PR10.6-RT-LOW-1
+    //   corrected line numbers from initial PR10.2 commit). Don't.
     mutable std::mutex m_mutex;
 
     // Heights that are already in DB (no need to request)
