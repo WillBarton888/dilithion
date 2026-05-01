@@ -6,6 +6,7 @@
 
 #include <primitives/transaction.h>
 #include <primitives/block.h>
+#include <node/undo_data.h>
 #include <leveldb/db.h>
 #include <string>
 #include <memory>
@@ -181,6 +182,28 @@ public:
      * @return true if an undo_<blockhash> entry exists in LevelDB
      */
     bool HasUndoData(const uint256& blockHash) const;
+
+    /**
+     * Read undo data for a block as a structured CBlockUndo.
+     *
+     * Read-only accessor on the existing on-disk format (key "undo_<blockhash>"
+     * written by ApplyBlock; consumed and deleted by UndoBlock). Does NOT
+     * mutate disk or the UTXO cache.
+     *
+     * Layout, validation, and the deviation from Bitcoin Core's per-tx
+     * grouping are documented in node/undo_data.h. The SHA3-256 footer is
+     * verified before parsing; corruption surfaces as a `false` return with
+     * `undo_out` left in an unspecified state, never a crash.
+     *
+     * Foundational accessor for block-analytics consumers (per-block fee
+     * aggregation, coinstatsindex). PR-BA-1 in the block-analytics bundle.
+     *
+     * @param blockHash The block hash whose undo data to read
+     * @param undo_out  Filled with the parsed block undo on success
+     * @return true on success; false if the entry is missing, truncated, or
+     *         the SHA3-256 footer fails to verify.
+     */
+    bool ReadUndoBlock(const uint256& blockHash, CBlockUndo& undo_out) const;
 
     /**
      * Flush all pending changes to disk
