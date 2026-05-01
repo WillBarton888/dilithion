@@ -160,19 +160,66 @@ BOOST_AUTO_TEST_CASE(zmq_publish_lifecycle_roundtrip)
 
     BOOST_REQUIRE(pub.Initialize(ctx));
 
-    // Set up a subscriber on the same context and wait for it to connect.
-    // libzmq's PUB/SUB has a slow-joiner problem: messages sent before the
-    // SUB has finished its handshake are dropped. We mitigate by sleeping
-    // 50ms after subscribe -- more than enough for loopback tcp.
+    // Set up a subscriber on the same context.
     void* sub = zmq_socket(ctx, ZMQ_SUB);
     BOOST_REQUIRE(sub != nullptr);
     BOOST_REQUIRE_EQUAL(zmq_connect(sub, kTestEndpoint), 0);
     BOOST_REQUIRE_EQUAL(zmq_setsockopt(sub, ZMQ_SUBSCRIBE, "", 0), 0);
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    // libzmq's PUB/SUB has a slow-joiner problem: messages sent before the
+    // SUB has finished its handshake are silently dropped. The previous
+    // test slept a fixed 100ms (with a comment claiming 50ms -- another
+    // bug); that is fragile on Windows CI under load.
+    //
+    // Replaced with a warmup loop that publishes throwaway "warmup"
+    // messages on a distinct topic until the SUB drains one, proving the
+    // handshake completed. This bounds the wait at roughly the actual
+    // handshake time instead of a worst-case constant. zmq_socket_monitor
+    // would be marginally cleaner but adds >20 LOC for the event-API
+    // boilerplate; the warmup loop hits the same goal.
+    //
+    // Each warmup send DOES advance the publisher's nSequence (the publisher
+    // has no way to know which messages were dropped vs delivered). We
+    // therefore probe the post-warmup sequence number directly off the
+    // wire and use that as the baseline for the real-message assertions.
+    constexpr int kWarmupAttempts = 50;            // ~5s worst case
+    constexpr int kWarmupPollMs = 100;
+    bool warmed = false;
+    for (int i = 0; i < kWarmupAttempts && !warmed; ++i) {
+        BOOST_REQUIRE(pub.SendZmqMessage("warmup", nullptr, 0));
+        auto frames = RecvAllFrames(sub, kWarmupPollMs);
+        if (!frames.empty()) {
+            warmed = true;
+        }
+    }
+    BOOST_REQUIRE(warmed);
+
+    // Drain any additional warmup frames still queued at the SUB so the
+    // real-message asserts below start from a clean queue.
+    while (!RecvAllFrames(sub, 10).empty()) {
+        // discard
+    }
+
+    // Probe the publisher's current sequence by sending one marker message
+    // and reading the seq frame off the wire. The next real message must
+    // have sequence == marker_seq + 1.
+    uint32_t seq_baseline = 0;
+    {
+        unsigned char marker[1] = {0xff};
+        BOOST_REQUIRE(pub.SendZmqMessage("marker", marker, 1));
+        auto frames = RecvAllFrames(sub, 1000);
+        BOOST_REQUIRE_EQUAL(frames.size(), 3u);
+        BOOST_REQUIRE_EQUAL(frames[2].size(), 4u);
+        seq_baseline = static_cast<uint32_t>(frames[2][0])
+                     | (static_cast<uint32_t>(frames[2][1]) << 8)
+                     | (static_cast<uint32_t>(frames[2][2]) << 16)
+                     | (static_cast<uint32_t>(frames[2][3]) << 24);
+        seq_baseline += 1;  // next expected
+    }
 
     // Send 3 messages and assert the subscriber receives each with the
-    // expected 3-frame layout and a strictly increasing nSequence.
+    // expected 3-frame layout and strictly increasing nSequence starting at
+    // seq_baseline.
     const char kTopic[] = "hashblock";
     unsigned char payload[32];
     for (unsigned i = 0; i < 32; ++i) payload[i] = static_cast<unsigned char>(i);
@@ -202,9 +249,9 @@ BOOST_AUTO_TEST_CASE(zmq_publish_lifecycle_roundtrip)
     }
 
     BOOST_REQUIRE_EQUAL(got_sequences.size(), 3u);
-    BOOST_CHECK_EQUAL(got_sequences[0], 0u);
-    BOOST_CHECK_EQUAL(got_sequences[1], 1u);
-    BOOST_CHECK_EQUAL(got_sequences[2], 2u);
+    BOOST_CHECK_EQUAL(got_sequences[0], seq_baseline);
+    BOOST_CHECK_EQUAL(got_sequences[1], seq_baseline + 1u);
+    BOOST_CHECK_EQUAL(got_sequences[2], seq_baseline + 2u);
 
     // Tear down. ZMQ_LINGER=0 in Shutdown() ensures we don't hang.
     int linger = 0;
