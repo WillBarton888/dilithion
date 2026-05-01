@@ -116,9 +116,15 @@ bool CoinStatsApplyBlock(CoinStats& stats,
                             /*fAddition=*/false);
         stats.blockRemovals += 1;
         stats.blockTotalIn  += sp.out.nValue;
-        if (stats.coinsCount > 0) {
-            stats.coinsCount -= 1;
+        // Symmetric underflow handling (L1): both coinsCount and totalAmount
+        // must be at least the removal value. An underflow on either side is
+        // a hard upstream-corruption indicator (undo data referencing a coin
+        // not present in the running stats); refuse the apply rather than
+        // silently saturating.
+        if (stats.coinsCount == 0) {
+            return false;
         }
+        stats.coinsCount -= 1;
         if (stats.totalAmount >= sp.out.nValue) {
             stats.totalAmount -= sp.out.nValue;
         } else {
