@@ -459,6 +459,30 @@ public:
     void RegisterWallet(CWallet* wallet) { m_wallet = wallet; }
 
     /**
+     * @brief Test-only seam: invoke a registered RPC handler by name.
+     *
+     * Phase 10 PR10.1 unit tests need to call individual RPC_* handlers
+     * (Phase 9 PR9.3 telemetry surface) without going through the full
+     * HTTP socket + JSON-RPC envelope path. The handlers themselves are
+     * private; this seam routes through the existing public m_handlers
+     * dispatch table — same path the production HTTP handler uses.
+     *
+     * Returns the handler's raw response string. If `method` is unknown,
+     * returns an error JSON. No CSRF / permission check is performed
+     * (test-only — production HTTP path enforces those upstream).
+     *
+     * @param method RPC method name (e.g. "getsyncstatus").
+     * @param params JSON params string (typically "[]" for parameterless).
+     */
+    std::string InvokeRPCForTest(const std::string& method, const std::string& params) {
+        auto it = m_handlers.find(method);
+        if (it == m_handlers.end()) {
+            return "{\"error\":\"unknown method: " + method + "\"}";
+        }
+        return it->second(params);
+    }
+
+    /**
      * Register miner instance
      */
     void RegisterMiner(CMiningController* miner) { m_miner = miner; }

@@ -588,6 +588,15 @@ fork_staging_legacy_path_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fork_staging_leg
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ fork_staging_legacy_path_tests built successfully$(COLOR_RESET)"
 
+# Phase 10 PR10.1: per-RPC unit tests for Phase 9 telemetry surface.
+# 9 cases locking v0.1.2 schemas of getsyncstatus + getblockdownloadstats
+# + getpeerinfo manager_class extension. Closes Cursor Phase 9 S4 + Layer-2
+# PR9.6-RT-MEDIUM-2 enhancement filings.
+phase_9_telemetry_rpc_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase_9_telemetry_rpc_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ phase_9_telemetry_rpc_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.1: HeadersManager → chain_selector wiring tests (5 cases).
 # Verifies happy-path, idempotency, orphan, rejected-parent flood,
 # cap-saturation per v1.5 plan §4 PR6.1.
