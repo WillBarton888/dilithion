@@ -151,6 +151,12 @@ private:
     // Data directory (for swap state persistence)
     std::string m_dataDir;
 
+    // Mirror of -persistmempool flag (default true). PR-MP-FIX Finding #8:
+    // savemempool RPC handler refuses to dump when this is false, so an
+    // operator who explicitly disabled persistence cannot have their
+    // on-disk state mutated by any RPC user.
+    bool m_persistMempool{true};
+
     // Atomic swap state store
     SwapStore m_swapStore;
 
@@ -497,6 +503,17 @@ public:
      */
     void SetDataDir(const std::string& dataDir);
 
+    /**
+     * Set whether mempool persistence is enabled (mirrors -persistmempool flag).
+     * Must be called before Start(). When false, the savemempool RPC handler
+     * refuses to dump (per Bitcoin Core v28.0 behaviour: an operator who
+     * explicitly disabled persistence should not have their on-disk state
+     * mutated by any RPC user).
+     *
+     * PR-MP-FIX (red-team Finding #8).
+     */
+    void SetPersistMempool(bool enabled) { m_persistMempool = enabled; }
+
 
     /** Increment session accepted-blocks counter (one of our MIK's blocks just connected to the chain) */
     void IncrementAcceptedSession() { ++m_acceptedSession; }
@@ -691,9 +708,13 @@ public:
     // Mempool persistence operator-on-demand save (Bitcoin Core port:
     // savemempool, src/rpc/mempool.cpp v28.0). Triggers an immediate
     // mempool.dat write without restarting the node. Returns
-    // {"path": "<absolute-path>"} on success or throws on failure.
+    // {"filename": "<absolute-path>"} on success or throws on failure.
+    // Refuses to dump when -persistmempool=0 was set (operator explicitly
+    // disabled persistence; mirrors BC v28.0 "Mempool was not loaded").
+    // Restricted to ADMIN_SERVER permission tier (see permissions.cpp).
     // Instance method (NOT static) because it consults m_mempool +
-    // m_dataDir; tests exercise via constructed CRPCServer instance.
+    // m_dataDir + m_persistMempool; tests exercise via constructed
+    // CRPCServer instance.
     std::string RPC_SaveMempool(const std::string& params);
 };
 

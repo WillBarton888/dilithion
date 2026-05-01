@@ -6333,6 +6333,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
         rpc_server.SetAttestationRateLimit(config.attestation_rate_limit);  // Sybil defense Phase 0
         rpc_server.SetDataDir(Dilithion::g_chainParams->dataDir);  // For swap state persistence
+        rpc_server.SetPersistMempool(config.persistmempool);  // PR-MP-FIX F#8: gate savemempool RPC
 
         // T1.B: wake any RPC worker parked on the wait-* condition variable.
         // Static dispatch so the callback never holds a stale CRPCServer

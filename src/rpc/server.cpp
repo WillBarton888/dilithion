@@ -5537,11 +5537,30 @@ std::string CRPCServer::RPC_GetIndexInfo(const std::string& params) {
 // tooling targeting BC's savemempool schema works against Dilithion
 // without modification.
 //
-// Throws: std::runtime_error on failure (mempool not registered, datadir
-// not set, or DumpMempool failure -- e.g. disk full, permissions).
+// Throws: std::runtime_error on failure. Specific reasons:
+//   - "Mempool not registered with RPC server" (server init error)
+//   - "Data directory not registered with RPC server" (server init error)
+//   - "Mempool was not loaded" (operator set -persistmempool=0; BC v28.0
+//     wording; PR-MP-FIX Finding #8)
+//   - "savemempool failed: <reason>" (DumpMempool failed: disk full,
+//     permissions, etc.)
+//
+// Permission tier: ADMIN_SERVER (PR-MP-FIX Finding #3). Read-only RPC
+// users cannot trigger this RPC. Restriction prevents DoS amplification
+// on --public-api seed nodes, where any authenticated remote client
+// could otherwise spam this RPC and serialize all other RPC traffic on
+// m_handlersMutex during the mempool snapshot + disk write.
+//
+// Concurrency: concurrent calls serialize via the dispatcher's
+// m_handlersMutex (taken in ExecuteRPC for every handler dispatch);
+// not via the mempool lock as a previous comment incorrectly claimed.
+// The mempool lock covers only the snapshot phase inside DumpMempool.
 //
 // No params. Object-style empty params object expected by JSON-RPC
-// dispatcher; we ignore the params content. The path string is JSON-
+// dispatcher; we ignore the params content. The path string is encoded
+// via std::filesystem::path::u8string() to ensure UTF-8 output for non-
+// ASCII paths (Windows paths returned by string() are in the active
+// code page, not UTF-8 -- PR-MP-FIX Finding #7). The result is JSON-
 // escaped for `\` and `"`; control characters (U+0000-U+001F) are
 // assumed not present because the path is operator-controlled (it's
 // the configured datadir, not attacker input).
@@ -5555,16 +5574,29 @@ std::string CRPCServer::RPC_SaveMempool(const std::string& params) {
         throw std::runtime_error("Data directory not registered with RPC server");
     }
 
+    // PR-MP-FIX Finding #8: respect the operator's -persistmempool=0 choice.
+    // BC v28.0 returns this exact error string when persistence is disabled.
+    if (!m_persistMempool) {
+        throw std::runtime_error("Mempool was not loaded");
+    }
+
     const auto result = mempool_persist::DumpMempool(
         *m_mempool, std::filesystem::path(m_dataDir));
     if (!result.success) {
         throw std::runtime_error("savemempool failed: " + result.error_message);
     }
 
+    // PR-MP-FIX Finding #7: use u8string() so non-ASCII paths round-trip
+    // as UTF-8 (Windows native string() is in the active code page).
+    // BC's UniValue layer outputs UTF-8; matching here keeps client
+    // tooling that targets BC's schema interoperable.
+    const std::filesystem::path final_path(result.final_path);
+    const std::string utf8_path = final_path.u8string();
+
     std::ostringstream oss;
     oss << "{\"filename\":\"";
     // Escape backslashes in Windows paths so the JSON stays valid.
-    for (char c : result.final_path) {
+    for (char c : utf8_path) {
         if (c == '\\') oss << "\\\\";
         else if (c == '"') oss << "\\\"";
         else oss << c;

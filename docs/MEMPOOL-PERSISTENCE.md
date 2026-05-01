@@ -201,7 +201,13 @@ Errors as JSON-RPC error responses if the mempool is not registered, the
 data directory is unset, or `DumpMempool` fails (disk full, permissions).
 
 The handler is safe to call repeatedly; each call atomically rewrites
-`mempool.dat`. Concurrent saves serialize on the mempool lock.
+`mempool.dat`. Concurrent calls serialize on the dispatcher's
+`m_handlersMutex` (every RPC handler dispatch is mutex-serialized);
+the mempool lock itself only covers the snapshot phase inside
+`DumpMempool`, not the file write or rename. The handler is
+restricted to the `ADMIN_SERVER` permission tier so a read-only
+client (e.g. a light-wallet or explorer credential on a
+`--public-api` seed) cannot trigger it.
 
 ### Recovery
 
@@ -282,8 +288,9 @@ DoS at startup.
 * `src/node/dilithion-node.cpp` and `src/node/dilv-node.cpp` -- startup
   `LoadMempool` and shutdown `DumpMempool` call sites + `--persistmempool`
   flag parsing.
-* `src/test/mempool_persist_tests.cpp` -- 16 Boost test cases covering
-  round-trip, atomicity, all cold-start branches, schema lock.
+* `src/test/mempool_persist_tests.cpp` -- 20 Boost test cases covering
+  round-trip, atomicity, all cold-start branches, schema lock, and the
+  savemempool RPC handler (positive + negative paths).
 
 ## Bitcoin Core lineage
 

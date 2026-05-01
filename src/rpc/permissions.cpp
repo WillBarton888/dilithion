@@ -134,6 +134,14 @@ void CRPCPermissions::InitializeMethodPermissions() {
     // v4.0.19: forcerebuild writes auto_rebuild marker and shuts down. Treated
     // as an admin-server operation alongside `stop` because it triggers shutdown.
     m_methodPermissions["forcerebuild"]       = adminServer;
+    // PR-MP-FIX (red-team Finding #3): savemempool triggers a synchronous
+    // mempool snapshot + disk write while serializing all other RPC traffic
+    // on m_handlersMutex. On --public-api seed nodes (NYC binds 0.0.0.0) a
+    // remote read-only client could otherwise spam this RPC and DoS the
+    // node. Authentication is not authorization -- restrict to admin tier
+    // explicitly. Matches Bitcoin Core v28.0's permission requirement for
+    // savemempool.
+    m_methodPermissions["savemempool"]        = adminServer;
 
     // ========================================================================
     // Public Methods (no permission required)
