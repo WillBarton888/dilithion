@@ -5,6 +5,12 @@
 //
 // Ported from Bitcoin Core v28.0 src/zmq/zmqutil.h
 // PR-Z-1: ZMQ notifications skeleton.
+//
+// ABI matches Bitcoin Core v28.0 except that the free functions and
+// constants in this header live in `namespace zmq_util` for hygiene
+// (BC has them at file scope). This is a deliberate quality improvement
+// over the upstream layout, NOT a verbatim port. The PR-Z-1 commit
+// message overstated this as 'verbatim'; corrected here.
 
 #ifndef DILITHION_ZMQ_ZMQUTIL_H
 #define DILITHION_ZMQ_ZMQUTIL_H

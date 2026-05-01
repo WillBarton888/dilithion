@@ -5,6 +5,9 @@
 //
 // Ported from Bitcoin Core v28.0 src/zmq/zmqutil.cpp
 // PR-Z-1: ZMQ notifications skeleton.
+//
+// ABI matches Bitcoin Core v28.0 except symbols are scoped to
+// `namespace zmq_util`. See zmqutil.h for the rationale.
 
 #include <zmq/zmqutil.h>
 
