@@ -232,6 +232,14 @@ bool CCoinStatsIndex::Init(const std::string& datadir,
 
     // Repopulate m_running from the on-disk last-indexed record so live
     // WriteBlock can fold incrementally without re-reading every time.
+    //
+    // M3 FIX: when the meta claims height=N but the record at N is missing
+    // or undecodable, do a full WipeIndex (mirroring the C7 / R5 path)
+    // rather than a soft in-memory reset. The soft reset left every record
+    // at heights 0..N-1 on disk; a subsequent reindex would write 0..N-1
+    // afresh but ANY records past the new tip would survive forever
+    // (since WriteBlock's monotonicity guard short-circuits at last+1).
+    // A full wipe guarantees no stale records past the new tip.
     if (height >= 0) {
         std::string key = MakeHeightKey(height);
         std::string value;
@@ -244,17 +252,41 @@ bool CCoinStatsIndex::Init(const std::string& datadir,
                 m_running = restored;
             } else {
                 std::cerr << "[coinstatsindex] last-indexed record at height "
-                          << height << " did not decode; resetting to cold."
+                          << height << " did not decode; wiping index to "
+                          << "guarantee no stale records past the new tip."
                           << std::endl;
-                m_running = CoinStats{};
+                lock.unlock();
+                const bool wiped = WipeIndex();
+                lock.lock();
+                if (!wiped) {
+                    std::cerr << "[coinstatsindex] integrity wipe failed; "
+                              << "closing index" << std::endl;
+                    m_db.reset();
+                    return false;
+                }
                 m_last_height.store(-1);
+                m_synced.store(false);
+                m_running = CoinStats{};
+                return true;
             }
         } else if (s2.IsNotFound()) {
             std::cerr << "[coinstatsindex] meta says height " << height
-                      << " but no record present; resetting to cold."
+                      << " but no record present; wiping index to "
+                      << "guarantee no stale records past the new tip."
                       << std::endl;
-            m_running = CoinStats{};
+            lock.unlock();
+            const bool wiped = WipeIndex();
+            lock.lock();
+            if (!wiped) {
+                std::cerr << "[coinstatsindex] integrity wipe failed; "
+                          << "closing index" << std::endl;
+                m_db.reset();
+                return false;
+            }
             m_last_height.store(-1);
+            m_synced.store(false);
+            m_running = CoinStats{};
+            return true;
         } else {
             std::cerr << "[coinstatsindex] error reading last-indexed record: "
                       << s2.ToString() << std::endl;
