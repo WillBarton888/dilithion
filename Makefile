@@ -39,7 +39,8 @@ INCLUDES := -I src \
             -I depends/randomx/src \
             -I depends/dilithium/ref \
             -I depends/chiavdf/src \
-            -I depends/chiavdf/src/c_bindings
+            -I depends/chiavdf/src/c_bindings \
+            -I depends/libzmq/include
 
 # Library paths and libraries (base)
 # Use ?= to allow environment to set initial LDFLAGS (e.g., --coverage)
@@ -49,16 +50,21 @@ LDFLAGS ?=
 # Platform-specific RandomX build directory
 ifeq ($(UNAME_S),Windows)
     RANDOMX_BUILD_DIR := depends/randomx/build-windows
+    LIBZMQ_BUILD_DIR := depends/libzmq/build-windows/lib
 else ifneq (,$(findstring MINGW,$(UNAME_S)))
     RANDOMX_BUILD_DIR := depends/randomx/build-windows
+    LIBZMQ_BUILD_DIR := depends/libzmq/build-windows/lib
 else ifneq (,$(findstring MSYS,$(UNAME_S)))
     RANDOMX_BUILD_DIR := depends/randomx/build-windows
+    LIBZMQ_BUILD_DIR := depends/libzmq/build-windows/lib
 else
     # Linux, macOS, and other Unix-like systems
     RANDOMX_BUILD_DIR := depends/randomx/build
+    LIBZMQ_BUILD_DIR := depends/libzmq/build/lib
 endif
 
 LDFLAGS += -L $(RANDOMX_BUILD_DIR) \
+           -L $(LIBZMQ_BUILD_DIR) \
            -L depends/dilithium/ref \
            -L /mingw64/lib \
            -L C:/msys64/mingw64/lib \
@@ -67,7 +73,13 @@ LDFLAGS += -L $(RANDOMX_BUILD_DIR) \
 # FIX-007 (CRYPT-001/006): Add OpenSSL for secure AES-256 implementation
 # Phase 2.2: Add dbghelp for Windows stack traces
 # PEER-DISCOVERY: Add miniupnpc for automatic UPnP port mapping
-LIBS := -lrandomx -lleveldb -lpthread -lssl -lcrypto -lminiupnpc -lgmpxx -lgmp
+# PR-Z-1: Add libzmq (static) for ZMQ publish notifications
+LIBS := -lrandomx -lzmq -lleveldb -lpthread -lssl -lcrypto -lminiupnpc -lgmpxx -lgmp
+
+# PR-Z-1: libzmq is built as a static library; ZMQ_STATIC must be defined
+# before <zmq.h> is included so the header does not emit DLL import attributes
+# on Windows (libzmq is built without -DDLL_EXPORT).
+CXXFLAGS += -DZMQ_STATIC
 
 # Platform-specific configuration
 ifeq ($(UNAME_S),Darwin)
@@ -273,6 +285,12 @@ SCRIPT_SOURCES := src/script/interpreter.cpp \
                   src/script/htlc.cpp \
                   src/script/atomic_swap.cpp
 
+# PR-Z-1: ZMQ publish-notifier skeleton. Per-topic publishers and chainstate /
+# mempool wiring land in PR-Z-2.
+ZMQ_SOURCES := src/zmq/zmqutil.cpp \
+               src/zmq/zmqabstractnotifier.cpp \
+               src/zmq/zmqpublishnotifier.cpp
+
 # Policy module: fee estimator + fee_estimates.dat persistence (BC port,
 # PR-EF-1). Pure module addition; mempool/chainstate hooks land in PR-EF-2,
 # RPC handlers land in PR-EF-3.
@@ -321,6 +339,7 @@ CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(X402_SOURCES) \
                 $(SCRIPT_SOURCES) \
                 $(POLICY_SOURCES) \
+                $(ZMQ_SOURCES) \
                 $(UTIL_SOURCES) \
                 $(WALLET_SOURCES)
 
@@ -395,12 +414,20 @@ all: dilithion-node dilv-node genesis_gen check-wallet-balance
 # Main Binaries
 # ============================================================================
 
-dilithion-node: $(CORE_OBJECTS) $(OBJ_DIR)/node/dilithion-node.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+# PR-Z-1 red-team F7: libzmq is an order-only prerequisite of every binary
+# that links it. Without this, a fresh clone + `make` races: object compiles
+# proceed in parallel before depends/libzmq/build*/lib/libzmq.a exists, and
+# the link step fails. Order-only ('|') means the dependency triggers a
+# build of libzmq if missing, but does not force a relink when libzmq's
+# mtime changes (libzmq is a vendored submodule, pinned).
+#
+# (RandomX has the same gap; deferred to a future cleanup -- out of scope.)
+dilithion-node: $(CORE_OBJECTS) $(OBJ_DIR)/node/dilithion-node.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS) | libzmq
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ dilithion-node built successfully$(COLOR_RESET)"
 
-dilv-node: $(CORE_OBJECTS) $(OBJ_DIR)/node/dilv-node.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+dilv-node: $(CORE_OBJECTS) $(OBJ_DIR)/node/dilv-node.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS) | libzmq
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ dilv-node built successfully$(COLOR_RESET)"
@@ -640,10 +667,12 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/fee_estimator_tests.o \
 	$(OBJ_DIR)/test/fee_persist_tests.o \
 	$(OBJ_DIR)/test/fee_wiring_tests.o \
+	$(OBJ_DIR)/test/zmq_tests.o \
 	$(CRYPTO_PROPERTY_OBJECTS)
 
 # Link test objects + full library (CORE_OBJECTS) to avoid hand-picked object drift
-test_dilithion: $(BOOST_TEST_OBJECTS) $(CORE_OBJECTS) $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+# PR-Z-1 red-team F7: order-only libzmq prerequisite (see dilithion-node).
+test_dilithion: $(BOOST_TEST_OBJECTS) $(CORE_OBJECTS) $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS) | libzmq
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Boost test suite built successfully$(COLOR_RESET)"
@@ -750,12 +779,13 @@ $(OBJ_DIR)/script \
 $(OBJ_DIR)/policy \
 $(OBJ_DIR)/tools \
 $(OBJ_DIR)/x402 \
+$(OBJ_DIR)/zmq \
 $(OBJ_DIR)/test \
 $(OBJ_DIR)/test/fuzz:
 	@mkdir -p $@
 
 # Compile C++ source files
-$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/index $(OBJ_DIR)/kernel $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/policy $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/test
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/index $(OBJ_DIR)/kernel $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/policy $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/zmq $(OBJ_DIR)/test
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
@@ -800,7 +830,53 @@ depends:
 	@cd depends/randomx && mkdir -p build-windows && cd build-windows && cmake -DCMAKE_SYSTEM_PROCESSOR=x86_64 -G "MSYS Makefiles" .. && make
 	@echo "$(COLOR_BLUE)[Dilithium]$(COLOR_RESET) Building Dilithium library..."
 	@cd depends/dilithium/ref && make
-	@echo "$(COLOR_GREEN)✓ Dependencies built$(COLOR_RESET)"
+	@echo "$(COLOR_BLUE)[libzmq]$(COLOR_RESET) Building libzmq static library..."
+	@$(MAKE) --no-print-directory libzmq
+	@echo "$(COLOR_GREEN)Dependencies built$(COLOR_RESET)"
+
+# PR-Z-1: libzmq build orchestration. Mirrors the chiavdf / RandomX submodule
+# pattern. The submodule is pinned to v4.3.5 (commit 622fc6dde9...).
+#
+# MSYS2 + libzmq quirk: upstream CMakeLists requires CMake < 3.5 policy
+# minimum (CMAKE_POLICY_VERSION_MINIMUM=3.5), and the MSYS Makefiles generator
+# misdetects the Windows IPC code path (no afunix.h on the GCC-Unix include
+# path), so we use MinGW Makefiles + ZMQ_HAVE_IPC=OFF on Windows. We don't
+# need IPC -- our publishers are TCP-only.
+#
+# On Linux / macOS the standard config works without the policy override and
+# IPC is supported natively.
+.PHONY: libzmq libzmq-clean
+libzmq:
+	@if [ ! -f $(LIBZMQ_BUILD_DIR)/libzmq.a ]; then \
+		echo "Configuring libzmq..."; \
+		case "$(UNAME_S)" in \
+			MINGW*|MSYS*|Windows) \
+				cd depends/libzmq && mkdir -p build-windows && cd build-windows && \
+				cmake -G 'MinGW Makefiles' \
+					-DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+					-DCMAKE_BUILD_TYPE=Release \
+					-DBUILD_SHARED=OFF -DBUILD_STATIC=ON \
+					-DBUILD_TESTS=OFF -DENABLE_CPACK=OFF \
+					-DENABLE_DRAFTS=OFF -DWITH_DOC=OFF -DWITH_DOCS=OFF \
+					-DWITH_LIBSODIUM=OFF -DZMQ_BUILD_TESTS=OFF \
+					-DZMQ_HAVE_IPC=OFF .. && \
+				mingw32-make -j4 ;; \
+			*) \
+				cd depends/libzmq && mkdir -p build && cd build && \
+				cmake -DCMAKE_POLICY_VERSION_MINIMUM=3.5 \
+					-DCMAKE_BUILD_TYPE=Release \
+					-DBUILD_SHARED=OFF -DBUILD_STATIC=ON \
+					-DBUILD_TESTS=OFF -DENABLE_CPACK=OFF \
+					-DENABLE_DRAFTS=OFF -DWITH_DOC=OFF -DWITH_DOCS=OFF \
+					-DWITH_LIBSODIUM=OFF -DZMQ_BUILD_TESTS=OFF .. && \
+				$(MAKE) -j4 ;; \
+		esac; \
+	else \
+		echo "[libzmq] already built"; \
+	fi
+
+libzmq-clean:
+	@rm -rf depends/libzmq/build depends/libzmq/build-windows
 
 # Include auto-generated header dependency files (-MMD -MP)
 # These ensure that changing any .h file triggers recompilation of all .cpp files that include it
@@ -818,6 +894,14 @@ clean:
 	@rm -f test_dilithion
 	@rm -f $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_GREEN)✓ Clean complete$(COLOR_RESET)"
+
+# PR-Z-1 red-team F8: distclean drops the libzmq build tree as well, so a
+# fresh-clone simulation (and the F7 verification) can run from a single
+# command. The PR-Z-3 runbook will document this for operators; landing
+# the target here keeps F7 fully verifiable today.
+.PHONY: distclean
+distclean: clean libzmq-clean
+	@echo "$(COLOR_GREEN)✓ Distclean complete (clean + libzmq-clean)$(COLOR_RESET)"
 
 install: dilithion-node genesis_gen
 	@echo "$(COLOR_YELLOW)Installing binaries...$(COLOR_RESET)"

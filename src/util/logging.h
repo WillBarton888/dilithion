@@ -44,6 +44,7 @@ enum class LogCategory : uint32_t {
     CONSENSUS = (1 << 5),     // Consensus validation
     IBD = (1 << 6),           // Initial Block Download
     VALIDATION = (1 << 7),    // Block/transaction validation
+    ZMQ = (1 << 8),           // ZMQ publish notifications
     ALL = 0xFFFFFFFF          // All categories
 };
 
@@ -156,6 +157,7 @@ private:
 #define LogPrintConsensus(level, format, ...) LogPrintf(CONSENSUS, level, format, ##__VA_ARGS__)
 #define LogPrintIBD(level, format, ...) LogPrintf(IBD, level, format, ##__VA_ARGS__)
 #define LogPrintValidation(level, format, ...) LogPrintf(VALIDATION, level, format, ##__VA_ARGS__)
+#define LogPrintZMQ(level, format, ...) LogPrintf(ZMQ, level, format, ##__VA_ARGS__)
 
 // Legacy compatibility (for gradual migration)
 #define LogInfo(...) LogPrintf(ALL, INFO, __VA_ARGS__)
