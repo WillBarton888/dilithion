@@ -6,6 +6,7 @@
 #include <node/mempool_persist.h>
 
 #include <node/mempool.h>
+#include <rpc/server.h>
 #include <crypto/sha3.h>
 #include <primitives/transaction.h>
 #include <uint256.h>
@@ -604,6 +605,67 @@ BOOST_AUTO_TEST_CASE(c6_bypass_fee_check_regression) {
     BOOST_CHECK(!load.cold_start);
     BOOST_CHECK_EQUAL(load.txs_admitted, 1u);
     BOOST_CHECK_EQUAL(mp_load.Size(), 1u);
+}
+
+// ---- PR-MP-3: savemempool RPC handler smoke test -----------------------
+
+// Verifies the RPC handler triggers DumpMempool correctly. We don't stand
+// up an HTTP server -- we exercise the handler directly via a minimal
+// CRPCServer instance, mirroring the getindexinfo schema-lock-in pattern.
+BOOST_AUTO_TEST_CASE(savemempool_rpc_handler) {
+    TempDir scope("savemempool_rpc");
+
+    CTxMemPool mp;
+    BOOST_REQUIRE_EQUAL(PopulateMempool(mp, 3), 3u);
+
+    // Stand up a CRPCServer just for the handler call. We don't call Start();
+    // the handler does not depend on the network being up.
+    CRPCServer server(/*port=*/18999);
+    server.RegisterMempool(&mp);
+    server.SetDataDir(scope.path().string());
+
+    // Call the handler directly. It returns JSON {"filename": "<absolute-path>"}
+    // matching Bitcoin Core v28.0's savemempool response schema.
+    const std::string response = server.RPC_SaveMempool("");
+
+    // Response shape lock: must contain "filename" key and the file's
+    // absolute path. We don't pin the exact bytes of the path because
+    // absolute paths are platform-specific (Windows backslashes get
+    // JSON-escaped to "\\\\").
+    BOOST_CHECK(response.find("\"filename\"") != std::string::npos);
+    BOOST_CHECK(response.find(mempool_persist::FILENAME) != std::string::npos);
+
+    // File must actually exist on disk and round-trip correctly.
+    const auto fp = scope.path() / mempool_persist::FILENAME;
+    BOOST_REQUIRE(std::filesystem::exists(fp));
+
+    CTxMemPool mp_load;
+    auto load = mempool_persist::LoadMempool(mp_load, scope.path(), 1);
+    BOOST_REQUIRE(load.success);
+    BOOST_CHECK(!load.cold_start);
+    BOOST_CHECK_EQUAL(load.txs_admitted, 3u);
+}
+
+// Negative path: missing mempool registration must throw with a clear error.
+BOOST_AUTO_TEST_CASE(savemempool_rpc_no_mempool) {
+    TempDir scope("savemempool_no_mempool");
+
+    CRPCServer server(/*port=*/18998);
+    // Deliberately do NOT call RegisterMempool(); m_mempool stays null.
+    server.SetDataDir(scope.path().string());
+
+    BOOST_CHECK_THROW(server.RPC_SaveMempool(""), std::runtime_error);
+}
+
+// Negative path: empty datadir must throw with a clear error.
+BOOST_AUTO_TEST_CASE(savemempool_rpc_no_datadir) {
+    CTxMemPool mp;
+
+    CRPCServer server(/*port=*/18997);
+    server.RegisterMempool(&mp);
+    // Deliberately do NOT call SetDataDir(); m_dataDir stays empty.
+
+    BOOST_CHECK_THROW(server.RPC_SaveMempool(""), std::runtime_error);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

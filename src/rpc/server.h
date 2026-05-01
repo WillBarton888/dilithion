@@ -635,6 +635,14 @@ public:
     // process-wide `g_tx_index` global. Public + static lets tests exercise the formatter
     // directly without standing up a full HTTP server (schema-lock-in coverage).
     static std::string RPC_GetIndexInfo(const std::string& params);
+
+    // Mempool persistence operator-on-demand save (Bitcoin Core port:
+    // savemempool, src/rpc/mempool.cpp v28.0). Triggers an immediate
+    // mempool.dat write without restarting the node. Returns
+    // {"path": "<absolute-path>"} on success or throws on failure.
+    // Instance method (NOT static) because it consults m_mempool +
+    // m_dataDir; tests exercise via constructed CRPCServer instance.
+    std::string RPC_SaveMempool(const std::string& params);
 };
 
 #endif // DILITHION_RPC_SERVER_H

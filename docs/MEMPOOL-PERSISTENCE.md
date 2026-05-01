@@ -177,6 +177,32 @@ Shutdown (failure -- best-effort, does not block shutdown):
 [mempool] DumpMempool failed: <reason> -- prior mempool.dat retained
 ```
 
+### `savemempool` JSON-RPC
+
+Bitcoin Core port (`src/rpc/mempool.cpp::savemempool` v28.0). Triggers an
+immediate `mempool.dat` write while the node is running, without waiting
+for shutdown. Useful for: pre-restart drain + verification, migrating a
+mempool snapshot to another datadir, sanity-checking the persistence
+subsystem is healthy.
+
+```bash
+curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json' \
+  --data-binary '{"jsonrpc":"2.0","id":1,"method":"savemempool","params":{}}' \
+  http://127.0.0.1:8332/
+```
+
+Response (matches Bitcoin Core v28.0's `savemempool` response schema):
+
+```json
+{ "filename": "/root/.dilithion/mempool.dat" }
+```
+
+Errors as JSON-RPC error responses if the mempool is not registered, the
+data directory is unset, or `DumpMempool` fails (disk full, permissions).
+
+The handler is safe to call repeatedly; each call atomically rewrites
+`mempool.dat`. Concurrent saves serialize on the mempool lock.
+
 ### Recovery
 
 If the operator wants to start with an empty mempool (e.g. they suspect
