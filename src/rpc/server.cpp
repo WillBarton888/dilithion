@@ -5751,7 +5751,11 @@ std::string CRPCServer::RPC_TestMempoolAccept(const std::string& params) {
 
         // Step 1: consensus-level transaction validation (inputs exist, fees
         // computable, signatures valid, etc.). This is what sendrawtransaction
-        // runs before AddTx. Reject reasons are surfaced verbatim.
+        // runs before AddTx. Reject reasons are surfaced verbatim. NOTE: for
+        // the validation-failure path, sendrawtransaction throws
+        // "Transaction validation failed: <inner>" with no extra prefix --
+        // we MIRROR that exactly here (no "Failed to add to mempool: " prefix
+        // since AddTx is not reached).
         CTransactionValidator txValidator;
         std::string validation_error;
         CAmount tx_fee = 0;
@@ -5769,7 +5773,10 @@ std::string CRPCServer::RPC_TestMempoolAccept(const std::string& params) {
         // Step 2: mempool admission validation (no mutation). TestAccept's
         // reject wording matches AddTx's reject wording exactly so callers
         // who run testmempoolaccept then sendrawtransaction will see the
-        // same error string in both places for the same input.
+        // same error string in both places for the same input. The
+        // "Failed to add to mempool: " prefix is applied here to MATCH
+        // sendrawtransaction's `runtime_error("Failed to add to mempool: " +
+        // mempool_error)` (see RPC_SendRawTransaction).
         std::string mempool_error;
         const bool allowed = m_mempool->TestAccept(
             tx, tx_fee, current_time, current_height, &mempool_error,
@@ -5782,15 +5789,22 @@ std::string CRPCServer::RPC_TestMempoolAccept(const std::string& params) {
             const size_t vsize = tx->GetSerializedSize();
             result["vsize"] = vsize;
             nlohmann::json fees;
-            // BC emits `base` as a number with 8 decimal places.
+            // BC emits `base` as a fixed-point number with 8 decimal places.
             // tx_fee is in ions (subunits); divide by COIN to express in DIL.
-            const double base_dil = static_cast<double>(tx_fee) / static_cast<double>(COIN);
-            fees["base"] = base_dil;
+            // Use std::fixed + setprecision(8) and parse-back so JSON emits
+            // "0.00000001" instead of nlohmann's default "1e-08" exponential.
+            std::ostringstream fee_oss;
+            fee_oss << std::fixed << std::setprecision(8)
+                    << (static_cast<double>(tx_fee) / static_cast<double>(COIN));
+            fees["base"] = nlohmann::json::parse(fee_oss.str());
             result["fees"] = std::move(fees);
             std::cout << "[mempool] testmempoolaccept: " << txid_hex
                       << " allowed" << std::endl;
         } else {
-            result["reject-reason"] = mempool_error;
+            // Match sendrawtransaction's `"Failed to add to mempool: " +
+            // mempool_error` wording byte-for-byte so wallets that compare
+            // strings see the same error from both RPCs.
+            result["reject-reason"] = "Failed to add to mempool: " + mempool_error;
             std::cout << "[mempool] testmempoolaccept: " << txid_hex
                       << " rejected (" << mempool_error << ")" << std::endl;
         }
