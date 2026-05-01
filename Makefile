@@ -237,6 +237,7 @@ NODE_SOURCES := src/node/block_index.cpp \
                 src/node/block_processing.cpp \
                 src/node/fork_manager.cpp \
                 src/node/mempool.cpp \
+                src/node/mempool_persist.cpp \
                 src/node/genesis.cpp \
                 src/node/utxo_set.cpp \
                 src/node/ibd_coordinator.cpp \
@@ -621,6 +622,7 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/fork_detection_tests.o \
 	$(OBJ_DIR)/test/tx_index_tests.o \
 	$(OBJ_DIR)/test/tx_index_integration_tests.o \
+	$(OBJ_DIR)/test/mempool_persist_tests.o \
 	$(CRYPTO_PROPERTY_OBJECTS)
 
 # Link test objects + full library (CORE_OBJECTS) to avoid hand-picked object drift

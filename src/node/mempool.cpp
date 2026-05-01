@@ -846,6 +846,21 @@ std::vector<CTransactionRef> CTxMemPool::GetOrderedTxs() const {
     return result;
 }
 
+std::vector<CTxMemPoolEntry> CTxMemPool::GetAllEntries() const {
+    std::lock_guard<std::mutex> lock(cs);
+
+    // Snapshot every entry. Iterates mapTx (the map of txid->entry); setEntries
+    // would also work but stores pointers and is fee-rate-ordered, which
+    // doesn't matter for persistence and adds a level of indirection.
+    std::vector<CTxMemPoolEntry> result;
+    result.reserve(mapTx.size());
+    for (const auto& [txid, entry] : mapTx) {
+        (void)txid;
+        result.push_back(entry);
+    }
+    return result;
+}
+
 std::vector<CTransactionRef> CTxMemPool::GetTopTxs(size_t n) const {
     std::lock_guard<std::mutex> lock(cs);
 
