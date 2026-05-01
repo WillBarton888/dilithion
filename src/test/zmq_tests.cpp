@@ -19,6 +19,8 @@
 #include <zmq/zmqpublishnotifier.h>
 #include <zmq/zmqutil.h>
 
+#include <primitives/transaction.h>
+
 #include <zmq.h>
 
 #include <atomic>
@@ -125,16 +127,24 @@ BOOST_AUTO_TEST_CASE(zmq_abstract_defaults)
     BOOST_CHECK_EQUAL(n.GetOutboundMessageHighWaterMark(), 2000);
 }
 
-// 2. Default Notify*() taking pointer arguments return true (no-op base).
-// The CTransaction& overloads need a real CTransaction instance to test
-// safely; PR-Z-2 will exercise them via the per-topic publishers and the
-// real transaction objects coming out of the mempool.
+// 2. All default Notify*() overloads on the abstract base return true (no-op
+// base). Exercises both the CBlockIndex* overloads with nullptr (no upstream
+// dereference happens in the no-op base) and the CTransaction& overloads
+// with a default-constructed transaction (CTransaction has a public default
+// ctor at primitives/transaction.h:120, so no real mempool object is
+// required for the base-class no-op contract). PR-Z-2 will exercise these
+// again from the per-topic publishers with real chainstate / mempool data.
 BOOST_AUTO_TEST_CASE(zmq_abstract_notifications_default_noop)
 {
     TestNotifier n;
     BOOST_CHECK(n.NotifyBlock(nullptr));
     BOOST_CHECK(n.NotifyBlockConnect(nullptr));
     BOOST_CHECK(n.NotifyBlockDisconnect(nullptr));
+
+    CTransaction tx;
+    BOOST_CHECK(n.NotifyTransaction(tx));
+    BOOST_CHECK(n.NotifyTransactionAcceptance(tx, 0));
+    BOOST_CHECK(n.NotifyTransactionRemoval(tx, 0));
 }
 
 // 3. Full lifecycle: bind PUB, connect SUB, publish, receive, shut down.
