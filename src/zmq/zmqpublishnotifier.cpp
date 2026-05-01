@@ -22,6 +22,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <thread>
 #include <utility>
 
 // Module-local map of address -> notifier so multiple publishers can share a
@@ -30,10 +31,37 @@
 // added to the multimap with the same key. Shutdown teardown only closes
 // the socket when the last publisher for an address is gone.
 //
-// THREADING: This map is touched only from chainstate / mempool callback
-// threads after node init. PR-Z-2 will document the lock discipline. For
-// PR-Z-1 the map is only exercised by the lifecycle test (single-threaded).
+// TODO(PR-Z-2): wrap in a mutex when chainstate / mempool callbacks invoke
+// SendZmqMessage / Initialize / Shutdown from arbitrary threads.
+// std::multimap find/insert/erase are NOT thread-safe. PR-Z-2's per-topic
+// publishers will be the first thing that exercises this map from non-main
+// threads, so the lock must land before that wiring goes in.
+//
+// PR-Z-1 contract: Initialize() and Shutdown() are called only from the
+// node's main / startup-shutdown thread (the lifecycle test enforces this).
+// Debug-only assertion is at the head of each function that touches the map.
 static std::multimap<std::string, CZMQAbstractPublishNotifier*> mapPublishNotifiers;
+
+// PR-Z-1: capture the thread that first touches mapPublishNotifiers and
+// assert all subsequent touches come from that same thread. Cheap insurance
+// against accidental misuse from PR-Z-2 wiring; flips to a real mutex in
+// PR-Z-2 (see TODO above).
+namespace {
+std::thread::id g_map_owner_thread{};
+bool g_map_owner_set{false};
+
+void AssertMapOwnerThread()
+{
+    if (!g_map_owner_set) {
+        g_map_owner_thread = std::this_thread::get_id();
+        g_map_owner_set = true;
+        return;
+    }
+    assert(g_map_owner_thread == std::this_thread::get_id() &&
+           "mapPublishNotifiers touched from non-owning thread; "
+           "PR-Z-2 must add a mutex before wiring multi-thread callbacks");
+}
+}  // namespace
 
 // Internal helper: send a variable-length sequence of frames as one multipart
 // ZMQ message. Caller passes (data, size) pairs terminated by a nullptr data
@@ -84,6 +112,7 @@ bool CZMQAbstractPublishNotifier::Initialize(void* pcontext)
 {
     assert(!psocket);
     assert(pcontext);
+    AssertMapOwnerThread();
 
     // Reuse an existing socket if another publisher already bound this
     // address. This is the normal case when an operator passes both
@@ -159,6 +188,8 @@ void CZMQAbstractPublishNotifier::Shutdown()
     // never invoked. Bitcoin Core relies on this in its construction-time
     // error paths.
     if (!psocket) return;
+
+    AssertMapOwnerThread();
 
     int count = mapPublishNotifiers.count(address);
 
