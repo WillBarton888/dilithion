@@ -185,6 +185,13 @@ public:
     void SetHeight(unsigned int height);
     void RemoveConfirmedTxs(const std::vector<CTransactionRef>& block_txs);
 
+    // PR-EF-2 fixup F#4: test seam. Tests want to force eviction without
+    // having to fill 300MB / 100k entries. Production callers do not set
+    // this. New value is clamped to max(1, requested) to keep the eviction
+    // loop well-defined; setting it below current count does NOT
+    // retroactively evict (next AddTx will).
+    void SetMaxMempoolCountForTesting(size_t count);
+
     // MEMPOOL-018 FIX: Get metrics for monitoring
     struct MempoolMetrics {
         uint64_t total_adds;

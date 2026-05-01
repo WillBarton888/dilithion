@@ -1102,6 +1102,12 @@ CTxMemPool::MempoolMetrics CTxMemPool::GetMetrics() const {
     return metrics;
 }
 
+// PR-EF-2 fixup F#4: test seam.
+void CTxMemPool::SetMaxMempoolCountForTesting(size_t count) {
+    std::lock_guard<std::mutex> lock(cs);
+    max_mempool_count = (count == 0) ? 1 : count;
+}
+
 void CTxMemPool::RemoveConfirmedTxs(const std::vector<CTransactionRef>& block_txs) {
     std::lock_guard<std::mutex> lock(cs);
     for (const auto& tx : block_txs) {
