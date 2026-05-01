@@ -4820,10 +4820,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cout << "  [OK] Regtest wallet created successfully." << std::endl;
                     CDilithiumAddress addr = wallet.GetNewHDAddress();
                     std::cout << "  First address: " << addr.ToString() << std::endl;
-                    // generated_mnemonic goes out of scope at the closing
-                    // brace; for regtest (a deterministic lab environment with
-                    // throwaway wallets) the higher-grade memory_cleanse used
-                    // on production paths is not load-bearing here.
+                    // PR10.5b-RT-LOW-1 hardening: explicitly cleanse the
+                    // generated mnemonic from local scope (matches the
+                    // production-path discipline used elsewhere in this
+                    // file). Removes the load-bearing "regtest is throwaway"
+                    // comment so a future developer copy-pasting this branch
+                    // for testnet/mainnet doesn't silently inherit a
+                    // memory-cleanse gap.
+                    if (!generated_mnemonic.empty()) {
+                        memory_cleanse(&generated_mnemonic[0], generated_mnemonic.size());
+                    }
                 } else {
                     std::cerr << "  ERROR: Regtest auto-create wallet failed" << std::endl;
                     return 1;

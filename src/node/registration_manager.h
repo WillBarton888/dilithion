@@ -234,6 +234,19 @@ public:
         std::vector<uint8_t> mikPubkey;
         std::array<uint8_t, 32> dnaHash{};
         bool hasDnaHash = false;
+        // True iff attestations are either present (collected from seeds)
+        // OR not required at the current tip (regtest fast-path per
+        // PR10.5b). Note: when the regtest fast-path fires,
+        // `hasAttestations` is true but `attestations` (below) is null.
+        // Consumers MUST defensive-AND both fields before dereferencing
+        // (existing call sites at dilv-node.cpp:1258-1259 + 1270 already
+        // do this; new consumers must follow that pattern).
+        // PR10.5b-RT-MEDIUM-2 (Layer-2 finding): snapshot invariant
+        // "hasAttestations ⇒ attestations != null" was broken by the
+        // regtest fast-path. Documented here rather than enforced by
+        // populating an empty CAttestationSet because the consumer
+        // pattern is established and a populated empty set has its own
+        // signals (e.g., `attestations->signatures.empty()` == true).
         bool hasAttestations = false;
         uint64_t regNonce = 0;
         bool hasRegNonce = false;
@@ -369,16 +382,21 @@ private:
     // ------------------------------------------------------------------
     // Phase 10 PR10.5b regtest fast-path helpers.
     //
-    // Gate: pure activation-height comparison against latestTipHeight_.
-    // No chain identity is checked. Mainnet/testnet at production heights
-    // (DNA: 40000 / 0; Attest: 40000 / 2000) have activation in the past
-    // and the requirement-checks return TRUE → fast-path NOT entered.
-    // Regtest (inherited from Testnet's 999999999 / 999999999 sentinels)
-    // has activation in the future indefinitely → fast-path entered.
+    // Gate: chain-identity guard (`IsRegtest()`) AND activation-height
+    // comparison against `latestTipHeight_`. The chain-identity guard
+    // is load-bearing per Layer-2 PR10.5b-RT-HIGH-1: without it, DIL
+    // testnet (which inherits Testnet's `dnaCommitmentActivationHeight
+    // = 999999999` sentinel) would also enter the fast-path and embed
+    // placeholder DNA bytes in real testnet blocks. The guard ensures
+    // mainnet AND testnet ALWAYS go through the production path
+    // regardless of activation-height configuration.
     //
-    // Layer-2 review (PR10.5b close) verifies (a) the gate excludes
-    // mainnet/testnet at all production heights and (b) the placeholder
-    // hash is non-confusable with a real DNA hash.
+    // Regtest is the ONLY chain identity that takes this path. The
+    // activation-height comparison within the regtest branch is a
+    // belt-and-braces secondary check — it's correct under regtest's
+    // inherited 999999999 sentinels but should the regtest activation
+    // heights ever change to real values, the fast-path correctly
+    // stops firing past those heights.
     // ------------------------------------------------------------------
     bool DnaCommitmentRequiredAtTip_() const;
     bool AttestationsRequiredAtTip_() const;

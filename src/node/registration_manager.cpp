@@ -362,14 +362,40 @@ void CRegistrationManager::HandleCheckEligibility_() {
 
 // ----------------------------------------------------------------------
 // Phase 10 PR10.5b regtest fast-path helpers.
+//
+// PR10.5b-RT-HIGH-1 hardening (2026-05-01): the original v0.1.6 design used
+// a pure activation-height gate ("`tipHeight >= activationHeight` ⇒
+// required"). Layer-2 review caught that DIL testnet has
+// `dnaCommitmentActivationHeight = 999999999` (effectively-disabled,
+// inherited by regtest), so the pure-height gate would fire the fast-path
+// on testnet too — embedding ASCII placeholder DNA bytes in real testnet
+// blocks. Fix: gate the fast-path additionally on `IsRegtest()`. Mainnet
+// and testnet now NEVER take this path regardless of activation-height
+// configuration; only regtest does.
 // ----------------------------------------------------------------------
 
 bool CRegistrationManager::DnaCommitmentRequiredAtTip_() const {
+    // Hardening: testnet/mainnet ALWAYS require DNA via the production path
+    // (no fast-path eligibility); only regtest's activation-height check is
+    // honored as "not required."
+    if (!Dilithion::g_chainParams || !Dilithion::g_chainParams->IsRegtest()) {
+        return true;
+    }
+    // Note (PR10.5b-RT-LOW-2): the comparison is against the last-published
+    // tip via latestTipHeight_.load(); during a deep reorg the worker thread
+    // may briefly observe a tip lower than the eventual settled tip. For
+    // regtest (the only path that reaches here), this is bounded by the
+    // next TIP_UPDATED event re-evaluating; not a consensus-grade guarantee.
     return static_cast<int>(latestTipHeight_.load()) >=
            env_->DNACommitmentActivationHeight();
 }
 
 bool CRegistrationManager::AttestationsRequiredAtTip_() const {
+    // Hardening: testnet/mainnet ALWAYS require attestations via the
+    // production path; only regtest's activation-height check is honored.
+    if (!Dilithion::g_chainParams || !Dilithion::g_chainParams->IsRegtest()) {
+        return true;
+    }
     return static_cast<int>(latestTipHeight_.load()) >=
            env_->SeedAttestationActivationHeight();
 }
