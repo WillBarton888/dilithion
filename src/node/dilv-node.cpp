@@ -75,7 +75,8 @@
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
 #include <index/tx_index.h>            // PR-3: optional transaction index
-// DilV: No RandomX — VDF-only chain
+#include <node/mempool_persist.h>      // PR-MP-2: mempool persistence (DumpMempool / LoadMempool)
+// DilV: No RandomX -- VDF-only chain
 // #include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
 #include <util/stacktrace.h>  // Phase 2.2: Crash diagnostics
@@ -524,6 +525,7 @@ struct NodeConfig {
     bool rescan = false;            // Phase 4.2: Rescan wallet transactions
     bool reset_chain = false;       // --reset-chain: wipe chain-derived state, keep wallet/MIK
     bool txindex_enabled = false;   // --txindex / -txindex: enable transaction index (PR-3)
+    bool persistmempool = true;     // --persistmempool=<0|1>: save/restore mempool across restarts (PR-MP-2; default ON)
     bool yes_flag = false;          // --yes: bypass --reset-chain confirmation prompt
     bool verbose = false;           // Show debug output (hidden by default)
     bool quiet = false;             // Quiet mode: only block lifecycle, errors, and warnings
@@ -653,6 +655,17 @@ struct NodeConfig {
             else if (arg == "--txindex" || arg == "-txindex") {
                 txindex_enabled = true;
             }
+            else if (arg == "--persistmempool" || arg == "-persistmempool") {
+                persistmempool = true;
+            }
+            else if (arg == "--persistmempool=0" || arg == "-persistmempool=0" ||
+                     arg == "--persistmempool=false" || arg == "-persistmempool=false") {
+                persistmempool = false;
+            }
+            else if (arg == "--persistmempool=1" || arg == "-persistmempool=1" ||
+                     arg == "--persistmempool=true" || arg == "-persistmempool=true") {
+                persistmempool = true;
+            }
             else if (arg == "--reset-chain") {
                 // Wipe chain-derived state, preserve wallet.dat and mik_registration.dat.
                 reset_chain = true;
@@ -774,6 +787,7 @@ struct NodeConfig {
         std::cout << "  --quiet, -q           Quiet mode: only block events, errors, and warnings" << std::endl;
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
         std::cout << "  --txindex             Build full transaction index (requires --reindex on warm chain)" << std::endl;
+        std::cout << "  --persistmempool=<0|1> Save/restore mempool across restarts (default: 1)" << std::endl;
         std::cout << "  --reset-chain         Wipe chain state for a clean resync." << std::endl;
         std::cout << "                          Preserves wallet.dat and mik_registration.dat" << std::endl;
         std::cout << "                          so miners do NOT re-solve the registration PoW." << std::endl;
@@ -2839,6 +2853,29 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 });
             g_tx_index->StartBackgroundSync();
             std::cout << "  [OK] Transaction index initialized" << std::endl;
+        }
+
+        // PR-MP-2: Mempool persistence. Default ON. Restores the saved mempool
+        // (mempool.dat) at startup so unconfirmed txs survive node restarts.
+        // Runs AFTER chainstate has loaded (we need a current_height) and
+        // BEFORE P2P starts listening (so peers can't relay txs while we're
+        // mid-load). Failures fall back to cold-start; never aborts the node.
+        if (config.persistmempool) {
+            // current_height is the height of the NEXT block (Bitcoin Core
+            // convention) -- the tx is a candidate for inclusion at this
+            // height. Cold-start (tip nHeight=0) maps to load_height=1,
+            // which AddTx accepts (it rejects height==0 as a sentinel).
+            const unsigned int load_height =
+                g_chainstate.GetTip()
+                    ? static_cast<unsigned int>(g_chainstate.GetTip()->nHeight) + 1
+                    : 1;
+            const auto load_result = mempool_persist::LoadMempool(
+                mempool, std::filesystem::path(config.datadir), load_height);
+            if (!load_result.success) {
+                std::cerr << "[mempool] LoadMempool hard error: "
+                          << load_result.error_message
+                          << " -- continuing with empty mempool" << std::endl;
+            }
         }
 
         // Keep legacy globals for backward compatibility during migration
@@ -7324,6 +7361,29 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // p2p_socket removed - CConnman handles socket cleanup
         std::cout << " done" << std::endl;
 
+        // PR-MP-2: Stop the RPC server BEFORE DumpMempool so a tx admitted
+        // via `sendrawtransaction` between the two cannot land in the
+        // mempool but be missed by the dump. Mirrors Bitcoin Core's
+        // shutdown sequence (init.cpp Shutdown()).
+        std::cout << "[Shutdown] Stopping RPC server..." << std::flush;
+        rpc_server.Stop();
+        std::cout << " done" << std::endl;
+
+        // PR-MP-2: Save mempool to disk. Runs AFTER P2P + RPC stops and
+        // BEFORE blockchain.Close(). The persist module logs `[mempool]
+        // DumpMempool: wrote N transactions` on success, so the wrapper
+        // here is silent on the success path. Best-effort: a failure is
+        // logged but does not block shutdown.
+        if (config.persistmempool) {
+            const auto dump_result = mempool_persist::DumpMempool(
+                mempool, std::filesystem::path(config.datadir));
+            if (!dump_result.success) {
+                std::cerr << "[mempool] DumpMempool failed: "
+                          << dump_result.error_message
+                          << " -- prior mempool.dat retained" << std::endl;
+            }
+        }
+
         // Remove UPnP port mapping on shutdown
         if (connman_opts.upnp_enabled) {
             std::cout << "[Shutdown] Removing UPnP port mapping..." << std::flush;
@@ -7364,9 +7424,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Clear peer manager pointer (ownership in g_node_context)
         // REMOVED: g_peer_manager cleanup - no longer used
-
-        std::cout << "[Shutdown] Stopping RPC server..." << std::flush;
-        rpc_server.Stop();
 
         // DFMP: Shutdown Fair Mining Protocol subsystem (persist heat trackers)
         std::cout << "  Shutting down DFMP..." << std::endl;
