@@ -2,57 +2,14 @@
 
 Read-only / blocking RPCs ported from Bitcoin Core v28.0 (`src/rpc/blockchain.cpp` and `src/rpc/rawtransaction.cpp`).
 
-Cluster: `getblockstats`, `waitfornewblock`, `waitforblock`, `waitforblockheight`, `gettxoutproof`, `verifytxoutproof`. All six were landed together in T1.B (Bitcoin Core port roadmap).
+Cluster: `waitfornewblock`, `waitforblock`, `waitforblockheight`, `gettxoutproof`, `verifytxoutproof` (5 RPCs). All five are part of T1.B (Bitcoin Core port roadmap).
+
+`getblockstats` is intentionally NOT in this cluster -- it requires per-tx fee fields that depend on undo-data exposure, and lands in a separate workstream alongside the `coinstatsindex` port.
 
 All examples below use object-style params (Dilithion convention; not array-style as in Bitcoin Core's CLI).
 
 ---
 
-## getblockstats
-
-Per-block analytics for explorers. Returns aggregate transaction-size, input/output counts, subsidy, and total fee.
-
-### Param
-
-```
-{"hash_or_height": <hex|int>}
-{"hash": "<64-hex>"}
-{"height": <int>}
-```
-
-Either `hash_or_height` or `hash`/`height`. Supplying both `hash` and `height` is rejected.
-
-### Response fields
-
-- `avgtxsize`, `mediantxsize`, `maxtxsize`, `mintxsize` -- distribution of per-tx serialized sizes (bytes).
-- `blockhash` -- hash of the requested block.
-- `height` -- block height.
-- `ins`, `outs` -- total non-coinbase inputs / outputs in the block.
-- `mediantime` -- median nTime of the previous 11 blocks (chain median past time). Falls back to `time` when ancestors are unavailable.
-- `subsidy` -- block subsidy in ions (DIL) or volts (DilV).
-- `time` -- block header timestamp.
-- `total_out` -- sum of non-coinbase outputs.
-- `total_size` -- serialized tx-array byte length.
-- `totalfee` -- coinbase output sum minus subsidy. Reported as 0 if coinbase under-pays subsidy (consensus violation; would be rejected at block validation).
-- `txs` -- transaction count including coinbase.
-- `utxo_increase` -- `outs - ins`. Net UTXO created by the block.
-
-### Omitted vs. Bitcoin Core
-
-The following Bitcoin Core fields are intentionally omitted:
-
-- `swtotal_size`, `swtotal_weight`, `swtxs`, `total_weight` -- segwit-only; Dilithion is non-segwit.
-- `avgfee`, `medianfee`, `maxfee`, `minfee`, `feerate_percentiles`, `avgfeerate`, `maxfeerate`, `minfeerate` -- per-tx fees require prevout lookups against an undo file. Dilithion does not currently expose undo data through the RPC layer; only the aggregate `totalfee` (coinbase-derived) is available. Adding per-tx fees would require a separate undo-data-aware port and is out of scope for this cluster.
-
-### Example
-
-```bash
-curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json' \
-  --data-binary '{"jsonrpc":"2.0","id":1,"method":"getblockstats","params":{"height":1000}}' \
-  http://127.0.0.1:8332/
-```
-
----
 
 ## waitfornewblock / waitforblock / waitforblockheight
 
@@ -206,7 +163,6 @@ LOW. All read-only or blocking-only; no consensus, no P2P, no storage schema cha
 
 | RPC | Bitcoin Core source |
 |-----|---------------------|
-| `getblockstats`        | `src/rpc/blockchain.cpp` v28.0 |
 | `waitfornewblock`      | `src/rpc/blockchain.cpp` v28.0 |
 | `waitforblock`         | `src/rpc/blockchain.cpp` v28.0 |
 | `waitforblockheight`   | `src/rpc/blockchain.cpp` v28.0 |

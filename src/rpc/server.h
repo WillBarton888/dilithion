@@ -646,13 +646,16 @@ public:
     // Static exposure also keeps them callable from unit tests without
     // standing up an HTTP server.
     //
-    // `getblockstats` and `gettxoutproof` are instance methods because
-    // they need to reach into m_blockchain / m_utxo_set / m_chainstate.
+    // `gettxoutproof` is an instance method because it needs to reach
+    // into m_blockchain / m_utxo_set / m_chainstate.
     //
     // Default timeout 30s, cap 300s (DoS guard -- worker threads in the
     // RPC thread-pool would otherwise be tied up by an unbounded number
     // of long-poll clients).
-    std::string RPC_GetBlockStats(const std::string& params);
+    //
+    // getblockstats is intentionally not in this cluster: it requires
+    // per-tx fee fields that depend on undo-data exposure (separate
+    // workstream alongside coinstatsindex).
     static std::string RPC_WaitForNewBlock(const std::string& params);
     static std::string RPC_WaitForBlock(const std::string& params);
     static std::string RPC_WaitForBlockHeight(const std::string& params);

@@ -3,22 +3,24 @@
 
 // Boost unit tests for the small-RPCs cluster ported from Bitcoin Core
 // v28.0 (T1.B). Coverage:
-//   getblockstats          -- happy path (returns expected schema for a
-//                             synthesized block) + height-out-of-range
-//                             negative case.
 //   waitfornewblock        -- short-timeout returns the current tip.
 //   waitforblock           -- short-timeout returns the current tip.
 //   waitforblockheight     -- already-met height returns immediately.
+//   waitforblockheight     -- notify wakes a waiter early.
 //   gettxoutproof          -- happy path (proof is constructed and
 //                             verifytxoutproof recovers the txids)
 //                             plus non-existent-txid negative case.
 //   verifytxoutproof       -- corrupted-hex negative case.
 //
+// getblockstats is intentionally not in this cluster: it requires
+// per-tx fee fields that depend on undo-data exposure (separate
+// workstream alongside coinstatsindex).
+//
 // These exercise CRPCServer's public surface directly; they do NOT
 // stand up the HTTP server. Static handlers run as plain function
-// calls, and the two instance-method handlers (getblockstats /
-// gettxoutproof) run against a CRPCServer constructed with a non-
-// production port (no Listen() ever called).
+// calls, and the instance-method handler (gettxoutproof) runs against
+// a CRPCServer constructed with a non-production port (no Listen()
+// ever called).
 
 #include <boost/test/unit_test.hpp>
 
@@ -26,6 +28,7 @@
 
 #include <consensus/chain.h>
 #include <consensus/validation.h>
+#include <core/chainparams.h>
 #include <node/block_index.h>
 #include <node/blockchain_storage.h>
 #include <primitives/block.h>
@@ -108,8 +111,7 @@ CTransactionRef MakeUniqueTx(uint8_t seed_a, uint8_t seed_b) {
 
 // Coinbase: vin[0].prevout is null. Output value = subsidy + fee. We use
 // 50 DIL = 5'000'000'000 ions (matches CalculateBlockSubsidy at height 0
-// for the default chain params); test exclusion-from-fee path is checked
-// indirectly via getblockstats's totalfee field.
+// for the default chain params).
 CTransactionRef MakeCoinbaseTx(uint64_t value, uint8_t scriptsig_seed) {
     CTransaction tx;
     tx.nVersion = 1;
@@ -138,9 +140,9 @@ CBlock MakeBlock(const std::vector<CTransactionRef>& txs) {
     }
     block.vtx = std::move(vtx_data);
 
-    // Build merkle root so the block is internally consistent (some
-    // RPC paths verify it; getblockstats does not, but
-    // verifytxoutproof does compare reconstructed roots).
+    // Build merkle root so the block is internally consistent
+    // (verifytxoutproof compares reconstructed roots against the
+    // block header's hashMerkleRoot).
     CBlockValidator validator;
     block.hashMerkleRoot = validator.BuildMerkleRoot(txs);
     return block;
@@ -171,6 +173,21 @@ struct ClusterChainFixture {
         per_height_block.reserve(n_blocks);
 
         g_chainstate.Cleanup();
+
+        // Ensure chain params are initialized before any subsidy/difficulty
+        // computation. CalculateBlockSubsidy reads halvingInterval from
+        // g_chainParams; if g_chainParams is zero-initialized (default-
+        // constructed via `new ChainParams()`), halvingInterval==0 causes
+        // an integer divide-by-zero. The local agent's tests passed only
+        // because some prior test in the suite happened to leave a valid
+        // g_chainParams behind; on fresh CI, the divide-by-zero crashes
+        // test execution. Set up Mainnet defaults here for determinism.
+        if (Dilithion::g_chainParams == nullptr ||
+            Dilithion::g_chainParams->halvingInterval == 0) {
+            static Dilithion::ChainParams cluster_test_params =
+                Dilithion::ChainParams::Mainnet();
+            Dilithion::g_chainParams = &cluster_test_params;
+        }
 
         CBlockIndex* prev_idx = nullptr;
         uint64_t subsidy = CBlockValidator::CalculateBlockSubsidy(0);
@@ -255,7 +272,7 @@ bool ExtractScalar(const std::string& body,
 
 // ---- Help-text and registration smoke test ----
 
-BOOST_AUTO_TEST_CASE(help_text_lists_all_six_rpcs) {
+BOOST_AUTO_TEST_CASE(help_text_lists_all_five_rpcs) {
     CRPCServer srv(0);  // port 0; never starts the listener
     // RPC_Help is private but exposed via the "help" handler. We don't
     // call the full request path here; instead we just confirm that the
@@ -423,78 +440,6 @@ BOOST_AUTO_TEST_CASE(wait_timeout_zero_rejected) {
     BOOST_CHECK_THROW(
         CRPCServer::RPC_WaitForNewBlock("{\"timeout_ms\":0}"),
         std::runtime_error);
-}
-
-// ---- getblockstats: happy path + negative case ----
-
-BOOST_AUTO_TEST_CASE(getblockstats_happy_path) {
-    TempDbScope scope_chain("getblockstats_chain");
-    CBlockchainDB chain_db;
-    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
-    ClusterChainFixture fix;
-    fix.Build(3, chain_db);
-
-    CRPCServer srv(0);
-    srv.RegisterBlockchain(&chain_db);
-    srv.RegisterChainState(&g_chainstate);
-
-    std::string params = "{\"height\":1}";
-    std::string body = srv.RPC_GetBlockStats(params);
-
-    // Schema: every documented field present.
-    BOOST_CHECK(body.find("\"avgtxsize\":")     != std::string::npos);
-    BOOST_CHECK(body.find("\"blockhash\":\"")   != std::string::npos);
-    BOOST_CHECK(body.find("\"height\":1")       != std::string::npos);
-    BOOST_CHECK(body.find("\"ins\":")           != std::string::npos);
-    BOOST_CHECK(body.find("\"maxtxsize\":")     != std::string::npos);
-    BOOST_CHECK(body.find("\"mediantime\":")    != std::string::npos);
-    BOOST_CHECK(body.find("\"mediantxsize\":")  != std::string::npos);
-    BOOST_CHECK(body.find("\"mintxsize\":")     != std::string::npos);
-    BOOST_CHECK(body.find("\"outs\":")          != std::string::npos);
-    BOOST_CHECK(body.find("\"subsidy\":")       != std::string::npos);
-    BOOST_CHECK(body.find("\"time\":")          != std::string::npos);
-    BOOST_CHECK(body.find("\"total_out\":")     != std::string::npos);
-    BOOST_CHECK(body.find("\"total_size\":")    != std::string::npos);
-    BOOST_CHECK(body.find("\"totalfee\":")      != std::string::npos);
-    BOOST_CHECK(body.find("\"txs\":2")          != std::string::npos);
-    BOOST_CHECK(body.find("\"utxo_increase\":") != std::string::npos);
-
-    // totalfee = coinbase_out - subsidy = 0 (we built coinbase paying
-    // exactly the subsidy with no fee top-up).
-    std::string fee;
-    BOOST_REQUIRE(ExtractScalar(body, "totalfee", fee));
-    BOOST_CHECK_EQUAL(fee, "0");
-
-    // Hash matches what we built.
-    std::string returned_hash;
-    BOOST_REQUIRE(ExtractScalar(body, "blockhash", returned_hash));
-    BOOST_CHECK_EQUAL(returned_hash, fix.per_height_hash[1].GetHex());
-
-    g_chainstate.Cleanup();
-}
-
-BOOST_AUTO_TEST_CASE(getblockstats_height_out_of_range_rejected) {
-    TempDbScope scope_chain("getblockstats_oor");
-    CBlockchainDB chain_db;
-    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
-    ClusterChainFixture fix;
-    fix.Build(2, chain_db);
-
-    CRPCServer srv(0);
-    srv.RegisterBlockchain(&chain_db);
-    srv.RegisterChainState(&g_chainstate);
-
-    BOOST_CHECK_THROW(
-        srv.RPC_GetBlockStats("{\"height\":99}"),
-        std::runtime_error);
-    BOOST_CHECK_THROW(
-        srv.RPC_GetBlockStats("{\"height\":-5}"),
-        std::runtime_error);
-    BOOST_CHECK_THROW(
-        srv.RPC_GetBlockStats("{}"),
-        std::runtime_error);
-
-    g_chainstate.Cleanup();
 }
 
 // ---- gettxoutproof + verifytxoutproof: round-trip ----

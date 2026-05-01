@@ -313,10 +313,16 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["getmikattestation"] = [this](const std::string& p) { return RPC_GetMIKAttestation(p); };
 
     // T1.B: small RPCs cluster (Bitcoin Core port v28.0).
-    // getblockstats + gettxoutproof are instance methods (need m_blockchain
-    // / m_chainstate access). The wait-* family + verifytxoutproof are
-    // static -- they read only g_chainstate or are pure-input.
-    m_handlers["getblockstats"]      = [this](const std::string& p) { return RPC_GetBlockStats(p); };
+    // gettxoutproof is an instance method (needs m_blockchain access). The
+    // wait-* family + verifytxoutproof are static -- they read only
+    // g_chainstate or are pure-input.
+    //
+    // getblockstats is intentionally omitted from this cluster: shipping
+    // without per-tx fee fields (avgfee/medianfee/feerate_percentiles/...)
+    // would violate the project's "do not defer" + "world-class port from
+    // Bitcoin Core" principles. It lands in the dedicated block-analytics
+    // PR alongside undo-data exposure (T1.G coinstatsindex bundle) so the
+    // full BC schema ships in one shot.
     m_handlers["waitfornewblock"]    = [](const std::string& p) { return RPC_WaitForNewBlock(p); };
     m_handlers["waitforblock"]       = [](const std::string& p) { return RPC_WaitForBlock(p); };
     m_handlers["waitforblockheight"] = [](const std::string& p) { return RPC_WaitForBlockHeight(p); };
@@ -5379,7 +5385,6 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"listswaps - List all known atomic swaps and their states\",";
 
     // T1.B: small RPCs cluster (Bitcoin Core port v28.0)
-    oss << "\"getblockstats - Per-block analytics (size, fees, subsidy, utxo delta)\",";
     oss << "\"waitfornewblock - Block until a new tip is connected (timeout_ms default 30000, max 300000)\",";
     oss << "\"waitforblock - Block until tip equals supplied hash (timeout_ms default 30000)\",";
     oss << "\"waitforblockheight - Block until tip reaches supplied height (timeout_ms default 30000)\",";
@@ -8419,7 +8424,6 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
 // ============================================================================
 // Small RPCs cluster (T1.B) -- Bitcoin Core port v28.0
 // ----------------------------------------------------------------------------
-//   getblockstats           src/rpc/blockchain.cpp v28.0
 //   waitfornewblock         src/rpc/blockchain.cpp v28.0
 //   waitforblock            src/rpc/blockchain.cpp v28.0
 //   waitforblockheight      src/rpc/blockchain.cpp v28.0
@@ -8694,188 +8698,6 @@ void CRPCServer::NotifyBlockTipChanged() {
     g_wait_cluster_cv.notify_all();
 }
 
-// ----------------------------------------------------------------------------
-// CRPCServer::RPC_GetBlockStats
-// ----------------------------------------------------------------------------
-// Per-block analytics for explorers. Bitcoin Core port; some segwit-only
-// fields are intentionally omitted because Dilithion is non-segwit:
-//
-//   omitted: swtotal_size, swtotal_weight, swtxs, total_weight
-//
-// Per-tx fee fields (avgfee, medianfee, maxfee, minfee, feerate_percentiles,
-// avgfeerate, maxfeerate, minfeerate) are also omitted: Bitcoin Core
-// computes these via prevout lookups against an undo file, which Dilithion
-// does not currently expose at this layer. `totalfee` IS reported, derived
-// from the coinbase output sum minus the block subsidy -- the same formula
-// Bitcoin Core uses as a fallback when undo data is unavailable.
-//
-// Field set (alphabetical):
-//   avgtxsize, blockhash, height, ins, maxtxsize, mediantime, mediantxsize,
-//   mintxsize, outs, subsidy, time, total_out, total_size, totalfee, txs,
-//   utxo_increase
-//
-// Param: object {"hash_or_height": <hex|int>}. Either form accepted (the
-// hash field name is `hash`, the height field name is `height`; supplying
-// both is rejected).
-std::string CRPCServer::RPC_GetBlockStats(const std::string& params) {
-    if (!m_blockchain) throw std::runtime_error("Blockchain not initialized");
-    if (!m_chainstate) throw std::runtime_error("Chain state not initialized");
-
-    // Resolve target block.
-    std::string hash_str;
-    int64_t height_param = -1;
-    bool have_hash = TryParseStringParam(params, "hash", hash_str);
-    bool have_height = TryParseIntParam(params, "height", height_param);
-    // Convenience alias: hash_or_height accepts either.
-    std::string hor;
-    if (!have_hash && !have_height && TryParseStringParam(params, "hash_or_height", hor)) {
-        if (hor.size() == 64) { hash_str = hor; have_hash = true; }
-        else {
-            try { height_param = std::stoll(hor); have_height = true; }
-            catch (...) { throw std::runtime_error("hash_or_height must be a 64-char hex hash or an integer height"); }
-        }
-    }
-    if (have_hash && have_height) {
-        throw std::runtime_error("Specify either hash or height, not both");
-    }
-    if (!have_hash && !have_height) {
-        throw std::runtime_error("Missing hash or height parameter");
-    }
-
-    uint256 target_hash;
-    if (have_height) {
-        if (height_param < 0) throw std::runtime_error("height must be non-negative");
-        CBlockIndex* pTip = m_chainstate->GetTip();
-        if (!pTip || height_param > pTip->nHeight) {
-            throw std::runtime_error("Block height out of range");
-        }
-        CBlockIndex* pBlock = pTip->GetAncestor(static_cast<int>(height_param));
-        if (!pBlock) throw std::runtime_error("No block at that height");
-        target_hash = pBlock->GetBlockHash();
-    } else {
-        target_hash = ParseHash64(hash_str, "hash");
-    }
-
-    CBlock block;
-    if (!m_blockchain->ReadBlock(target_hash, block)) {
-        throw std::runtime_error("Block not found");
-    }
-
-    CBlockIndex blockIndex;
-    int height = -1;
-    if (m_blockchain->ReadBlockIndex(target_hash, blockIndex)) {
-        height = blockIndex.nHeight;
-    }
-    if (height < 0) {
-        // Fallback: walk ancestors via active tip.
-        CBlockIndex* pTip = m_chainstate->GetTip();
-        if (pTip) {
-            for (CBlockIndex* p = pTip; p; p = p->pprev) {
-                if (p->GetBlockHash() == target_hash) { height = p->nHeight; break; }
-            }
-        }
-    }
-    if (height < 0) throw std::runtime_error("Block index missing for given block");
-
-    CBlockValidator validator;
-    std::vector<CTransactionRef> transactions;
-    std::string deserializeError;
-    if (!validator.DeserializeBlockTransactions(block, transactions, deserializeError)) {
-        throw std::runtime_error("Failed to deserialize block transactions: " + deserializeError);
-    }
-
-    // Aggregates -- per-tx size + per-block input/output totals.
-    std::vector<size_t> tx_sizes;
-    tx_sizes.reserve(transactions.size());
-    uint64_t total_size = block.vtx.size();      // serialized tx-array size
-    uint64_t total_out  = 0;                      // total non-coinbase output value
-    uint64_t coinbase_out = 0;                    // sum of coinbase outputs (subsidy + fees)
-    uint64_t ins  = 0;
-    uint64_t outs = 0;
-    for (size_t i = 0; i < transactions.size(); ++i) {
-        const auto& tx = transactions[i];
-        size_t sz = tx->GetSerializedSize();
-        tx_sizes.push_back(sz);
-        if (i == 0) {
-            // Coinbase: the only TX whose inputs aren't real outpoints.
-            for (const auto& vo : tx->vout) coinbase_out += vo.nValue;
-            outs += tx->vout.size();
-        } else {
-            ins  += tx->vin.size();
-            outs += tx->vout.size();
-            for (const auto& vo : tx->vout) total_out += vo.nValue;
-        }
-    }
-
-    uint64_t subsidy = CBlockValidator::CalculateBlockSubsidy(static_cast<uint32_t>(height));
-    // totalfee = coinbase_out - subsidy (clamped at 0; under-paid coinbase
-    // would be a consensus failure, but we report 0 rather than overflow).
-    uint64_t totalfee = (coinbase_out >= subsidy) ? (coinbase_out - subsidy) : 0;
-
-    // Median txsize via std::nth_element (KISS, no helper header).
-    uint64_t mintxsize = 0, maxtxsize = 0, mediantxsize = 0;
-    double avgtxsize = 0.0;
-    if (!tx_sizes.empty()) {
-        auto minmax = std::minmax_element(tx_sizes.begin(), tx_sizes.end());
-        mintxsize = *minmax.first;
-        maxtxsize = *minmax.second;
-        size_t mid = tx_sizes.size() / 2;
-        std::nth_element(tx_sizes.begin(), tx_sizes.begin() + mid, tx_sizes.end());
-        mediantxsize = tx_sizes[mid];
-        uint64_t sum = 0;
-        for (size_t s : tx_sizes) sum += s;
-        avgtxsize = static_cast<double>(sum) / tx_sizes.size();
-    }
-
-    // mediantime: median nTime of the last 11 blocks (chain median past time)
-    // -- standard explorer field. Fallback to block.nTime when ancestors are
-    // unavailable.
-    uint64_t mediantime = block.nTime;
-    {
-        CBlockIndex* pTip = m_chainstate->GetTip();
-        if (pTip) {
-            CBlockIndex* p = pTip->GetAncestor(height);
-            if (p) {
-                std::vector<uint32_t> times;
-                CBlockIndex* it = p;
-                for (int i = 0; i < 11 && it; ++i) {
-                    times.push_back(it->nTime);
-                    it = it->pprev;
-                }
-                if (!times.empty()) {
-                    size_t mid = times.size() / 2;
-                    std::nth_element(times.begin(), times.begin() + mid, times.end());
-                    mediantime = times[mid];
-                }
-            }
-        }
-    }
-
-    // utxo_increase = (outputs created in this block) - (inputs consumed).
-    // Coinbase always creates outputs without consuming any prevouts.
-    int64_t utxo_increase = static_cast<int64_t>(outs) - static_cast<int64_t>(ins);
-
-    std::ostringstream oss;
-    oss << "{";
-    oss << "\"avgtxsize\":" << avgtxsize << ",";
-    oss << "\"blockhash\":\"" << target_hash.GetHex() << "\",";
-    oss << "\"height\":" << height << ",";
-    oss << "\"ins\":" << ins << ",";
-    oss << "\"maxtxsize\":" << maxtxsize << ",";
-    oss << "\"mediantime\":" << mediantime << ",";
-    oss << "\"mediantxsize\":" << mediantxsize << ",";
-    oss << "\"mintxsize\":" << mintxsize << ",";
-    oss << "\"outs\":" << outs << ",";
-    oss << "\"subsidy\":" << subsidy << ",";
-    oss << "\"time\":" << block.nTime << ",";
-    oss << "\"total_out\":" << total_out << ",";
-    oss << "\"total_size\":" << total_size << ",";
-    oss << "\"totalfee\":" << totalfee << ",";
-    oss << "\"txs\":" << transactions.size() << ",";
-    oss << "\"utxo_increase\":" << utxo_increase;
-    oss << "}";
-    return oss.str();
-}
 
 // ----------------------------------------------------------------------------
 // CRPCServer::RPC_WaitForNewBlock
