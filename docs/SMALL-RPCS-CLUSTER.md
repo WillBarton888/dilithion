@@ -1,8 +1,8 @@
 # Small RPCs Cluster
 
-Read-only / blocking RPCs ported from Bitcoin Core v28.0 (`src/rpc/blockchain.cpp` and `src/rpc/rawtransaction.cpp`).
+Read-only / blocking RPCs ported from Bitcoin Core v28.0 (`src/rpc/blockchain.cpp`, `src/rpc/rawtransaction.cpp`, `src/rpc/mempool.cpp`).
 
-Cluster: `waitfornewblock`, `waitforblock`, `waitforblockheight`, `gettxoutproof`, `verifytxoutproof` (5 RPCs). All five are part of T1.B (Bitcoin Core port roadmap).
+Cluster: `waitfornewblock`, `waitforblock`, `waitforblockheight`, `gettxoutproof`, `verifytxoutproof`, `testmempoolaccept` (6 RPCs). All six are part of T1.B (Bitcoin Core port roadmap).
 
 `getblockstats` is intentionally NOT in this cluster -- it requires per-tx fee fields that depend on undo-data exposure, and lands in a separate workstream alongside the `coinstatsindex` port.
 
@@ -143,9 +143,96 @@ curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json
 
 ---
 
+## testmempoolaccept
+
+Run mempool admission validation against one or more raw transactions WITHOUT broadcasting them. Returns per-tx accept/reject results matching `sendrawtransaction`'s acceptance semantics. Wallet/exchange UX preview path: callers can confirm a transaction will be accepted before paying network propagation cost.
+
+### Param
+
+```
+{
+  "rawtxs":     ["<hex>", ...],   // 1..25 hex-encoded raw transactions
+  "maxfeerate": <number|string>?  // accepted for BC schema compatibility; ignored
+}
+```
+
+`maxfeerate` is intentionally a no-op in Dilithion -- the node uses one fee policy via `Consensus::CheckFee` and has no separate accept-with-different-fee-cap path. We accept the parameter so clients targeting Bitcoin Core's RPC schema work unmodified.
+
+### Response
+
+```json
+[
+  {
+    "txid":          "<hex>",
+    "wtxid":         "<hex>",            // == txid (Dilithion has no segwit)
+    "allowed":       true,
+    "vsize":         <int>,              // serialized size in bytes
+    "fees":          {"base": <DIL>}     // fee in DIL (numeric, 8 dp)
+  },
+  {
+    "txid":          "<hex>",
+    "wtxid":         "<hex>",
+    "allowed":       false,
+    "reject-reason": "<exact AddTx wording>"
+  },
+  ...
+]
+```
+
+### Reject-reason wording
+
+Reject-reasons are byte-for-byte equivalent to `sendrawtransaction`'s error wording for the same input. A caller running `testmempoolaccept` then `sendrawtransaction` against the same hex must see the same string in both places. Documented reject reasons (T1.B-2 contract):
+
+| Reason | Trigger |
+|--------|---------|
+| `Coinbase transaction not allowed in mempool` | Coinbase tx (consensus violation) |
+| `Already in mempool` | Tx with same txid is already in the mempool |
+| `Transaction spends output already spent by transaction in mempool (double-spend attempt)` | Conflicts with an existing mempool tx |
+| `Negative fee not allowed` | Fee is negative |
+| `Transaction time must be positive` | `time <= 0` |
+| `Transaction time too far in future` | `time > now + 2h` |
+| `Transaction height cannot be zero` | `height == 0` |
+| `Transaction exceeds maximum size` | tx > 1 MB |
+| `Mempool full (transaction count limit)` | Mempool at count cap (no eviction attempted in TestAccept) |
+| `Mempool full (size limit)` | Mempool at size cap |
+| `Transaction validation failed: ...` | Failed `CTransactionValidator::CheckTransaction` (UTXO, signatures, etc.) |
+
+### State integrity guarantee
+
+`testmempoolaccept` is read-only on mempool state. After any number of calls (including 100 simultaneous calls from different clients), the following invariants hold:
+
+- `mempool.Size()` is unchanged.
+- `mapTx`, `setEntries`, `mapSpentOutpoints`, `mapDescendants` are all unchanged.
+- Counter atomics (`metric_adds`, `metric_add_failures`, etc.) are unchanged.
+
+A defence-in-depth check inside the handler logs a `STATE LEAK` warning to stderr if `mempool.Size()` changes across the call -- alarm-grade signal that should never fire.
+
+### Permission and rate limit
+
+- Permission tier: `READ_BLOCKCHAIN` (read-only-equivalent; no mutation).
+- Rate limit: 100/min per IP. Validation is non-trivial (CTransactionValidator + mempool checks) and a request can carry up to 25 raw txs, so 100/min keeps the worst-case validation budget bounded while supporting wallet/exchange preview rates.
+
+### Example
+
+```bash
+curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json' \
+  --data-binary '{"jsonrpc":"2.0","id":1,"method":"testmempoolaccept","params":{"rawtxs":["<hex>"]}}' \
+  http://127.0.0.1:8332/
+```
+
+### Source mapping
+
+| RPC | Bitcoin Core source |
+|-----|---------------------|
+| `testmempoolaccept` | `src/rpc/mempool.cpp` v28.0 |
+
+Test-accept semantics adapted from BC's `MemPoolAccept::AcceptToMemoryPool` with `test_accept=true`. Dilithion implements this via `CTxMemPool::TestAccept` -- a const method that delegates to a `ValidateLocked` private helper shared with `AddTxUnlocked`'s validation phase. The shared helper guarantees that `testmempoolaccept` and `sendrawtransaction` accept/reject under identical conditions.
+
+---
+
 ## Error handling
 
-All six handlers throw `std::runtime_error` (translated to a JSON-RPC error response) on:
+All seven handlers throw `std::runtime_error` (translated to a JSON-RPC error response) on:
 
 - Missing required param.
 - Malformed hex (length != 64 for 32-byte hashes; non-hex characters; truncated proof blob).
@@ -168,3 +255,4 @@ LOW. All read-only or blocking-only; no consensus, no P2P, no storage schema cha
 | `waitforblockheight`   | `src/rpc/blockchain.cpp` v28.0 |
 | `gettxoutproof`        | `src/rpc/rawtransaction.cpp` v28.0 |
 | `verifytxoutproof`     | `src/rpc/rawtransaction.cpp` v28.0 |
+| `testmempoolaccept`    | `src/rpc/mempool.cpp` v28.0 |

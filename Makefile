@@ -634,6 +634,7 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/coinstatsindex_tests.o \
 	$(OBJ_DIR)/test/coinstatsindex_integration_tests.o \
 	$(OBJ_DIR)/test/mempool_persist_tests.o \
+	$(OBJ_DIR)/test/testmempoolaccept_tests.o \
 	$(OBJ_DIR)/test/rpc_small_cluster_tests.o \
 	$(OBJ_DIR)/test/undo_data_tests.o \
 	$(OBJ_DIR)/test/fee_estimator_tests.o \
