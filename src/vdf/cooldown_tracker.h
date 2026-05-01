@@ -57,15 +57,24 @@ public:
      *  activeWindow: long window (how many recent blocks define "active miners")
      *  shortWindow: short window for dual-window cooldown (0 = disabled)
      *  activationHeight: stabilization fork height (dual-window + time-based expiry)
-     *  targetBlockTime: seconds per block (for time-based expiry calculation) */
+     *  targetBlockTime: seconds per block (for time-based expiry calculation)
+     *  timeBasedExpiryRetiredHeight: v4.0.22 -- height at which time-based
+     *      cooldown expiry is RETIRED. Above this height, only block-based
+     *      cooldown applies. Was added to fix the same-miner concentration
+     *      observed during 2026-04-25 incident: time-based expiry let one
+     *      miner win 3 consecutive blocks because each was >360s after the
+     *      previous (cooldown=8 * targetBlockTime=45 = 360s). 999999999 =
+     *      time-based expiry never retired (legacy behaviour). */
     explicit CCooldownTracker(int activeWindow = ACTIVE_WINDOW,
                               int shortWindow = 0,
                               int activationHeight = 999999999,
-                              int targetBlockTime = 45)
+                              int targetBlockTime = 45,
+                              int timeBasedExpiryRetiredHeight = 999999999)
         : m_activeWindow(activeWindow),
           m_shortWindow(shortWindow),
           m_stabilizationHeight(activationHeight),
-          m_targetBlockTime(targetBlockTime) {}
+          m_targetBlockTime(targetBlockTime),
+          m_timeBasedExpiryRetiredHeight(timeBasedExpiryRetiredHeight) {}
 
     /** Compute cooldown from active miner count. */
     static int CalculateCooldown(int activeMiners);
@@ -162,6 +171,7 @@ private:
     int m_shortWindow{0};                   // short window (0 = disabled)
     int m_stabilizationHeight{999999999};   // activation height for dual-window + time expiry
     int m_targetBlockTime{45};              // seconds per block
+    int m_timeBasedExpiryRetiredHeight{999999999};  // v4.0.22: above this height, block-only cooldown
 
     // address → height of most recent win
     std::map<Address, int> m_lastWinHeight;

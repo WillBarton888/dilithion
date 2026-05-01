@@ -263,6 +263,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["decoderawtransaction"] = [this](const std::string& p) { return RPC_DecodeRawTransaction(p); };
     m_handlers["getindexinfo"] = [](const std::string& p) { return RPC_GetIndexInfo(p); };
     m_handlers["addnode"] = [this](const std::string& p) { return RPC_AddNode(p); };
+    m_handlers["disconnectnode"] = [this](const std::string& p) { return RPC_DisconnectNode(p); };  // v4.0.22 manual peer disconnect
 
     // x402 payment methods (DilV only)
     m_handlers["verifyx402payment"] = [this](const std::string& p) { return RPC_VerifyX402Payment(p); };
@@ -5894,6 +5895,74 @@ std::string CRPCServer::RPC_AddNode(const std::string& params) {
     std::cout << "[RPC] addnode: Connected to " << node_str << " (node_id=" << pnode->id << ", manual)" << std::endl;
 
     return "null";  // Success
+}
+
+// v4.0.22 — Manual peer disconnect RPC. Bitcoin Core compatible: disconnects
+// all current connections matching the supplied address (an IP may have
+// multiple connections, e.g. inbound + outbound). Used as an operator tool
+// to evict stuck/at-capacity sync peers without needing to restart the node.
+// Does NOT remove the peer from the addnode list (use addnode remove for that).
+std::string CRPCServer::RPC_DisconnectNode(const std::string& params) {
+    // Parse params - expecting {"address":"ip" or "ip:port"} (Bitcoin Core compat)
+    // Accept "node" as alias for compatibility with addnode-style callers.
+    size_t addr_pos = params.find("\"address\"");
+    if (addr_pos == std::string::npos) {
+        addr_pos = params.find("\"node\"");
+    }
+    if (addr_pos == std::string::npos) {
+        throw std::runtime_error("Missing address parameter");
+    }
+
+    size_t colon = params.find(":", addr_pos);
+    size_t quote1 = params.find("\"", colon);
+    size_t quote2 = params.find("\"", quote1 + 1);
+    if (quote1 == std::string::npos || quote2 == std::string::npos) {
+        throw std::runtime_error("Invalid address parameter format");
+    }
+
+    std::string addr_str = params.substr(quote1 + 1, quote2 - quote1 - 1);
+
+    // Parse IP[:port] from addr_str. Port is optional; if omitted we match all
+    // connections from that IP regardless of remote port.
+    std::string ip_str;
+    uint16_t port = 0;  // 0 = match any port
+    bool port_specified = false;
+
+    if (CSock::ParseEndpoint(addr_str, ip_str, port)) {
+        port_specified = true;
+    } else {
+        // Bare IP — match all ports
+        if (addr_str.find(':') != std::string::npos) {
+            throw std::runtime_error("Invalid address format. Use [IPv6]:port bracket notation");
+        }
+        ip_str = addr_str;
+    }
+
+    extern NodeContext g_node_context;
+    if (!g_node_context.connman) {
+        throw std::runtime_error("Connection manager not initialized");
+    }
+
+    // Find all matching nodes and disconnect them. An IP may have several
+    // simultaneous connections (e.g. one inbound + one outbound); evict all.
+    auto nodes = g_node_context.connman->GetNodes();
+    int disconnected = 0;
+    for (CNode* node : nodes) {
+        if (!node) continue;
+        std::string node_ip = node->addr.ToStringIP();
+        if (node_ip != ip_str) continue;
+        if (port_specified && node->addr.port != port) continue;
+        g_node_context.connman->DisconnectNode(node->id, "manual disconnectnode RPC");
+        ++disconnected;
+    }
+
+    std::cout << "[RPC] disconnectnode: " << disconnected
+              << " connection(s) disconnected for " << addr_str << std::endl;
+
+    // Return a small JSON object so callers can confirm action took effect.
+    std::ostringstream oss;
+    oss << "{\"address\":\"" << addr_str << "\",\"disconnected\":" << disconnected << "}";
+    return oss.str();
 }
 
 // ============================================================================

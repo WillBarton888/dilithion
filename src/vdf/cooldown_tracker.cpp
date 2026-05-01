@@ -46,35 +46,19 @@ bool CCooldownTracker::IsInCooldown(const Address& addr, int height, int64_t cur
         return false;
 
     // Time-based expiry (post-stabilization, when timestamp provided).
-    if (height >= m_stabilizationHeight && currentTimestamp > 0) {
+    // v4.0.22: above m_timeBasedExpiryRetiredHeight, time-based expiry is
+    // RETIRED. Pure block-based cooldown applies. Fixes same-miner
+    // concentration observed during 2026-04-25 incident: time-based expiry
+    // (cooldown_blocks * target_block_time) let one miner win 3 consecutive
+    // blocks because each block was >360s after the previous.
+    if (height >= m_stabilizationHeight && currentTimestamp > 0
+                                        && height < m_timeBasedExpiryRetiredHeight) {
         auto tsIt = m_lastWinTimestamp.find(addr);
         if (tsIt != m_lastWinTimestamp.end() && tsIt->second > 0) {
             int64_t timeGap = currentTimestamp - tsIt->second;
             int64_t timeCooldown = static_cast<int64_t>(cooldown) * m_targetBlockTime;
-            // DEBUG: dump full state for blocks near 259
-            if (height >= 255 && height <= 265) {
-                std::cerr << "[COOLDOWN-TRACE] h=" << height
-                          << " lastWinH=" << it->second
-                          << " blockGap=" << blockGap
-                          << " cooldown=" << cooldown
-                          << " blockTs=" << currentTimestamp
-                          << " lastWinTs=" << tsIt->second
-                          << " timeGap=" << timeGap
-                          << " timeCooldown=" << timeCooldown
-                          << " timeExpired=" << (timeGap >= timeCooldown ? "YES" : "NO")
-                          << " entries=" << m_heightToWinner.size()
-                          << " stabH=" << m_stabilizationHeight
-                          << " target=" << m_targetBlockTime
-                          << std::endl;
-            }
             if (timeGap >= timeCooldown)
                 return false;  // time-based expiry
-        } else if (height >= 255 && height <= 265) {
-            std::cerr << "[COOLDOWN-TRACE] h=" << height
-                      << " lastWinH=" << it->second
-                      << " NO TIMESTAMP for this MIK (tsIt="
-                      << (tsIt == m_lastWinTimestamp.end() ? "END" : "ZERO")
-                      << ")" << std::endl;
         }
     }
 
@@ -92,7 +76,9 @@ bool CCooldownTracker::IsInCooldownExcludingHeight(const Address& addr, int heig
         int cooldown = ComputeEffectiveCooldown(height);
         int blockGap = height - it->second;
         if (blockGap >= cooldown) return false;
-        if (height >= m_stabilizationHeight && currentTimestamp > 0) {
+        // v4.0.22: gated time-based expiry (see IsInCooldown for rationale)
+        if (height >= m_stabilizationHeight && currentTimestamp > 0
+                                            && height < m_timeBasedExpiryRetiredHeight) {
             auto tsIt = m_lastWinTimestamp.find(addr);
             if (tsIt != m_lastWinTimestamp.end() && tsIt->second > 0) {
                 int64_t timeGap = currentTimestamp - tsIt->second;
@@ -157,7 +143,9 @@ bool CCooldownTracker::IsInCooldownExcludingHeight(const Address& addr, int heig
     int blockGap = height - it->second;
     if (blockGap >= cooldown) return false;
 
-    if (height >= m_stabilizationHeight && currentTimestamp > 0) {
+    // v4.0.22: gated time-based expiry (see IsInCooldown for rationale)
+    if (height >= m_stabilizationHeight && currentTimestamp > 0
+                                        && height < m_timeBasedExpiryRetiredHeight) {
         auto tsIt = simLastWinTs.find(addr);
         if (tsIt != simLastWinTs.end() && tsIt->second > 0) {
             int64_t timeGap = currentTimestamp - tsIt->second;

@@ -124,6 +124,7 @@ ChainParams ChainParams::Mainnet() {
     params.consecutiveMinerCheckHeight = 999999999; // Disabled (VDF not active on mainnet)
     params.consecutiveMinerStallExemptionRetiredHeight = 999999999;  // v4.0.21 Patch A: disabled on DIL (no VDF)
     params.soloExemptionLifetimeGateHeight = 999999999;              // v4.0.21 Patch C: disabled on DIL (no VDF)
+    params.timeBasedCooldownExpiryRetiredHeight = 999999999;         // v4.0.22 Patch E: disabled on DIL (no VDF)
     params.vdfCooldownShortWindow = 0;               // Disabled (VDF not active on mainnet)
     params.stabilizationForkHeight = 999999999;      // Disabled (VDF not active on mainnet)
     params.mikWindowCapWindow = 0;                   // Disabled (VDF not active on mainnet)
@@ -314,6 +315,7 @@ ChainParams ChainParams::Testnet() {
     params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive from genesis
     params.consecutiveMinerStallExemptionRetiredHeight = 0;  // v4.0.21 Patch A: testnet retires stall exemption from genesis
     params.soloExemptionLifetimeGateHeight = 0;              // v4.0.21 Patch C: testnet activates lifetime gate from genesis
+    params.timeBasedCooldownExpiryRetiredHeight = 0;         // v4.0.22 Patch E: testnet retires time-based expiry from genesis
     params.vdfCooldownShortWindow = 0;         // Disabled — avoids MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window + time expiry from genesis
     params.mikWindowCapWindow = 480;           // 480 blocks = ~6h at 45s/block (MVP)
@@ -418,7 +420,7 @@ ChainParams ChainParams::DilV() {
     // Genesis block itself is exempt (code at chain.cpp:889-890 skips height 0)
     // MIK required from block 1 onward
     params.dfmpActivationHeight = 0;
-    params.dfmpAssumeValidHeight = 36500;  // v4.0.17: match new checkpoint at 36500 — skip cooldown/ban validation for checkpointed blocks during IBD
+    params.dfmpAssumeValidHeight = 44469;  // v4.0.22: 2026-04-25 incident -- skip strict consensus checks (cooldown, MIK, DNA, attestation) for historical chain through the convergence checkpoint at 44469. Above 44469, Patches A/C activate (44470) and strict deterministic rules apply. Bypass exactly matches checkpoint height -- no vulnerability window.
 
     // All DFMP versions active from genesis — use modern rules from day one
     params.dfmpV3ActivationHeight = 0;
@@ -452,14 +454,23 @@ ChainParams ChainParams::DilV() {
     params.dfmpCooldownConsensusHeight = 0;    // Consensus-enforced cooldown from genesis
     params.stallExemptionV2Height = 0;         // Tightened stall exemption from genesis
     params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive blocks from same miner from genesis
-    // v4.0.21 — Patch A: retire 1-hour stall exemption in CheckConsecutiveMiner +
-    // CheckVDFReplacementPreflight. Activation = 44600 (forward-only, ~150 blocks
-    // above current network tip ~44400 to give miners ~110 minutes to upgrade).
-    // Existing chain history below 44600 retains the prior rule.
-    params.consecutiveMinerStallExemptionRetiredHeight = 44600;
-    // v4.0.21 — Patch C: tighten solo-miner exemption with deterministic lifetime
-    // gate. Same activation height as Patch A.
-    params.soloExemptionLifetimeGateHeight = 44600;
+    // v4.0.22 -- Patches A/C/E pushed to height 50000 (was 44470) on
+    // 2026-04-25 after the 44470 activation produced an unrecoverable
+    // consensus split: v4.0.16 miners continued producing blocks under
+    // the OLD cooldown rules (no stall-exemption retirement, no solo
+    // gate, time-based expiry still active), and v4.0.22 seeds with the
+    // new rules at 44470 rejected those blocks. The miner network kept
+    // extending the v4.0.16 chain past 44760+, while the seed canonical
+    // chain (NYC/SYD) stalled at ~44494. Pushing all three activations
+    // to 50000 lets seeds accept the v4.0.16 chain through the existing
+    // miner population, gives time to coordinate a miner upgrade before
+    // the new rules engage, and avoids forcing the choice between
+    // "minority canonical chain" and "longer rule-violating chain"
+    // tonight. The cooldown rule changes are still planned -- just
+    // moved to a coordinated upgrade window above the live tip.
+    params.consecutiveMinerStallExemptionRetiredHeight = 50000;
+    params.soloExemptionLifetimeGateHeight = 50000;
+    params.timeBasedCooldownExpiryRetiredHeight = 50000;
     params.vdfCooldownShortWindow = 0;         // Disabled at genesis — avoids short-window MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window cooldown + time-based expiry from genesis
 
@@ -534,6 +545,21 @@ ChainParams ChainParams::DilV() {
     params.checkpoints.emplace_back(15000, uint256S("45f5877adcc1ec2dab453412d6a5cb3fd9383fc97a184aa4ec855db55212f5d6"));
     params.checkpoints.emplace_back(18700, uint256S("1fbcf55c40c735596b68772af0072b98342a098bd5c1ff0b3bb26423720e9295"));
     params.checkpoints.emplace_back(36500, uint256S("3a6c72ee0ac27508fe82b76ed561dc93bc52ee5a26825cbf3f693bbc7070fd63"));
+    // v4.0.22 (2026-04-25): the 44469 convergence checkpoint was REMOVED.
+    // Originally added to anchor the seed-chosen canonical chain after the
+    // 2026-04-25 incident, but in combination with the Patches A/C/E
+    // cooldown rule changes activating at 44470 it created an unrecoverable
+    // consensus split: v4.0.16 miners kept extending their pre-checkpoint
+    // chain (rejected by the 44469 checkpoint at chainstate level) while
+    // the seed canonical chain was rejected from accumulating blocks (any
+    // miner-produced block past 44470 hit cooldown violation). With both
+    // the cooldown rules pushed to 50000 AND this checkpoint removed,
+    // chain-work-based selection (with Patch H storing competing siblings)
+    // can pick whichever chain the network actually extends -- restoring
+    // automatic convergence with the live miner population. The next solid
+    // checkpoint at 44000 remains as the last pre-incident anchor; any
+    // future post-incident anchor must be added only after rule changes
+    // are coordinated with miners.
 
     // No assume-valid yet
     params.defaultAssumeValid = "";

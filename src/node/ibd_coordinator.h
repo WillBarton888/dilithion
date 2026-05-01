@@ -175,7 +175,11 @@ private:
     // Headers sync peer management (Bitcoin Core style)
     void SelectHeadersSyncPeer();           // Pick a sync peer if none selected
     bool CheckHeadersSyncProgress();        // Check if sync peer is making progress
-    void SwitchHeadersSyncPeer();           // Switch to a different peer
+    // v4.0.22 Patch F: penalize=true (default, used by stall-timeout path)
+    // increments consecutive-stalls counter; penalize=false (used by
+    // coherence-recovery path) skips the counter so peer rotation due to
+    // chain coherence breaks doesn't exhaust the bad-peer pool.
+    void SwitchHeadersSyncPeer(bool penalize = true);
 
     // IBD HANG FIX #6: Hang cause tracking
     enum class HangCause {
@@ -212,6 +216,13 @@ private:
     std::set<int> m_headers_bad_peers;                              // Peers that have repeatedly failed to deliver headers
     int m_headers_sync_peer_consecutive_stalls{0};                  // Consecutive stalls for current peer
     static constexpr int MAX_HEADERS_CONSECUTIVE_STALLS = 3;        // Ban peer after N consecutive stalls
+
+    // v4.0.22: Throttle for active header recovery on chain-coherence breaks.
+    // Without throttle, FetchBlocks fires recovery on every tick (~1s) when
+    // chain has a header gap, exhausting peer pool via bad-peer tracking.
+    // 30s throttle gives header sync time to fill the gap before retrying.
+    std::chrono::steady_clock::time_point m_last_active_recovery_time{};
+    static constexpr int ACTIVE_RECOVERY_THROTTLE_SECONDS = 30;
 
     // Blocks sync peer tracking (single peer for block download, different from headers peer)
     int m_blocks_sync_peer{-1};                                     // NodeId of block sync peer (-1 = none)

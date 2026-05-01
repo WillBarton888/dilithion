@@ -741,15 +741,25 @@ BlockProcessResult ProcessNewBlock(
     // Post-fork (>= timestampValidationHeight): rejects blocks with timestamp > now + 600s or <= MTP.
     // Block at timestampValidationHeight (24500 mainnet) is the first to use the 600s limit.
     // Orphan blocks (no parent) skip validation — re-validated when parent connects.
+    //
+    // v4.0.22 (2026-04-25 incident): also skip if block is at or below
+    // dfmpAssumeValidHeight. The historical chain in the incident range
+    // contains blocks whose timestamps are inconsistent with current MTP
+    // computation (likely due to clock skew or bug in the originating
+    // miners). They were accepted by the network at the time. Above
+    // dfmpAssumeValidHeight, strict validation applies.
     // =========================================================================
     {
         int tsValHeight = (Dilithion::g_chainParams)
             ? Dilithion::g_chainParams->timestampValidationHeight : 999999999;
+        int tsAssumeValidHeight = (Dilithion::g_chainParams)
+            ? Dilithion::g_chainParams->dfmpAssumeValidHeight : 0;
 
         CBlockIndex* pParentTS = g_chainstate.GetBlockIndex(block.hashPrevBlock);
         int tsBlockHeight = (pParentTS != nullptr) ? pParentTS->nHeight + 1 : currentChainHeight + 1;
 
-        if (pParentTS != nullptr && tsBlockHeight >= tsValHeight) {
+        if (pParentTS != nullptr && tsBlockHeight >= tsValHeight
+                                  && tsBlockHeight > tsAssumeValidHeight) {
             if (!CheckBlockTimestamp(block, pParentTS, tsBlockHeight)) {
                 std::cerr << "[ProcessNewBlock] REJECTED: Block at height " << tsBlockHeight
                           << " failed timestamp validation" << std::endl;

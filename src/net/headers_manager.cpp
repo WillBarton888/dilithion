@@ -170,35 +170,43 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         // But we MUST still store headers so the chain walk in
         // GetBestChainHashAtHeight() works during IBD block fetching.
         if (expectedHeight <= highestCheckpoint) {
-            if (heightHasHeaders) {
-                // We have our canonical header at this height - use it as pprev
-                uint256 existingHash = *heightIt->second.begin();
-                auto existingIt = mapHeaders.find(existingHash);
-                if (existingIt != mapHeaders.end()) {
-                    pprev = &existingIt->second;
-                    prevHash = existingHash;
-                    heightStart = existingIt->second.height;
-                    continue;  // Skip without computing hash
-                }
-            }
-            // BUG FIX: Previously set pprev=nullptr and continued, silently
-            // dropping the header. On a fresh sync this meant NO headers below
-            // the checkpoint were stored, breaking GetBestChainHashAtHeight()
-            // for ALL heights (chain walk can't traverse the gap).
-            // Fix: compute hash and store the header, just skip PoW validation.
+            // Patch H (v4.0.22) -- Compute incoming hash and check for true
+            // duplicate. PRIOR BUG: if mapHeightIndex already had ANY header
+            // at this height, the incoming header was silently dropped via
+            // *heightIt->second.begin() picking the first-arrived sibling.
+            // That left competing siblings unstored, so when a node received
+            // the canonical sibling AFTER committing to a wrong-fork sibling
+            // (LDN/SGP at 44468 during the 2026-04-25 incident), the canonical
+            // header was never seen by chain selection. UpdateBestHeader could
+            // not reorg because the alternative chain did not exist in
+            // mapHeaders. Fix: store every distinct sibling and let cumulative
+            // chain work decide via UpdateBestHeader. Checkpoint at the next
+            // height (or above) still enforces which sibling is canonical via
+            // the parent-hash link from the checkpoint header.
             uint256 storageHash = header.GetHash();
-            if (mapHeaders.find(storageHash) != mapHeaders.end()) {
-                // Already stored (duplicate) - advance pprev and continue
-                pprev = &mapHeaders[storageHash];
+
+            // True duplicate: same hash already stored - advance pprev and skip.
+            auto existingIt = mapHeaders.find(storageHash);
+            if (existingIt != mapHeaders.end()) {
+                pprev = &existingIt->second;
                 prevHash = storageHash;
+                heightStart = existingIt->second.height;
                 continue;
             }
+
+            // New header at this height (either empty slot or competing sibling).
+            // Skip the expensive RandomX PoW check (below checkpoint, trust
+            // anchor handles validity) but DO store and register the header so
+            // cumulative chain-work comparison can pick the canonical chain
+            // over a stuck wrong-fork sibling.
             int height = pprev ? (pprev->height + 1) : expectedHeight;
             uint256 chainWork = CalculateChainWork(header, pprev);
             HeaderWithChainWork headerData(header, height);
             headerData.chainWork = chainWork;
             mapHeaders[storageHash] = headerData;
             AddToHeightIndex(storageHash, height);
+            UpdateChainTips(storageHash);   // Patch H -- register competing tip
+            UpdateBestHeader(storageHash);  // Patch H -- re-evaluate active chain
             pprev = &mapHeaders[storageHash];
             prevHash = storageHash;
             if (heightStart < 0) heightStart = height;
@@ -1920,39 +1928,29 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
 
         auto it = mapHeaders.find(current);
         if (it == mapHeaders.end()) {
-            // Chain walk broken - parent hash not in mapHeaders.
-            // This happens during forks when the best header's ancestry has gaps.
-            // BUG #282 FIX: Fall back to mapHeightIndex to find the target height
-            // directly, instead of returning null and causing a tight request loop.
+            // v4.0.22 — Chain walk broken (parent hash not in mapHeaders).
+            //
+            // BUG #282 originally added a mapHeightIndex fallback here to "fix"
+            // tight request loops. That fallback violates chain coherence: it
+            // returns the highest-work header AT THIS HEIGHT, which may belong
+            // to a DIFFERENT branch than the heights adjacent to it. The IBD
+            // scheduler then assembles mixed-fork GETDATA batches, blocks from
+            // different forks get applied to the same UTXO set, and we hit
+            // "Input references non-existent UTXO" errors mid-IBD (fresh nodes)
+            // or unable-to-reorg deadlock (existing nodes — incident 2026-04-25).
+            //
+            // Correct behaviour: return null. Caller (ibd_coordinator) MUST treat
+            // null as "header chain incomplete here" and stop building the batch
+            // at this height — never substitute a same-height header from a
+            // different branch.
             static int chainBreakLogCount = 0;
             if (chainBreakLogCount < 10) {
                 chainBreakLogCount++;
                 std::cerr << "[GetBestChainHashAtHeight] CHAIN BREAK at height " << currentHeight
-                          << " - falling back to height index for target " << height << std::endl;
+                          << " (target " << height << ") -- returning null. "
+                          << "Caller should pause IBD here and trigger header recovery." << std::endl;
             }
-
-            // Try to find the target height via mapHeightIndex
-            auto targetIt = mapHeightIndex.find(height);
-            if (targetIt != mapHeightIndex.end() && !targetIt->second.empty()) {
-                // Find the header with the most chainwork at this height
-                uint256 bestHash;
-                uint256 bestWork;
-                for (const auto& h : targetIt->second) {
-                    auto hdrIt = mapHeaders.find(h);
-                    if (hdrIt != mapHeaders.end()) {
-                        if (bestHash.IsNull() || ChainWorkGreaterThan(hdrIt->second.chainWork, bestWork)) {
-                            bestWork = hdrIt->second.chainWork;
-                            // Return RandomX hash for peer communication
-                            bestHash = hdrIt->second.randomXHash.IsNull() ? h : hdrIt->second.randomXHash;
-                        }
-                    }
-                }
-                if (!bestHash.IsNull()) {
-                    m_bestChainCache[height] = bestHash;
-                    return bestHash;
-                }
-            }
-            break;
+            return uint256();
         }
 
         // BUG FIX: Return RandomX hash, not SHA256 hash
@@ -1985,26 +1983,13 @@ uint256 CHeadersManager::GetBestChainHashAtHeight(int height) const
     // Fully populated cache from best header to genesis
     m_bestChainCacheDirty = false;
 
-    // BUG #282 FIX: Height not found via chain walk - try mapHeightIndex as last resort
-    auto fallbackIt = mapHeightIndex.find(height);
-    if (fallbackIt != mapHeightIndex.end() && !fallbackIt->second.empty()) {
-        uint256 bestHash;
-        uint256 bestWork;
-        for (const auto& h : fallbackIt->second) {
-            auto hdrIt = mapHeaders.find(h);
-            if (hdrIt != mapHeaders.end()) {
-                if (bestHash.IsNull() || ChainWorkGreaterThan(hdrIt->second.chainWork, bestWork)) {
-                    bestWork = hdrIt->second.chainWork;
-                    bestHash = hdrIt->second.randomXHash.IsNull() ? h : hdrIt->second.randomXHash;
-                }
-            }
-        }
-        if (!bestHash.IsNull()) {
-            m_bestChainCache[height] = bestHash;
-            return bestHash;
-        }
-    }
-
+    // v4.0.22 — Height not found on the best-header-chain ancestry path.
+    // BUG #282's mapHeightIndex fallback is removed for the same reason as
+    // the in-walk fallback above (chain coherence). If the best-header chain
+    // doesn't have a header at this height on its actual ancestry, the
+    // caller MUST NOT request some other branch's header at this height --
+    // doing so would assemble a mixed-fork GETDATA batch (incident
+    // 2026-04-25). Return null so the caller pauses block fetching here.
     return uint256();
 }
 
@@ -2498,22 +2483,43 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 auto heightIt = mapHeightIndex.find(expectedHeight);
                 bool heightHasHeaders = (heightIt != mapHeightIndex.end() && !heightIt->second.empty());
 
-                // CHECKPOINT OPTIMIZATION: Skip existing headers below checkpoint
-                if (expectedHeight <= checkpointHeight && heightHasHeaders) {
-                    uint256 existingHash = *heightIt->second.begin();
-                    auto existingIt = mapHeaders.find(existingHash);
+                // Patch H (v4.0.22) -- Same silent-drop bug as ProcessHeaders
+                // FAST PATH 1. PRIOR BUG: when below checkpoint and we already
+                // had ANY header at this height, code picked
+                // *heightIt->second.begin() (first-arrived sibling) and dropped
+                // the incoming header without comparing hashes. Competing
+                // siblings were never stored, so chain selection could not
+                // reorg from a wrong-fork sibling to the canonical sibling.
+                // Fix: use the actual incoming hash for true-duplicate check;
+                // store competing siblings so UpdateBestHeader can compare
+                // cumulative chain work and pick the canonical chain.
+                uint256 storageHash = allHashes[batchStart + i];
+
+                if (expectedHeight <= checkpointHeight) {
+                    auto existingIt = mapHeaders.find(storageHash);
                     if (existingIt != mapHeaders.end()) {
-                        // DEBUG: Log checkpoint optimization with work info
-                        // BUG FIX: Update best header for existing checkpoint headers too
-                        UpdateBestHeader(existingHash);
+                        // True duplicate (same hash) -- advance pprev and skip.
+                        UpdateBestHeader(storageHash);
                         pprev = &existingIt->second;
-                        prevHash = existingHash;
+                        prevHash = storageHash;
                         continue;
                     }
+                    // New header at this height (empty slot or competing sibling).
+                    // Store with cumulative chain work but skip PoW validation
+                    // (below checkpoint, trust anchor handles validity).
+                    int height = pprev ? (pprev->height + 1) : expectedHeight;
+                    uint256 chainWork = CalculateChainWork(header, pprev);
+                    HeaderWithChainWork headerData(header, height);
+                    headerData.chainWork = chainWork;
+                    mapHeaders[storageHash] = headerData;
+                    AddToHeightIndex(storageHash, height);
+                    UpdateChainTips(storageHash);   // register competing tip
+                    UpdateBestHeader(storageHash);  // re-evaluate active chain
+                    pprev = &mapHeaders[storageHash];
+                    prevHash = storageHash;
+                    totalProcessed++;
+                    continue;  // Skip PoW validation but header is now stored
                 }
-
-                // Get pre-computed hash (computed in parallel in STEP 1)
-                uint256 storageHash = allHashes[batchStart + i];
 
                 // Skip TRUE duplicates (same hash already exists)
                 if (mapHeaders.find(storageHash) != mapHeaders.end()) {
