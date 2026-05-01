@@ -543,7 +543,7 @@ struct NodeConfig {
     int max_connections = 0;         // --maxconnections: Maximum peer connections (0 = default 125)
     int max_connections_per_ip = 2;  // --max-connections-per-ip: Max inbound per IP (default 2, range 1-64)
     int attestation_rate_limit = 1;  // --attestation-rate-limit: Max attestations per /24 subnet per day (Sybil defense)
-    bool use_new_peerman = false;    // Phase 6 PR6.5b.1a: --usenewpeerman opt-in to port-CPeerManager (experimental / developer-only; default OFF)
+    bool use_new_peerman = false;    // --usenewpeerman opt-in to port-CPeerManager (Phase 6 PR6.5b.1a wired; Phases 6/7/8 closed; default OFF until A1/A2 Track A decision per docs/runbooks/usenewpeerman-flip-runbook.md)
 
     bool ParseArgs(int argc, char* argv[]) {
         for (int i = 1; i < argc; ++i) {
@@ -749,11 +749,17 @@ struct NodeConfig {
                 }
             }
             else if (arg == "--usenewpeerman" || arg == "--usenewpeerman=1") {
-                // Phase 6 PR6.5b.1a: opt-in to port-CPeerManager (experimental).
-                // See dilithion-node.cpp parsing for full context. Default OFF.
+                // --usenewpeerman opt-in to the Bitcoin Core port PeerManager.
+                // Wired in Phase 6 PR6.5b.1a; full body work + dual-layer
+                // review closed in Phases 6/7/8 (2026-05-01). Available for
+                // opt-in burn-in. Default OFF until the Phase 9+ A1/A2
+                // Track A decision discharges the 8-bullet pre-condition
+                // list — see docs/runbooks/usenewpeerman-flip-runbook.md
+                // for the operator procedure.
                 use_new_peerman = true;
             }
             else if (arg == "--usenewpeerman=0") {
+                // Explicit opt-out. Same as default; included for symmetry.
                 use_new_peerman = false;
             }
             else if (arg == "--help" || arg == "-h") {
@@ -802,10 +808,11 @@ struct NodeConfig {
         std::cout << "  --maxconnections=<n>  Maximum peer connections (default: 125)" << std::endl;
         std::cout << "  --max-connections-per-ip=<n>" << std::endl;
         std::cout << "                        Max inbound connections per IP (default: 2, range: 1-64)" << std::endl;
-        std::cout << "  --usenewpeerman       [EXPERIMENTAL / DEV-ONLY] Opt in to the Bitcoin Core" << std::endl;
-        std::cout << "                        port PeerManager (Phase 6 PR6.5b). Default OFF." << std::endl;
-        std::cout << "                        Production should leave this disabled until the" << std::endl;
-        std::cout << "                        port body work (PR6.5b.5/6) completes." << std::endl;
+        std::cout << "  --usenewpeerman       Opt in to the Bitcoin Core port PeerManager." << std::endl;
+        std::cout << "                        Available for burn-in. Default OFF." << std::endl;
+        std::cout << "                        Default flip is gated on the Phase 9+ A1/A2" << std::endl;
+        std::cout << "                        decision; see docs/runbooks/usenewpeerman-" << std::endl;
+        std::cout << "                        flip-runbook.md for the operator procedure." << std::endl;
         std::cout << "  --help, -h            Show this help message" << std::endl;
         std::cout << std::endl;
         std::cout << "Configuration:" << std::endl;
