@@ -122,6 +122,25 @@ public:
     std::optional<CTxMemPoolEntry> GetTxIfExists(const uint256& txid) const;  // MEMPOOL-010 FIX: TOCTOU-safe API
     std::vector<CTransactionRef> GetOrderedTxs() const;
     std::vector<CTransactionRef> GetTopTxs(size_t n) const;
+
+    /**
+     * Snapshot every CTxMemPoolEntry currently in the mempool.
+     *
+     * Used by the mempool-persist subsystem (see src/kernel/mempool_persist.h)
+     * to dump the full mempool to disk on shutdown. Unlike GetOrderedTxs() and
+     * GetTopTxs(), this returns the FULL ENTRY (with fee, time, height
+     * metadata) rather than just CTransactionRef -- because mempool.dat needs
+     * to round-trip the metadata for fee-estimator continuity.
+     *
+     * The returned vector is a SNAPSHOT under the mempool lock; copies are
+     * cheap (CTxMemPoolEntry is small + holds a CTransactionRef which is
+     * shared_ptr).
+     *
+     * No DoS limit on the count -- caller is the persist module which always
+     * dumps the full mempool. If a future caller needs a bounded snapshot,
+     * add a separate method.
+     */
+    std::vector<CTxMemPoolEntry> GetAllEntries() const;
     void Clear();
     size_t Size() const;
     size_t GetMempoolSize() const;
