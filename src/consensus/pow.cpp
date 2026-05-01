@@ -1102,10 +1102,23 @@ uint32_t GetNextWorkRequired(const CBlockIndex* pindexLast, int64_t nBlockTime) 
         return Dilithion::g_chainParams->genesisNBits;
     }
 
-    // DilV: VDF chain uses fixed nBits (no difficulty retargeting)
+    // DilV + regtest: VDF chain uses fixed nBits (no difficulty retargeting).
     // VDF distribution uses lowest-output-wins, not hash-under-target.
     // nBits is vestigial for serialization compatibility.
-    if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) {
+    //
+    // PR8.0 (2026-05-01): regtest is configured as a VDF chain
+    // (chainparams.cpp:658-674: "Phase 5 (2026-04-26): regtest IS a VDF chain,
+    // run via dilv-node binary"), but IsDilV() returns false for REGTEST
+    // (network==DILV strict). Without this clause, regtest's slow first
+    // blocks trigger EDA at the legacy ~6-block-gap threshold, and Node A
+    // + Node B compute divergent nBits → block rejection on the receiver
+    // side → sync stalls at height 1. Empirically reproduced 2026-05-01
+    // via tools/run_phase5_v2_byte_equivalence.sh. Treating regtest as
+    // a VDF chain here matches its declared semantics and resolves the
+    // pre-existing two-local-process regtest peering issue (Phase 5
+    // carryover #2 / Phase 6 PR6.3 scope).
+    if (Dilithion::g_chainParams &&
+        (Dilithion::g_chainParams->IsDilV() || Dilithion::g_chainParams->IsRegtest())) {
         return Dilithion::g_chainParams->genesisNBits;
     }
 

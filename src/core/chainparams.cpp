@@ -679,6 +679,20 @@ ChainParams ChainParams::Regtest() {
     // headers. Override of inherited Testnet value.
     params.nMapBlockIndexCap = 1000;
 
+    // Phase 8 PR8.0 (2026-05-01): disable the 45s minBlockTimestampGap
+    // inherited from Testnet. Regtest inherits Testnet's gap = 45 + height = 0
+    // ("active from genesis"), which throttles single-miner regtest setups
+    // to ~45s/block — too slow to hit Phase 8 acceptance bars (≥20 blocks
+    // within 60s for the 4-node harness). The gap is a Sybil/pacing rule
+    // for production VDF chains; regtest is a deterministic single-process
+    // (or few-process) lab environment with no Sybil surface to defend.
+    // Disabling it lets blocks publish immediately after VDF + DFMP
+    // validation succeed. Consensus-side check at pow.cpp:1422 is gated
+    // on `minGap > 0`, so setting to 0 disables both the miner-side wait
+    // (vdf_miner.cpp:396-407) AND the consensus-side enforcement.
+    params.minBlockTimestampGap = 0;
+    params.minBlockTimestampGapHeight = 0;
+
     return params;
 }
 
