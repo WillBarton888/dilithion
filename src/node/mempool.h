@@ -139,11 +139,31 @@ private:
                                   std::string* error,
                                   std::vector<uint256>& evicted_conflicts);
 
+    // T1.B-2 (testmempoolaccept): Pure validation, NO mutation. Caller MUST hold cs lock.
+    // Returns true iff the tx WOULD be accepted by AddTxUnlocked under the same arguments.
+    // BYTE-FOR-BYTE equivalent to AddTxUnlocked's accept/reject logic; both paths share
+    // this helper. Used by TestAccept() (read-only) and AddTxUnlocked() (validation phase).
+    // On failure, sets *error to the same wording AddTxUnlocked uses for the same condition.
+    // Note: cannot evaluate eviction (which is a mutation); when the mempool is full and
+    // eviction would be required, ValidateLocked reports the would-be-full reject reason.
+    // For testmempoolaccept this matches BC v28.0 semantics: "mempool full" is a reject.
+    bool ValidateLocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) const;
+
 public:
     CTxMemPool();
     ~CTxMemPool();  // MEMPOOL-007 FIX: Destructor to stop expiration thread
     bool AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error = nullptr, bool bypass_fee_check = false);
     bool RemoveTx(const uint256& txid);
+    // T1.B-2 (testmempoolaccept port from Bitcoin Core v28.0): Run AddTx's full validation
+    // pipeline against `tx` and return whether it WOULD be accepted, WITHOUT mutating any
+    // mempool state (mapTx, setEntries, mapSpentOutpoints, mapDescendants, counters,
+    // metrics -- all unchanged). Acquires cs internally. On failure, sets *error to the
+    // exact reject reason that AddTx would have produced for the same condition (so the
+    // RPC's reject-reason field matches sendrawtransaction's error verbatim).
+    // Safe to call concurrently from multiple threads; const-method, read-only on the
+    // shared mempool state guarded by cs.
+    bool TestAccept(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error = nullptr, bool bypass_fee_check = false) const;
+
     // MEMPOOL-008 FIX: RBF support.
     //
     // PR-EF-2 fixup F#8: bypass_fee_check defaults to false for live RBF.

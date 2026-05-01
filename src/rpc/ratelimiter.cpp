@@ -53,6 +53,14 @@ const std::map<std::string, CRateLimiter::MethodRateLimit> CRateLimiter::METHOD_
     {"getaddresses",           {200.0, 3.33, 1.0}},  // 200/min
     {"listhdaddresses",        {200.0, 3.33, 1.0}},  // 200/min
 
+    // === MEDIUM: testmempoolaccept (100/min) ===
+    // T1.B-2 (BC v28.0 port). Validation is non-trivial (CTransactionValidator
+    // + mempool checks) and the request can include up to 25 raw txs per call,
+    // so 100/min keeps the worst-case validation budget bounded while still
+    // allowing wallets/exchanges a healthy preview rate. Matches gettransaction
+    // tier roughly; tightened from the 1000/min default to bound DoS surface.
+    {"testmempoolaccept",      {100.0, 1.667, 1.0}}, // 100/min
+
     // === MEDIUM: Blockchain Queries (500/min) ===
     {"getblock",               {500.0, 8.33, 1.0}},  // 500/min - I/O intensive
     {"getrawtransaction",      {500.0, 8.33, 1.0}},  // 500/min

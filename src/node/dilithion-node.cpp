@@ -73,6 +73,7 @@
 #include <consensus/signature_batch_verifier.h>  // Phase 3.2: Batch signature verification
 #include <consensus/chain_verifier.h>  // Chain integrity validation (Bug #17)
 #include <index/tx_index.h>            // PR-3: optional transaction index
+#include <index/coinstatsindex.h>      // PR-BA-2: optional UTXO-set stats index
 #include <node/mempool_persist.h>      // PR-MP-2: mempool persistence (DumpMempool / LoadMempool)
 #include <policy/fees.h>               // PR-EF-2: CBlockPolicyEstimator + g_fee_estimator
 #include <policy/fee_persist.h>        // PR-EF-2: fee_estimates.dat (DumpFeeEstimates / LoadFeeEstimates)
@@ -536,6 +537,7 @@ struct NodeConfig {
     bool rescan = false;            // Phase 4.2: Rescan wallet transactions
     bool reset_chain = false;       // --reset-chain: wipe chain-derived state, keep wallet/MIK
     bool txindex_enabled = false;   // --txindex / -txindex: enable transaction index (PR-3)
+    bool coinstatsindex_enabled = false;   // --coinstatsindex / -coinstatsindex: enable UTXO-set stats index (PR-BA-2)
     bool persistmempool = true;     // --persistmempool=<0|1>: save/restore mempool across restarts (PR-MP-2; default ON)
     bool feeestimates  = true;      // --feeestimates=<0|1>: enable adaptive fee estimator + persistence (PR-EF-2; default ON)
     bool yes_flag = false;          // --yes: bypass --reset-chain confirmation prompt
@@ -666,6 +668,15 @@ struct NodeConfig {
             }
             else if (arg == "--txindex" || arg == "-txindex") {
                 txindex_enabled = true;
+            }
+            else if (arg == "--coinstatsindex" || arg == "-coinstatsindex") {
+                coinstatsindex_enabled = true;
+            }
+            else if (arg == "--coinstatsindex=1" || arg == "-coinstatsindex=1") {
+                coinstatsindex_enabled = true;
+            }
+            else if (arg == "--coinstatsindex=0" || arg == "-coinstatsindex=0") {
+                coinstatsindex_enabled = false;
             }
             else if (arg == "--persistmempool" || arg == "-persistmempool") {
                 // Bare flag form means enable; default is already true so no-op.
@@ -810,6 +821,7 @@ struct NodeConfig {
         std::cout << "  --quiet, -q           Quiet mode: only block events, errors, and warnings" << std::endl;
         std::cout << "  --reindex             Rebuild blockchain from scratch (use after crash)" << std::endl;
         std::cout << "  --txindex             Build full transaction index (requires --reindex on warm chain)" << std::endl;
+        std::cout << "  --coinstatsindex      Build UTXO-set statistics index (requires --reindex on warm chain)" << std::endl;
         std::cout << "  --persistmempool=<0|1> Save/restore mempool across restarts (default: 1)" << std::endl;
         std::cout << "  --feeestimates=<0|1>  Adaptive fee estimator + fee_estimates.dat (default: 1)" << std::endl;
         std::cout << "  --reset-chain         Wipe chain state for a clean resync." << std::endl;
@@ -3095,6 +3107,61 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                                   confirmed);
                 });
             std::cout << "  [OK] Fee estimator initialized" << std::endl;
+        }
+
+        // PR-BA-2: Optional UTXO-set statistics index. Default OFF;
+        // --coinstatsindex opts in. Mirrors the txindex lifecycle exactly:
+        // -reindex required for cold rebuild on warm chain (N2); live
+        // callbacks gated on IsSynced (PR-7G R1); reset() runs BEFORE
+        // blockchain.Close() and BEFORE chainParams cleanup (R3).
+        if (config.coinstatsindex_enabled) {
+            g_coin_stats_index = std::make_unique<CCoinStatsIndex>();
+            std::string cs_dir = config.datadir + "/indexes/coinstats";
+            std::error_code _cs_ec;
+            std::filesystem::create_directories(cs_dir, _cs_ec);
+            if (_cs_ec) {
+                std::cerr << "[coinstatsindex] could not create " << cs_dir
+                          << ": " << _cs_ec.message() << std::endl;
+            }
+            if (!g_coin_stats_index->Init(cs_dir, &blockchain, &utxo_set)) {
+                std::cerr << "[coinstatsindex] Init failed; aborting." << std::endl;
+                return 1;
+            }
+            int last_cs = g_coin_stats_index->LastIndexedHeight();
+            int tip_cs = g_chainstate.GetTip() ? g_chainstate.GetTip()->nHeight : 0;
+            if (last_cs == -1 && tip_cs > 0 && !config.reindex) {
+                std::cerr << "[coinstatsindex] -coinstatsindex=1 on a non-empty "
+                          << "chain requires -reindex to acknowledge a multi-hour "
+                          << "rebuild. Aborting." << std::endl;
+                g_coin_stats_index.reset();
+                return 1;
+            }
+            if (last_cs >= 0 && tip_cs > last_cs) {
+                std::cout << "[coinstatsindex] resuming from height " << last_cs
+                          << " (chain tip " << tip_cs << ", gap=" << (tip_cs - last_cs)
+                          << " blocks)" << std::endl;
+            }
+            // Live callbacks gated on IsSynced (BaseIndex pattern).
+            g_chainstate.RegisterBlockConnectCallback(
+                [](const CBlock& b, int h, const uint256& hh) {
+                    if (g_coin_stats_index && g_coin_stats_index->IsSynced() &&
+                        !g_coin_stats_index->WriteBlock(b, h, hh)) {
+                        std::cerr << "[coinstatsindex] WriteBlock failed at height "
+                                  << h << " (hash " << hh.GetHex().substr(0, 16) << "...)"
+                                  << " -- index now lagging chain" << std::endl;
+                    }
+                });
+            g_chainstate.RegisterBlockDisconnectCallback(
+                [](const CBlock& b, int h, const uint256& hh) {
+                    if (g_coin_stats_index && g_coin_stats_index->IsSynced() &&
+                        !g_coin_stats_index->EraseBlock(b, h, hh)) {
+                        std::cerr << "[coinstatsindex] EraseBlock failed at height "
+                                  << h << " (hash " << hh.GetHex().substr(0, 16) << "...)"
+                                  << " -- index may contain stale entries" << std::endl;
+                    }
+                });
+            g_coin_stats_index->StartBackgroundSync();
+            std::cout << "  [OK] Coinstatsindex initialized" << std::endl;
         }
 
         // PR-MP-2: Mempool persistence. Default ON. Restores the saved mempool
@@ -7976,6 +8043,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // chain-shutdown line and so the index never holds a dangling
         // CBlockchainDB* across blockchain teardown.
         g_tx_index.reset();
+        // PR-BA-2: same teardown ordering as g_tx_index. Must release before
+        // blockchain.Close() so the index never holds a dangling
+        // CBlockchainDB* / CUTXOSet* across blockchain teardown.
+        g_coin_stats_index.reset();
 
         std::cout << "  Closing blockchain database..." << std::endl;
         blockchain.Close();
@@ -8031,6 +8102,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // be torn down by the static destructor sequence. Mirrors the
         // normal-shutdown ordering at line 7725.
         g_tx_index.reset();
+        // PR-BA-2: same R3 ordering applies to coinstatsindex.
+        g_coin_stats_index.reset();
 
         // Cleanup on error (P0-5 FIX: use load/store for atomic)
         auto* relay_mgr = g_tx_relay_manager.load();
@@ -8086,6 +8159,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // PR-7G R3: release tx_index before chainParams cleanup. See the
         // matching note in the std::exception catch above.
         g_tx_index.reset();
+        g_coin_stats_index.reset();
 
         // Cleanup on error (P0-5 FIX: use load/store for atomic)
         auto* relay_mgr = g_tx_relay_manager.load();

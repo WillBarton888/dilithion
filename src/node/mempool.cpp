@@ -420,9 +420,19 @@ void CTxMemPool::ExpirationThreadFunc() {
     }
 }
 
-// CID 1675250 FIX: Internal unlocked version - caller MUST hold cs lock
-bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) {
-    // NOTE: This function assumes caller holds cs lock - no lock acquisition here
+// T1.B-2 (testmempoolaccept): Pure validation -- NO mutation of any mempool state.
+// Caller MUST hold cs lock. Returns true iff the tx would pass AddTxUnlocked's
+// initial validation gauntlet (everything before the eviction-and-insertion phase).
+// BYTE-FOR-BYTE equivalent to AddTxUnlocked's reject wording for each branch so
+// testmempoolaccept's reject-reason matches sendrawtransaction's error verbatim.
+//
+// Eviction is intentionally NOT attempted here -- eviction mutates the mempool
+// and testmempoolaccept must be side-effect-free. When the mempool is full,
+// ValidateLocked reports "Mempool full (transaction count limit)" or
+// "Mempool full (size limit)" directly; AddTxUnlocked's public path additionally
+// attempts eviction.
+bool CTxMemPool::ValidateLocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) const {
+    // NOTE: This function assumes caller holds cs lock - no lock acquisition here.
     if (!tx) { if (error) *error = "Null tx"; return false; }
 
     // MEMPOOL-005 FIX: Reject coinbase transactions (consensus violation)
@@ -472,7 +482,7 @@ bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t t
     }
 
     // Skip fee check for transactions being restored after a reorg (Bitcoin Core pattern).
-    // These txs already passed fee validation when first accepted — reorg doesn't change the fee.
+    // These txs already passed fee validation when first accepted -- reorg doesn't change the fee.
     if (!bypass_fee_check) {
         std::string fee_error;
         if (!Consensus::CheckFee(*tx, fee, true, &fee_error)) {
@@ -481,7 +491,7 @@ bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t t
         }
     }
 
-    size_t tx_size = tx->GetSerializedSize();
+    const size_t tx_size = tx->GetSerializedSize();
 
     // MEMPOOL-006 FIX: Enforce maximum transaction size limit
     // Prevents single oversized transaction from filling entire mempool
@@ -497,6 +507,46 @@ bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t t
         if (error) *error = "Mempool size overflow";
         return false;
     }
+
+    // T1.B-2 NOTE: Capacity exhaustion is reported here without attempting eviction
+    // (eviction is mutation; ValidateLocked is const). AddTxUnlocked re-runs these
+    // capacity checks AFTER ValidateLocked returns, attempting eviction before
+    // declaring failure -- producing identical reject wording on the production
+    // path when eviction itself fails.
+    if (mempool_count >= max_mempool_count) {
+        if (error) *error = "Mempool full (transaction count limit)";
+        return false;
+    }
+    if (mempool_size + tx_size > max_mempool_size) {
+        if (error) *error = "Mempool full (size limit)";
+        return false;
+    }
+
+    return true;
+}
+
+// CID 1675250 FIX: Internal unlocked version - caller MUST hold cs lock
+bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) {
+    // T1.B-2: Run the shared validation gauntlet first. If it rejects for any
+    // reason OTHER than capacity-full, propagate the reject. For capacity-full,
+    // fall through to the eviction path below (preserves pre-T1.B-2 behaviour
+    // where AddTx attempts eviction before declaring failure).
+    std::string validate_err;
+    if (!ValidateLocked(tx, fee, time, height, &validate_err, bypass_fee_check)) {
+        const bool count_full = (validate_err == "Mempool full (transaction count limit)");
+        const bool size_full  = (validate_err == "Mempool full (size limit)");
+        if (!count_full && !size_full) {
+            if (error) *error = validate_err;
+            return false;
+        }
+        // Capacity-full path: continue into eviction-aware code below.
+    }
+
+    // Re-derive locals needed for the mutation phase. (ValidateLocked already
+    // confirmed tx is non-null, not coinbase, not already-present, and that
+    // tx_size <= MAX_TX_SIZE without overflow.)
+    const uint256 txid = tx->GetHash();
+    const size_t tx_size = tx->GetSerializedSize();
 
     // MEMPOOL-002 FIX: Attempt eviction before rejecting due to mempool full
     // This ensures high-fee transactions can evict low-fee transactions
@@ -647,6 +697,21 @@ bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, uns
         }
     }
     return ok;
+}
+
+// T1.B-2 (testmempoolaccept port from Bitcoin Core v28.0):
+// Public read-only entry point. Acquires the mempool lock for a consistent
+// snapshot, then delegates to ValidateLocked. NEVER mutates ANY mempool state
+// (mapTx, setEntries, mapSpentOutpoints, mapDescendants, all counters, all
+// metric_* atomics, mempool_size, mempool_count -- all unchanged).
+//
+// Concurrency: const-method, safe to call from any number of threads in
+// parallel with each other and with AddTx/RemoveTx -- the lock serialises all
+// mempool access. Reject wording matches AddTx exactly so the RPC layer can
+// surface a single error string that callers can rely on.
+bool CTxMemPool::TestAccept(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) const {
+    std::lock_guard<std::mutex> lock(cs);
+    return ValidateLocked(tx, fee, time, height, error, bypass_fee_check);
 }
 
 // ============================================================================

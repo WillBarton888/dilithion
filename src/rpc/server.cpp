@@ -29,6 +29,7 @@
 #include <consensus/pow.h>
 #include <consensus/validation.h>  // For DeserializeBlockTransactions
 #include <index/tx_index.h>  // PR-5: txindex fast-path for getrawtransaction/gettransaction
+#include <index/coinstatsindex.h>  // PR-BA-2: coinstatsindex registration in getindexinfo
 #include <node/mempool_persist.h>  // PR-MP-3: savemempool RPC handler
 #include <cmath>  // For pow()
 #include <util/base58.h>           // For EncodeBase58Check
@@ -265,6 +266,9 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["decoderawtransaction"] = [this](const std::string& p) { return RPC_DecodeRawTransaction(p); };
     m_handlers["getindexinfo"] = [](const std::string& p) { return RPC_GetIndexInfo(p); };
     m_handlers["savemempool"] = [this](const std::string& p) { return RPC_SaveMempool(p); };
+    // T1.B-2: testmempoolaccept (BC v28.0 port). Read-only validation; permission
+    // READ_BLOCKCHAIN, rate limit 100/min. See server.h docstring + permissions.cpp.
+    m_handlers["testmempoolaccept"] = [this](const std::string& p) { return RPC_TestMempoolAccept(p); };
     m_handlers["addnode"] = [this](const std::string& p) { return RPC_AddNode(p); };
     m_handlers["disconnectnode"] = [this](const std::string& p) { return RPC_DisconnectNode(p); };  // v4.0.22 manual peer disconnect
 
@@ -5353,6 +5357,7 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"sendtoaddress - Send coins to an address\",";
     oss << "\"signrawtransaction - Sign inputs for a raw transaction\",";
     oss << "\"sendrawtransaction - Broadcast a raw transaction to the network\",";
+    oss << "\"testmempoolaccept - Run mempool admission checks against raw txs without broadcasting\",";
 
     // Transaction query
     oss << "\"gettransaction - Get transaction details by txid\",";
@@ -5520,6 +5525,25 @@ std::string CRPCServer::RPC_GetIndexInfo(const std::string& params) {
             << "}";
         first = false;
     }
+    // PR-BA-2: register coinstatsindex alongside txindex when enabled.
+    // Shape: {synced, best_block_height, corrupted}. The `corrupted` field
+    // (M2 fix) exposes the sticky m_corrupted flag so operators / monitoring
+    // can detect EraseBlock leveldb-write failures and parent-mismatch
+    // bails (H3) without having to scrape logs. A value of `true` means
+    // "restart with --reindex" -- the index will not write further rows
+    // until WipeIndex clears the flag.
+    //
+    // Omitted when not enabled at runtime; -1 best_block_height means the
+    // index has been opened but no rows written yet (cold-start window).
+    if (g_coin_stats_index) {
+        if (!first) oss << ",";
+        oss << "\"coinstatsindex\":{"
+            << "\"synced\":" << (g_coin_stats_index->IsSynced() ? "true" : "false") << ","
+            << "\"best_block_height\":" << g_coin_stats_index->LastIndexedHeight() << ","
+            << "\"corrupted\":" << (g_coin_stats_index->IsCorrupted() ? "true" : "false")
+            << "}";
+        first = false;
+    }
 
     oss << "}";
     return oss.str();
@@ -5603,6 +5627,207 @@ std::string CRPCServer::RPC_SaveMempool(const std::string& params) {
     }
     oss << "\"}";
     return oss.str();
+}
+
+// ============================================================================
+// T1.B-2: testmempoolaccept (Bitcoin Core v28.0 port)
+// ============================================================================
+// Run mempool admission validation against one or more raw transactions WITHOUT
+// broadcasting/mutating the mempool. Wallet/exchange UX preview path.
+// Schema is BC v28.0 byte-for-byte compatible (modulo Dilithion's lack of
+// segwit -- wtxid is set equal to txid).
+//
+// Permissions: READ_BLOCKCHAIN (read-only-equivalent). Rate limit 100/min
+// (validation is non-trivial; matches gettransaction tier).
+std::string CRPCServer::RPC_TestMempoolAccept(const std::string& params) {
+    if (!m_mempool) {
+        throw std::runtime_error("Mempool not initialized");
+    }
+    if (!m_utxo_set) {
+        throw std::runtime_error("UTXO set not initialized");
+    }
+    if (!m_chainstate) {
+        throw std::runtime_error("Chain state not initialized");
+    }
+
+    // ---- Parse params (object-style: {"rawtxs": ["<hex>", ...], ...}) ----
+    // PR-MP-FIX lessons: parse via nlohmann to avoid substring-match
+    // ambiguity. Empty params (no rawtxs key) is rejected.
+    nlohmann::json req;
+    try {
+        // Empty params -> require at least an empty object so the parser
+        // produces a deterministic error rather than UB.
+        const std::string p = params.empty() ? std::string("{}") : params;
+        req = nlohmann::json::parse(p);
+    } catch (const nlohmann::json::parse_error& e) {
+        throw std::runtime_error(std::string("Invalid params (not JSON): ") + e.what());
+    }
+
+    if (!req.is_object()) {
+        throw std::runtime_error("Params must be a JSON object");
+    }
+
+    if (!req.contains("rawtxs")) {
+        throw std::runtime_error("Missing rawtxs parameter");
+    }
+    const auto& rawtxs = req["rawtxs"];
+    if (!rawtxs.is_array()) {
+        throw std::runtime_error("rawtxs must be an array");
+    }
+
+    // BC v28.0 caps the array at 25 to bound work per call; matches the
+    // upstream constant `MAX_PACKAGE_COUNT`.
+    static constexpr size_t kMaxRawTxs = 25;
+    if (rawtxs.empty()) {
+        throw std::runtime_error("rawtxs array is empty");
+    }
+    if (rawtxs.size() > kMaxRawTxs) {
+        throw std::runtime_error("rawtxs array too large (max 25)");
+    }
+
+    // BC v28.0 also accepts a "maxfeerate" key. We accept it for schema
+    // compatibility but ignore it (Dilithion uses one fee policy).
+    // Validate type if present so a typo (string vs number) surfaces.
+    if (req.contains("maxfeerate") && !req["maxfeerate"].is_null()) {
+        const auto& mfr = req["maxfeerate"];
+        if (!mfr.is_number() && !mfr.is_string()) {
+            throw std::runtime_error("maxfeerate must be a number or string");
+        }
+        // Otherwise: deliberately a no-op; documented in handler docstring.
+    }
+
+    // ---- Per-tx validation ----
+    const int64_t current_time = std::chrono::duration_cast<std::chrono::seconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+
+    // m_chainstate->GetHeight() is read lazily inside the loop on the FIRST
+    // tx that reaches consensus-validation, so fully-malformed batches
+    // (every entry fails type/hex/deserialize) never deref the chainstate.
+    // This keeps the early-error path independent of chainstate availability
+    // and makes tests for the param + per-element-error rows hermetic.
+    bool current_height_loaded = false;
+    unsigned int current_height = 0;
+
+    // Snapshot mempool size before/after to observability-check non-mutation
+    // even in production (cheap O(1) read; logged only if it ever drifts).
+    const size_t mempool_size_before = m_mempool->Size();
+
+    nlohmann::json out = nlohmann::json::array();
+
+    for (size_t i = 0; i < rawtxs.size(); ++i) {
+        const auto& entry = rawtxs[i];
+        if (!entry.is_string()) {
+            // Per-element error: emit a result row with allowed=false rather
+            // than throwing, so partial-batch results still come back.
+            nlohmann::json result;
+            result["txid"] = "";
+            result["wtxid"] = "";
+            result["allowed"] = false;
+            result["reject-reason"] = "rawtx must be a hex string";
+            out.push_back(std::move(result));
+            continue;
+        }
+
+        const std::string hex_str = entry.get<std::string>();
+        std::vector<uint8_t> tx_data = ParseHex(hex_str);
+
+        nlohmann::json result;
+
+        if (tx_data.empty()) {
+            result["txid"] = "";
+            result["wtxid"] = "";
+            result["allowed"] = false;
+            result["reject-reason"] = "Invalid hex string";
+            out.push_back(std::move(result));
+            continue;
+        }
+
+        CTransaction tx_mutable;
+        std::string deserialize_error;
+        if (!tx_mutable.Deserialize(tx_data.data(), tx_data.size(), &deserialize_error)) {
+            result["txid"] = "";
+            result["wtxid"] = "";
+            result["allowed"] = false;
+            result["reject-reason"] = "Failed to deserialize transaction: " + deserialize_error;
+            out.push_back(std::move(result));
+            continue;
+        }
+
+        const uint256 txid = tx_mutable.GetHash();
+        // Dilithion has no segwit -- wtxid == txid. Emit both fields so BC
+        // schema clients work unchanged.
+        const std::string txid_hex = txid.GetHex();
+        result["txid"] = txid_hex;
+        result["wtxid"] = txid_hex;
+
+        // Lazily load current chain height -- we know we're past the
+        // type/hex/deserialize gates, so a real chainstate is required from
+        // here on. Cached across iterations.
+        if (!current_height_loaded) {
+            current_height = m_chainstate->GetHeight();
+            current_height_loaded = true;
+        }
+
+        // Step 1: consensus-level transaction validation (inputs exist, fees
+        // computable, signatures valid, etc.). This is what sendrawtransaction
+        // runs before AddTx. Reject reasons are surfaced verbatim.
+        CTransactionValidator txValidator;
+        std::string validation_error;
+        CAmount tx_fee = 0;
+        if (!txValidator.CheckTransaction(tx_mutable, *m_utxo_set, current_height, tx_fee, validation_error)) {
+            result["allowed"] = false;
+            result["reject-reason"] = "Transaction validation failed: " + validation_error;
+            std::cout << "[mempool] testmempoolaccept: " << txid_hex
+                      << " rejected (" << validation_error << ")" << std::endl;
+            out.push_back(std::move(result));
+            continue;
+        }
+
+        CTransactionRef tx = MakeTransactionRef(tx_mutable);
+
+        // Step 2: mempool admission validation (no mutation). TestAccept's
+        // reject wording matches AddTx's reject wording exactly so callers
+        // who run testmempoolaccept then sendrawtransaction will see the
+        // same error string in both places for the same input.
+        std::string mempool_error;
+        const bool allowed = m_mempool->TestAccept(
+            tx, tx_fee, current_time, current_height, &mempool_error,
+            /*bypass_fee_check=*/false);
+
+        result["allowed"] = allowed;
+        if (allowed) {
+            // BC v28.0 fields: vsize (Dilithion: serialized size; no witness
+            // discount), fees.base (in coins, NOT ions, per BC schema).
+            const size_t vsize = tx->GetSerializedSize();
+            result["vsize"] = vsize;
+            nlohmann::json fees;
+            // BC emits `base` as a number with 8 decimal places.
+            // tx_fee is in ions (subunits); divide by COIN to express in DIL.
+            const double base_dil = static_cast<double>(tx_fee) / static_cast<double>(COIN);
+            fees["base"] = base_dil;
+            result["fees"] = std::move(fees);
+            std::cout << "[mempool] testmempoolaccept: " << txid_hex
+                      << " allowed" << std::endl;
+        } else {
+            result["reject-reason"] = mempool_error;
+            std::cout << "[mempool] testmempoolaccept: " << txid_hex
+                      << " rejected (" << mempool_error << ")" << std::endl;
+        }
+        out.push_back(std::move(result));
+    }
+
+    // Defence-in-depth: assert the mempool was not mutated. This is a
+    // cheap O(1) check; firing means TestAccept (or one of its dependencies)
+    // leaked state. Loud-but-non-fatal: log + continue, since the response
+    // itself is still well-formed.
+    const size_t mempool_size_after = m_mempool->Size();
+    if (mempool_size_before != mempool_size_after) {
+        std::cerr << "[mempool] testmempoolaccept: STATE LEAK -- size went from "
+                  << mempool_size_before << " to " << mempool_size_after << std::endl;
+    }
+
+    return out.dump();
 }
 
 std::string CRPCServer::RPC_GetChainTips(const std::string& params) {

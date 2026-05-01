@@ -716,6 +716,25 @@ public:
     // m_dataDir + m_persistMempool; tests exercise via constructed
     // CRPCServer instance.
     std::string RPC_SaveMempool(const std::string& params);
+
+    // T1.B-2 (testmempoolaccept port from Bitcoin Core v28.0
+    // src/rpc/mempool.cpp::testmempoolaccept). Takes a JSON array of hex-encoded
+    // raw transactions, runs the full mempool admission validation pipeline
+    // (CTransactionValidator + CTxMemPool::TestAccept) against each, and returns
+    // a JSON array of per-tx accept/reject results matching BC v28.0's schema:
+    //
+    //   [{"txid": "<hex>", "wtxid": "<hex>", "allowed": <bool>,
+    //     "vsize": <int>?, "fees": {"base": <DIL>}?, "reject-reason": "<str>"?}, ...]
+    //
+    // CRITICAL: must NOT mutate the mempool. State leak == BLOCKER.
+    // Permission tier: READ_BLOCKCHAIN. Rate limit: 100/min (validation work is
+    // non-trivial; matches gettransaction tier). Object-style params per
+    // Dilithion convention: {"rawtxs": ["<hex>", ...]}. Maxfeerate is accepted
+    // for BC schema compatibility but ignored (Dilithion uses a single fee
+    // policy via Consensus::CheckFee). Instance method (NOT static) because
+    // it consults m_mempool + m_utxo_set + m_chainstate; tests exercise via
+    // constructed CRPCServer instance with stand-in dependencies.
+    std::string RPC_TestMempoolAccept(const std::string& params);
 };
 
 #endif // DILITHION_RPC_SERVER_H
