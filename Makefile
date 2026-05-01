@@ -166,7 +166,9 @@ CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
                   src/crypto/pbkdf2_sha3.cpp \
                   src/crypto/siphash.cpp
 
-INDEX_SOURCES := src/index/tx_index.cpp
+INDEX_SOURCES := src/index/tx_index.cpp \
+                 src/index/coinstatsindex.cpp \
+                 src/kernel/coinstats.cpp
 
 MINER_SOURCES := src/miner/controller.cpp \
                  src/miner/vdf_miner.cpp
@@ -629,6 +631,8 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/fork_detection_tests.o \
 	$(OBJ_DIR)/test/tx_index_tests.o \
 	$(OBJ_DIR)/test/tx_index_integration_tests.o \
+	$(OBJ_DIR)/test/coinstatsindex_tests.o \
+	$(OBJ_DIR)/test/coinstatsindex_integration_tests.o \
 	$(OBJ_DIR)/test/mempool_persist_tests.o \
 	$(OBJ_DIR)/test/rpc_small_cluster_tests.o \
 	$(OBJ_DIR)/test/undo_data_tests.o \

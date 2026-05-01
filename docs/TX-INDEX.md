@@ -470,3 +470,12 @@ operators without tailing logs. The handler is read-only and lock-free
 For the full red-team CONCERN trail, see
 `.claude/autonomous/txindex/active/redteam_pr4_diff.md` and
 `.claude/autonomous/txindex/active/redteam_pr6_diff.md`.
+
+## Sister index: COINSTATSINDEX
+
+PR-BA-2 (port/coinstatsindex) added a sister UTXO-set statistics index
+that reuses the BaseIndex pattern documented above. It lives at
+`<datadir>/indexes/coinstats/` and registers in `getindexinfo` alongside
+`txindex` when both are enabled. See `docs/COINSTATSINDEX.md` for the
+schema, lifecycle, and recovery runbook. Both indexes opt in independently
+via separate CLI flags (`-txindex=1` and `-coinstatsindex=1`).

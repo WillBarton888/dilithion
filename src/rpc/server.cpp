@@ -29,6 +29,7 @@
 #include <consensus/pow.h>
 #include <consensus/validation.h>  // For DeserializeBlockTransactions
 #include <index/tx_index.h>  // PR-5: txindex fast-path for getrawtransaction/gettransaction
+#include <index/coinstatsindex.h>  // PR-BA-2: coinstatsindex registration in getindexinfo
 #include <node/mempool_persist.h>  // PR-MP-3: savemempool RPC handler
 #include <cmath>  // For pow()
 #include <util/base58.h>           // For EncodeBase58Check
@@ -5517,6 +5518,18 @@ std::string CRPCServer::RPC_GetIndexInfo(const std::string& params) {
         oss << "\"txindex\":{"
             << "\"synced\":" << (g_tx_index->IsSynced() ? "true" : "false") << ","
             << "\"best_block_height\":" << g_tx_index->LastIndexedHeight()
+            << "}";
+        first = false;
+    }
+    // PR-BA-2: register coinstatsindex alongside txindex when enabled.
+    // Same shape as txindex: {synced, best_block_height}. Omitted when
+    // not enabled at runtime; -1 best_block_height means the index has
+    // been opened but no rows written yet (cold-start window).
+    if (g_coin_stats_index) {
+        if (!first) oss << ",";
+        oss << "\"coinstatsindex\":{"
+            << "\"synced\":" << (g_coin_stats_index->IsSynced() ? "true" : "false") << ","
+            << "\"best_block_height\":" << g_coin_stats_index->LastIndexedHeight()
             << "}";
         first = false;
     }
