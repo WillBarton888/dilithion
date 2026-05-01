@@ -1,5 +1,13 @@
 # Dilithion .gitignore
 
+# Autonomous mode transient files (.claude/autonomous/)
+.claude/autonomous/STOP
+.claude/autonomous/STARTED.txt
+.claude/autonomous/STARTED_AT_HEAD.txt
+.claude/autonomous/HEARTBEAT.txt
+.claude/autonomous/pending_cleanup.txt
+.claude/autonomous/active/
+
 # Build artifacts
 *.o
 *.lo
