@@ -894,6 +894,14 @@ clean:
 	@rm -f $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_GREEN)✓ Clean complete$(COLOR_RESET)"
 
+# PR-Z-1 red-team F8: distclean drops the libzmq build tree as well, so a
+# fresh-clone simulation (and the F7 verification) can run from a single
+# command. The PR-Z-3 runbook will document this for operators; landing
+# the target here keeps F7 fully verifiable today.
+.PHONY: distclean
+distclean: clean libzmq-clean
+	@echo "$(COLOR_GREEN)✓ Distclean complete (clean + libzmq-clean)$(COLOR_RESET)"
+
 install: dilithion-node genesis_gen
 	@echo "$(COLOR_YELLOW)Installing binaries...$(COLOR_RESET)"
 	@install -d $(DESTDIR)/usr/local/bin
