@@ -700,6 +700,17 @@ peer_manager_lock_order_invariants_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_m
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -lpthread
 	@echo "$(COLOR_GREEN)✓ peer_manager_lock_order_invariants_tests built successfully$(COLOR_RESET)"
 
+# Phase 6 PR6.5b.7-c: 3-node in-process integration tests (5 cases).
+# Wires three CPeerManager fixtures via a TestRoutingConnman that
+# captures each fixture's outbound PushMessage and re-delivers it as
+# inbound ProcessMessage on the destination fixture. Drives cross-
+# fixture γ ownership + multithreaded contention. Run under TSAN
+# (`make TSAN=1 ...`) for race detection at integration level.
+peer_manager_three_node_integration_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_three_node_integration_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -lpthread
+	@echo "$(COLOR_GREEN)✓ peer_manager_three_node_integration_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.
 fast_path_2_boundary_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fast_path_2_boundary_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
