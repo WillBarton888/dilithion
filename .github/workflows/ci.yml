@@ -437,8 +437,14 @@ jobs:
     - name: Build with coverage
       run: |
         make clean
-        CXXFLAGS="--coverage -O0 -g -std=c++17" \
-        CFLAGS="--coverage -O0 -g" \
+        # -fprofile-update=atomic: makes gcov branch/line counter updates
+        # atomic so concurrent test threads (e.g. tx_index_tests
+        # concurrent_findtx_and_writeblock has 4 reader threads + 1
+        # writer) don't cause torn writes and "Unexpected negative
+        # count" errors during lcov geninfo. Compatible with gcc 5+
+        # and clang 12+.
+        CXXFLAGS="--coverage -fprofile-update=atomic -O0 -g -std=c++17" \
+        CFLAGS="--coverage -fprofile-update=atomic -O0 -g" \
         LDFLAGS="--coverage" \
         make test_dilithion -j$(nproc)
 

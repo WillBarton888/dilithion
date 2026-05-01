@@ -166,6 +166,8 @@ CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
                   src/crypto/pbkdf2_sha3.cpp \
                   src/crypto/siphash.cpp
 
+INDEX_SOURCES := src/index/tx_index.cpp
+
 MINER_SOURCES := src/miner/controller.cpp \
                  src/miner/vdf_miner.cpp
 
@@ -297,6 +299,7 @@ CORE_SOURCES := $(CONSENSUS_SOURCES) \
                 $(CORE_SOURCES_UTIL) \
                 $(DB_SOURCES) \
                 $(CRYPTO_SOURCES) \
+                $(INDEX_SOURCES) \
                 $(MINER_SOURCES) \
                 $(DFMP_SOURCES) \
                 $(DIGITAL_DNA_SOURCES) \
@@ -616,6 +619,8 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/misbehavior_scoring_tests.o \
 	$(OBJ_DIR)/test/ibd_functional_tests.o \
 	$(OBJ_DIR)/test/fork_detection_tests.o \
+	$(OBJ_DIR)/test/tx_index_tests.o \
+	$(OBJ_DIR)/test/tx_index_integration_tests.o \
 	$(CRYPTO_PROPERTY_OBJECTS)
 
 # Link test objects + full library (CORE_OBJECTS) to avoid hand-picked object drift
@@ -709,6 +714,7 @@ $(OBJ_DIR)/core \
 $(OBJ_DIR)/crypto \
 $(OBJ_DIR)/db \
 $(OBJ_DIR)/dfmp \
+$(OBJ_DIR)/index \
 $(OBJ_DIR)/miner \
 $(OBJ_DIR)/net \
 $(OBJ_DIR)/node \
@@ -728,7 +734,7 @@ $(OBJ_DIR)/test/fuzz:
 	@mkdir -p $@
 
 # Compile C++ source files
-$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/test
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/index $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/test
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
