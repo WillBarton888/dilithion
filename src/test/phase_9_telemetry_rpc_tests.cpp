@@ -50,6 +50,7 @@
 #include <net/peers.h>
 #include <net/headers_manager.h>
 #include <net/block_fetcher.h>
+#include <net/block_tracker.h>
 #include <net/port/peer_manager.h>
 
 #include <cassert>
@@ -71,6 +72,7 @@ void ResetNodeContext()
     g_node_context.connman.reset();
     g_node_context.headers_manager.reset();
     g_node_context.block_fetcher.reset();
+    g_node_context.block_tracker.reset();
 }
 
 // Helper: substring assertion with a friendly error message on failure.
@@ -229,6 +231,7 @@ void test_getblockdownloadstats_empty_peers()
     ResetNodeContext();
 
     g_node_context.peer_manager = std::make_unique<CPeerManager>("");
+    g_node_context.block_tracker = std::make_unique<CBlockTracker>();
     g_node_context.block_fetcher = std::make_unique<CBlockFetcher>(g_node_context.peer_manager.get());
     g_node_context.connman = std::make_unique<CConnman>();
 
@@ -258,11 +261,15 @@ void test_getblockdownloadstats_with_peers()
     ResetNodeContext();
 
     g_node_context.peer_manager = std::make_unique<CPeerManager>("");
+    g_node_context.block_tracker = std::make_unique<CBlockTracker>();
     g_node_context.block_fetcher = std::make_unique<CBlockFetcher>(g_node_context.peer_manager.get());
     g_node_context.connman = std::make_unique<CConnman>();
 
     // Add 2 connected peers via AddPeerWithId; mark CONNECTED state so
-    // GetConnectedPeers returns them.
+    // both the legacy GetConnectedPeers AND the PR10.2 joint-snapshot
+    // GetBlockDownloadSnapshot include them. (Post-PR10.2 the RPC uses
+    // GetBlockDownloadSnapshot under cs_peers; case 7 exercises that
+    // path implicitly via the via-RPC call below.)
     auto peer1 = g_node_context.peer_manager->AddPeerWithId(101);
     if (peer1) peer1->state = CPeer::STATE_CONNECTED;
     auto peer2 = g_node_context.peer_manager->AddPeerWithId(102);
@@ -300,6 +307,7 @@ void test_getblockdownloadstats_stalled_blocks_populated()
     ResetNodeContext();
 
     g_node_context.peer_manager = std::make_unique<CPeerManager>("");
+    g_node_context.block_tracker = std::make_unique<CBlockTracker>();
     g_node_context.block_fetcher = std::make_unique<CBlockFetcher>(g_node_context.peer_manager.get());
     g_node_context.connman = std::make_unique<CConnman>();
 
@@ -318,6 +326,73 @@ void test_getblockdownloadstats_stalled_blocks_populated()
     // would appear as `{"height":N,"peer_id":M}` — that path is
     // exercised by scripts/four_node_local.sh, not this unit test.
     AssertContains(result, "\"stalled_blocks\":[]", "case 8");
+
+    ResetNodeContext();
+    std::cout << " OK\n";
+}
+
+// ============================================================================
+// Case 8b (Phase 10 PR10.2 joint-snapshot atomicity): exercise the new
+// CPeerManager::GetBlockDownloadSnapshot path used by RPC_GetBlockDownloadStats.
+//
+// This test verifies the joint snapshot returns peer + blocks_in_flight
+// pairs under a SINGLE cs_peers acquisition (as opposed to the v0.1.2
+// "GetConnectedPeers + per-peer GetPeerBlocksInFlight" pattern that was
+// vulnerable to PR9.6-RT-MEDIUM-2 (b) peer-disconnect-during-iteration).
+//
+// The race itself can't be deterministically triggered in a single-
+// threaded unit test (it requires concurrent peer events between the
+// GetConnectedPeers snapshot and per-peer iteration). What we CAN
+// verify deterministically:
+//   * The new path produces well-formed entries for connected peers.
+//   * blocks_in_flight reads come from the SAME cs_peers critical
+//     section as the connected-peers iteration (verified at code-
+//     review time via the lock-acquisition pattern in
+//     CPeerManager::GetBlockDownloadSnapshot at peers.cpp).
+//   * The TSAN sweep at PR10.2 commit time exercises the path under
+//     concurrent operations (separate harness; not reproducible at
+//     unit-test scope).
+// ============================================================================
+void test_getblockdownloadstats_joint_snapshot_atomicity()
+{
+    std::cout << "  test_getblockdownloadstats_joint_snapshot_atomicity..." << std::flush;
+    ResetNodeContext();
+
+    g_node_context.peer_manager = std::make_unique<CPeerManager>("");
+    g_node_context.block_tracker = std::make_unique<CBlockTracker>();
+    g_node_context.block_fetcher = std::make_unique<CBlockFetcher>(g_node_context.peer_manager.get());
+    g_node_context.connman = std::make_unique<CConnman>();
+
+    // Add 3 connected peers; verify the joint snapshot returns all 3
+    // with valid schema fields.
+    auto p1 = g_node_context.peer_manager->AddPeerWithId(301);
+    if (p1) p1->state = CPeer::STATE_CONNECTED;
+    auto p2 = g_node_context.peer_manager->AddPeerWithId(302);
+    if (p2) p2->state = CPeer::STATE_CONNECTED;
+    auto p3 = g_node_context.peer_manager->AddPeerWithId(303);
+    if (p3) p3->state = CPeer::STATE_CONNECTED;
+
+    // Direct snapshot API exercise (in addition to the via-RPC test in case 7).
+    auto snapshot = g_node_context.peer_manager->GetBlockDownloadSnapshot();
+    assert(snapshot.size() == 3);
+
+    // Each entry has both fields populated (peer_id matches one of our IDs;
+    // blocks_in_flight is 0 since no blocks tracked).
+    bool found_301 = false, found_302 = false, found_303 = false;
+    for (const auto& e : snapshot) {
+        assert(e.blocks_in_flight == 0);
+        if (e.peer_id == 301) found_301 = true;
+        if (e.peer_id == 302) found_302 = true;
+        if (e.peer_id == 303) found_303 = true;
+    }
+    assert(found_301 && found_302 && found_303);
+
+    // Verify via-RPC path also reflects the joint snapshot.
+    CRPCServer server(0);
+    std::string result = server.InvokeRPCForTest("getblockdownloadstats", "[]");
+    AssertContains(result, "\"peer_id\":301", "case 8b");
+    AssertContains(result, "\"peer_id\":302", "case 8b");
+    AssertContains(result, "\"peer_id\":303", "case 8b");
 
     ResetNodeContext();
     std::cout << " OK\n";
@@ -386,6 +461,7 @@ int main()
         test_getblockdownloadstats_empty_peers();         // 6
         test_getblockdownloadstats_with_peers();          // 7
         test_getblockdownloadstats_stalled_blocks_populated();  // 8
+        test_getblockdownloadstats_joint_snapshot_atomicity();  // 8b (PR10.2)
         test_getpeerinfo_manager_class_field();           // 9
     } catch (const std::exception& e) {
         std::cerr << "\nFAILED with exception: " << e.what() << "\n";
@@ -393,6 +469,6 @@ int main()
     }
 
     std::cout << "\nAll Phase 9 telemetry RPC unit tests passed.\n";
-    std::cout << "  9 cases: 4 getsyncstatus + 4 getblockdownloadstats + 1 getpeerinfo.\n";
+    std::cout << "  10 cases: 4 getsyncstatus + 4 getblockdownloadstats + 1 PR10.2 joint-snapshot atomicity + 1 getpeerinfo.\n";
     return 0;
 }

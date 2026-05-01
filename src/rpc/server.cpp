@@ -5269,21 +5269,14 @@ std::string CRPCServer::RPC_GetSyncStatus(const std::string& params) {
         return "{\"error\":\"headers_manager not initialized\"}";
     }
 
-    // PR9.6-RT-MEDIUM-2 documented race window: each of GetSyncProgress(),
-    // GetBestHeight(), and GetBestHeaderHash() acquires cs_headers
-    // independently. A header arriving mid-RPC can shift the tip between
-    // calls, leaving best_header_height + best_header_hash referring to
-    // different blocks (height N hash; or height N+1 hash with a height-N-1
-    // progress reading). Race window is bounded by: (a) header arrival
-    // rate (~1/45s on DilV mainnet), (b) lock-acquisition overhead
-    // (microseconds). Operationally negligible for an observability RPC;
-    // a single-call atomic-snapshot getter would require new CHeadersManager
-    // API surface and is filed as a Phase 10+ enhancement opportunity.
-    // Operators monitoring this RPC should expect ±1 header drift between
-    // height and hash fields under high header-arrival load.
-    double progress = g_node_context.headers_manager->GetSyncProgress();
-    int best_height = g_node_context.headers_manager->GetBestHeight();
-    uint256 best_hash = g_node_context.headers_manager->GetBestHeaderHash();
+    // Phase 10 PR10.2: switched from three independent getter calls to
+    // CHeadersManager::GetSyncSnapshot() — single cs_headers acquisition
+    // returning all three values atomically. Eliminates the Phase 9
+    // PR9.6-RT-MEDIUM-2 (a) multi-lock tip-skew race window where a
+    // header arriving between GetSyncProgress / GetBestHeight /
+    // GetBestHeaderHash calls left height + hash referring to different
+    // blocks. The snapshot is internally consistent by construction.
+    auto snap = g_node_context.headers_manager->GetSyncSnapshot();
 
     const char* manager_class = (g_node_context.connman && g_node_context.connman->HasPortPeerManager())
                                     ? "both"
@@ -5291,9 +5284,9 @@ std::string CRPCServer::RPC_GetSyncStatus(const std::string& params) {
 
     std::ostringstream oss;
     oss << "{";
-    oss << "\"headers_progress\":" << progress << ",";
-    oss << "\"best_header_height\":" << best_height << ",";
-    oss << "\"best_header_hash\":\"" << best_hash.GetHex() << "\",";
+    oss << "\"headers_progress\":" << snap.progress << ",";
+    oss << "\"best_header_height\":" << snap.best_height << ",";
+    oss << "\"best_header_hash\":\"" << snap.best_hash.GetHex() << "\",";
     oss << "\"manager_class\":\"" << manager_class << "\"";
     oss << "}";
     return oss.str();
@@ -5312,16 +5305,13 @@ std::string CRPCServer::RPC_GetBlockDownloadStats(const std::string& params) {
     size_t total_in_flight = g_node_context.block_fetcher->GetInFlightCount();
     size_t total_pending = g_node_context.block_fetcher->GetPendingCount();
 
-    // PR9.6-RT-MEDIUM-2 documented race window: GetConnectedPeers() returns
-    // a snapshot vector, then we iterate calling GetPeerBlocksInFlight(id)
-    // per peer. Between the snapshot and each per-peer read, a peer may
-    // disconnect; GetPeerBlocksInFlight on a disconnected NodeId returns 0
-    // (CBlockTracker drops the peer's entries on disconnect, so it's not
-    // stale data — just 0). Conversely a NEW peer connecting between the
-    // snapshot and iteration won't appear in this response. Race window
-    // is bounded by peer-event rate; operationally negligible. Atomic-
-    // snapshot would require new joint API across CPeerManager + CBlock-
-    // Fetcher; filed as Phase 10+ enhancement opportunity.
+    // Phase 10 PR10.2: switched from "GetConnectedPeers + per-peer
+    // GetPeerBlocksInFlight" to CPeerManager::GetBlockDownloadSnapshot()
+    // — single cs_peers acquisition with nested block_tracker reads.
+    // Eliminates Phase 9 PR9.6-RT-MEDIUM-2 (b) peer-disconnect-during-
+    // iteration race. Lock-ordering audit (PR10.2 2026-05-01) confirmed
+    // cs_peers → block_tracker is the established Dilithion order;
+    // joint snapshot follows it. No deadlock potential.
     std::ostringstream oss;
     oss << "{";
     oss << "\"total_blocks_in_flight\":" << total_in_flight << ",";
@@ -5329,15 +5319,14 @@ std::string CRPCServer::RPC_GetBlockDownloadStats(const std::string& params) {
     oss << "\"peers\":[";
 
     if (g_node_context.peer_manager) {
-        auto peers = g_node_context.peer_manager->GetConnectedPeers();
+        auto snapshot = g_node_context.peer_manager->GetBlockDownloadSnapshot();
         bool first = true;
-        for (const auto& peer : peers) {
+        for (const auto& entry : snapshot) {
             if (!first) oss << ",";
             first = false;
-            int blocks_in_flight = g_node_context.block_fetcher->GetPeerBlocksInFlight(peer->id);
             oss << "{";
-            oss << "\"peer_id\":" << peer->id << ",";
-            oss << "\"blocks_in_flight\":" << blocks_in_flight << ",";
+            oss << "\"peer_id\":" << entry.peer_id << ",";
+            oss << "\"blocks_in_flight\":" << entry.blocks_in_flight << ",";
             oss << "\"manager_class\":\"" << manager_class << "\"";
             oss << "}";
         }

@@ -305,6 +305,44 @@ std::vector<std::shared_ptr<CPeer>> CPeerManager::GetConnectedPeers() {
     return result;
 }
 
+std::vector<CPeerManager::BlockDownloadEntry> CPeerManager::GetBlockDownloadSnapshot() const {
+    // Phase 10 PR10.2 — joint atomic snapshot under cs_peers.
+    //
+    // Lock-ordering: cs_peers → block_tracker.m_mutex (established order
+    // at the two genuinely-nested precedents MarkBlockAsInFlight + Get-
+    // BlocksInFlightForPeer; see header docblock for audit details). No
+    // deadlock potential — block_tracker's encapsulation invariant
+    // (block_tracker.h:419) prevents the inverse order from existing.
+    //
+    // Performance profile (PR10.2-RT-MEDIUM-1 honest characterization):
+    // holds cs_peers for O(N) where N is connected-peer count (capped at
+    // 125 by MAX_OUTBOUND_CONNECTIONS + max_inbound). Each iteration
+    // nested-locks block_tracker.m_mutex for an O(1) map lookup. Worst-
+    // case hold time at N=125 is ~20-50µs (per-iteration map lookup is
+    // a few hundred ns + recursive_mutex acquisition overhead). This is
+    // operationally fine for a telemetry-tier RPC consumed every ~10min
+    // during burn-in (PR9.2 runbook §3 cadence) — but would NOT be
+    // appropriate inside a hot peer-event path that holds cs_peers
+    // under load (e.g. peer-event dispatch, MarkBlockAsInFlight per
+    // block request).
+    std::lock_guard<std::recursive_mutex> lock(cs_peers);
+
+    std::vector<BlockDownloadEntry> result;
+    if (!g_node_context.block_tracker) {
+        return result;  // empty — block_tracker not initialized
+    }
+
+    for (const auto& pair : peers) {
+        if (pair.second->IsConnected()) {
+            BlockDownloadEntry entry;
+            entry.peer_id = pair.first;
+            entry.blocks_in_flight = g_node_context.block_tracker->GetPeerInFlightCount(pair.first);
+            result.push_back(entry);
+        }
+    }
+    return result;
+}
+
 bool CPeerManager::CanAcceptConnection() const {
     std::lock_guard<std::recursive_mutex> lock(cs_peers);
     // BUG #105 FIX: Count only CONNECTED peers, not total map entries

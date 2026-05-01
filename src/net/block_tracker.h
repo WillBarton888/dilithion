@@ -416,6 +416,22 @@ public:
     }
 
 private:
+    // Lock-ordering safety invariant (PR10.2-RT-INFO-1, 2026-05-01):
+    //   m_mutex is acquired ONLY internally by CBlockTracker public methods.
+    //   No method on CBlockTracker calls into CPeerManager (cs_peers),
+    //   CConnman (cs_vNodes), CHeadersManager (cs_headers), or any other
+    //   external subsystem from inside the locked region. This invariant
+    //   preserves the one-way Dilithion lock-acquisition order
+    //     {cs_vNodes, cs_peers, cs_headers} → block_tracker.m_mutex
+    //   that PR10.2's CPeerManager::GetBlockDownloadSnapshot relies on
+    //   for its `cs_peers → m_mutex` nested acquisition to be safe
+    //   (no inversion possible).
+    //
+    //   FUTURE MAINTAINERS: adding any callback / peer-event / chain-
+    //   state touch INTO this class from inside m_mutex's locked scope
+    //   would silently break PR10.2's safety claim and could introduce
+    //   deadlock with CPeerManager::GetBlockDownloadSnapshot or
+    //   peers.cpp:1098 / :1240 nested-lock sites. Don't.
     mutable std::mutex m_mutex;
 
     // Heights that are already in DB (no need to request)

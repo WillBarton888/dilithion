@@ -297,6 +297,26 @@ public:
     int GetBestHeight() const;
 
     /**
+     * @brief Atomic sync-state snapshot — single cs_headers acquisition.
+     *
+     * Phase 10 PR10.2: eliminates the multi-lock-acquisition tip-skew race
+     * documented at Phase 9 PR9.6-RT-MEDIUM-2 (a). Calling
+     * GetSyncProgress() / GetBestHeight() / GetBestHeaderHash() in
+     * sequence acquires cs_headers three times; a header arriving
+     * between calls can shift the tip, leaving height + hash referring
+     * to different blocks. This getter reads all three under ONE lock,
+     * guaranteeing internal consistency of the returned snapshot.
+     *
+     * @return SyncSnapshot { progress, best_height, best_hash }
+     */
+    struct SyncSnapshot {
+        double progress;       ///< 0.0–1.0; 0.0 if no peers
+        int best_height;       ///< Best validated header chain tip height
+        uint256 best_hash;     ///< Best validated header chain tip hash
+    };
+    SyncSnapshot GetSyncSnapshot() const;
+
+    /**
      * @brief Get best header hash (from chain tips tracker)
      *
      * @return Hash of best validated header tip

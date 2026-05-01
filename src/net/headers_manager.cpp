@@ -1157,6 +1157,40 @@ int CHeadersManager::GetBestHeight() const
     return nBestHeight;
 }
 
+CHeadersManager::SyncSnapshot CHeadersManager::GetSyncSnapshot() const
+{
+    // Phase 10 PR10.2: atomic snapshot under a SINGLE cs_headers acquisition.
+    // Eliminates Phase 9 PR9.6-RT-MEDIUM-2 (a) multi-lock tip-skew race.
+    //
+    // Body composes the same logic as GetSyncProgress() + GetBestHeight()
+    // + GetBestHeaderHash() but reads all three protected fields once
+    // under the lock. No new state is added; the lock-acquisition pattern
+    // matches the existing three getters (same mutex, same scope) — no
+    // new lock-ordering interaction with other subsystems.
+    std::lock_guard<std::mutex> lock(cs_headers);
+
+    SyncSnapshot snap;
+    snap.best_height = nBestHeight;
+    snap.best_hash = hashBestHeader;
+
+    // Progress: walk peer states for max claimed height, divide by ours.
+    if (mapPeerStates.empty()) {
+        snap.progress = 0.0;
+    } else {
+        int maxPeerHeight = nBestHeight;
+        for (const auto& pair : mapPeerStates) {
+            if (pair.second.nSyncHeight > maxPeerHeight) {
+                maxPeerHeight = pair.second.nSyncHeight;
+            }
+        }
+        snap.progress = (maxPeerHeight <= 0)
+            ? 0.0
+            : static_cast<double>(nBestHeight) / static_cast<double>(maxPeerHeight);
+    }
+
+    return snap;
+}
+
 uint256 CHeadersManager::GetBestHash() const
 {
     std::lock_guard<std::mutex> lock(cs_headers);

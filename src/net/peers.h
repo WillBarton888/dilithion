@@ -281,6 +281,49 @@ public:
     std::vector<std::shared_ptr<CPeer>> GetAllPeers();
     std::vector<std::shared_ptr<CPeer>> GetConnectedPeers();
 
+    /**
+     * @brief Phase 10 PR10.2 — atomic joint snapshot of connected peers
+     *        with their per-peer block-download counts.
+     *
+     * Eliminates the Phase 9 PR9.6-RT-MEDIUM-2 (b) peer-disconnect-during-
+     * iteration race in `RPC_GetBlockDownloadStats`. The race fires when
+     * `GetConnectedPeers()` snapshots one set of peers, then iterating
+     * `block_tracker->GetPeerInFlightCount(id)` per peer happens after
+     * cs_peers has been released — peer events between the snapshot and
+     * the per-peer reads can introduce inconsistency.
+     *
+     * This getter holds cs_peers throughout the iteration AND calls
+     * `g_node_context.block_tracker->GetPeerInFlightCount(id)` inside
+     * the locked region — producing a joint atomic snapshot.
+     *
+     * **Lock-ordering safety (audited PR10.2 2026-05-01; refined per
+     * Layer-2 PR10.2-RT-LOW-1):** the established Dilithion order is
+     * `cs_peers → block_tracker.m_mutex` at TWO genuinely-nested
+     * precedent sites (`MarkBlockAsInFlight` at peers.cpp:1098,
+     * `GetBlocksInFlightForPeer` at peers.cpp:1240). `OnPeerDisconnected`
+     * is sequential, not nested, so it is not a precedent for this
+     * pattern.
+     *
+     * The inverse order is structurally impossible per block_tracker's
+     * encapsulation invariant: `CBlockTracker` only acquires `m_mutex`
+     * internally and never calls into CPeerManager from inside the
+     * locked region (verified: read every public method on
+     * `block_tracker.h`). No path can hold `block_tracker.m_mutex` and
+     * then attempt `cs_peers`. Future maintainers adding peer-event
+     * callbacks INTO block_tracker would silently break this safety
+     * claim — see the invariant comment near
+     * `CBlockTracker::m_mutex` declaration.
+     *
+     * @return Vector of (peer_id, blocks_in_flight) pairs for all
+     *         connected peers; empty if g_node_context.block_tracker
+     *         is null.
+     */
+    struct BlockDownloadEntry {
+        int peer_id;
+        int blocks_in_flight;
+    };
+    std::vector<BlockDownloadEntry> GetBlockDownloadSnapshot() const;
+
     // Phase 1: CNode management (event-driven networking)
     // CNode objects are owned by CConnman. These methods manage references only.
     CNode* AddNode(const NetProtocol::CAddress& addr, bool inbound = false);
