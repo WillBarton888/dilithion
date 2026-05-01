@@ -679,10 +679,21 @@ BOOST_AUTO_TEST_CASE(eraseblock_failure_sets_corrupted_flag) {
     BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), kN - 1);
     BOOST_REQUIRE(!idx.IsCorrupted());
 
-    coin_stats_index_test_hooks::g_force_eraseblock_failure.store(true);
-    const bool erased = idx.EraseBlock(fix.per_height_block[kN - 1], kN - 1,
-                                       fix.per_height_hash[kN - 1]);
-    coin_stats_index_test_hooks::g_force_eraseblock_failure.store(false);
+    // L2 fix: RAII scope guard ensures the global hook is reset even if
+    // EraseBlock throws or BOOST_REQUIRE bails out of the test below. The
+    // previous implementation set/unset the hook in two separate
+    // statements; an exception between them would leak the hook into
+    // subsequent tests in the same process.
+    struct ForceEraseFailureGuard {
+        ForceEraseFailureGuard()  { coin_stats_index_test_hooks::g_force_eraseblock_failure.store(true); }
+        ~ForceEraseFailureGuard() { coin_stats_index_test_hooks::g_force_eraseblock_failure.store(false); }
+    };
+    bool erased = false;
+    {
+        ForceEraseFailureGuard guard;
+        erased = idx.EraseBlock(fix.per_height_block[kN - 1], kN - 1,
+                                fix.per_height_hash[kN - 1]);
+    }
 
     BOOST_CHECK(!erased);            // forced failure surfaced
     BOOST_CHECK(idx.IsCorrupted());  // sticky flag set
