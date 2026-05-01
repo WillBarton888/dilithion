@@ -272,8 +272,12 @@ BOOST_AUTO_TEST_CASE(zmq_publish_shutdown_without_initialize)
     BOOST_CHECK(true);
 }
 
-// 6. Bind failure: malformed address must return false from Initialize and
-// leave the notifier in a re-Initialize-able state.
+// 6. Bind failure: malformed address must return false from Initialize, must
+// not leave a dangling socket, and must leave the notifier in a state where
+// a subsequent SetAddress + Initialize works. Also confirms the global
+// mapPublishNotifiers is not polluted by the failed init (re-using the same
+// good address from a prior successful Initialize would otherwise hand back
+// a stale fd).
 BOOST_AUTO_TEST_CASE(zmq_publish_bind_failure_clean_state)
 {
     void* ctx = zmq_ctx_new();
@@ -284,7 +288,20 @@ BOOST_AUTO_TEST_CASE(zmq_publish_bind_failure_clean_state)
     n.SetAddress("tcp://this-is-not-a-valid-address::99999999");
 
     BOOST_CHECK(!n.Initialize(ctx));
-    // Subsequent Shutdown must not crash.
+    // Subsequent Shutdown must not crash even though Initialize failed.
+    n.Shutdown();
+
+    // Re-initialize against a valid address. If the failed Initialize had
+    // polluted mapPublishNotifiers or left psocket non-null, this would
+    // either assert (assert(!psocket) at the top of Initialize) or fail to
+    // bind. Use a fresh port distinct from the other tests in this suite.
+    n.SetAddress("tcp://127.0.0.1:28335");
+    BOOST_REQUIRE(n.Initialize(ctx));
+
+    // Sanity-check the recovered notifier actually publishes.
+    unsigned char payload[4] = {0xde, 0xad, 0xbe, 0xef};
+    BOOST_CHECK(n.SendZmqMessage("hashblock", payload, sizeof(payload)));
+
     n.Shutdown();
 
     zmq_ctx_term(ctx);
