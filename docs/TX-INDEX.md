@@ -334,6 +334,72 @@ Stop the node, `rm -rf <datadir>/indexes/txindex/`, restart with
 the next startup with `-txindex=1` the operator must pass `-reindex` to
 re-acknowledge the rebuild.
 
+### `getindexinfo` JSON-RPC
+
+Bitcoin Core port (`src/rpc/blockchain.cpp::getindexinfo` v28.0). Returns
+a JSON object keyed by index name, with each enabled index reporting its
+sync state. Indexes that are not enabled at runtime are omitted entirely
+-- a node started without `-txindex=1` returns `{}`.
+
+Currently Dilithion exposes only the `txindex` key; future ports
+(BIP 157/158 block filter index, coinstatsindex) will register here under
+the same schema.
+
+```bash
+curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json' \
+  --data-binary '{"jsonrpc":"2.0","id":1,"method":"getindexinfo","params":[]}' \
+  http://127.0.0.1:8332/
+```
+
+Response (txindex enabled and synced):
+
+```json
+{
+  "txindex": {
+    "synced": true,
+    "best_block_height": 152043
+  }
+}
+```
+
+Response (txindex enabled, still building):
+
+```json
+{
+  "txindex": {
+    "synced": false,
+    "best_block_height": 41200
+  }
+}
+```
+
+Response (txindex enabled, cold-start window — first row not yet written):
+
+```json
+{
+  "txindex": {
+    "synced": false,
+    "best_block_height": -1
+  }
+}
+```
+
+`best_block_height = -1` is the sentinel value emitted between
+`-txindex=1 -reindex` startup and the moment SyncLoop writes its first
+record. Consumers should treat `-1` as "no progress yet" rather than a
+sync error.
+
+Response (txindex not enabled):
+
+```json
+{}
+```
+
+Intended use: explorer/wallet/exchange health pages can poll
+`getindexinfo` on a short interval (seconds) and surface readiness to
+operators without tailing logs. The handler is read-only and lock-free
+-- it costs two atomic loads per call and returns immediately.
+
 ## Source references
 
 * `src/index/tx_index.h` -- `CTxIndex` declaration; thread/lock contract

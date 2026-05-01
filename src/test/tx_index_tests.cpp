@@ -4,6 +4,7 @@
 #include <boost/test/unit_test.hpp>
 
 #include <index/tx_index.h>
+#include <rpc/server.h>
 
 #include <consensus/chain.h>
 #include <consensus/validation.h>
@@ -1679,6 +1680,65 @@ BOOST_AUTO_TEST_CASE(reindex_skips_height_with_no_main_chain) {
 
     // The walk bailed; m_synced stays false so operators detect.
     BOOST_CHECK(!idx.IsSynced());
+
+    g_chainstate.Cleanup();
+}
+
+// getindexinfo schema-lock-in test (red-team CONCERN #3 from the
+// getindexinfo PR diff audit). The handler is a pure formatter on the
+// already-tested CTxIndex APIs (IsSynced, LastIndexedHeight); this test
+// locks the JSON shape against accidental future drift -- the case that
+// would silently break Explorer/wallet/exchange health pages without
+// any compiler warning.
+//
+// Three response shapes covered:
+//   (a) g_tx_index == nullptr            -> "{}"
+//   (b) txindex enabled, mid-sync        -> {"txindex":{"synced":false,"best_block_height":-1}}
+//   (c) txindex enabled, synced+at-tip   -> {"txindex":{"synced":true,"best_block_height":N}}
+//
+// The handler is `static` precisely so this test can call it directly
+// without standing up an HTTP server.
+BOOST_AUTO_TEST_CASE(getindexinfo_schema_lock_in) {
+    // (a) No index registered.
+    BOOST_REQUIRE(g_tx_index == nullptr);
+    BOOST_CHECK_EQUAL(CRPCServer::RPC_GetIndexInfo(""), std::string("{}"));
+
+    TempDbScope scope_idx("getindexinfo_idx");
+    TempDbScope scope_chain("getindexinfo_chain");
+
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+
+    constexpr int kN = 4;
+    ChainFixture fix;
+    fix.Build(kN, chain_db);
+
+    // Stand up g_tx_index as the global the handler reads.
+    g_tx_index = std::make_unique<CTxIndex>();
+    BOOST_REQUIRE(g_tx_index->Init(scope_idx.path(), &chain_db));
+
+    // (b) Cold-start: registered but no rows written yet.
+    BOOST_CHECK(!g_tx_index->IsSynced());
+    BOOST_CHECK_EQUAL(g_tx_index->LastIndexedHeight(), -1);
+    BOOST_CHECK_EQUAL(
+        CRPCServer::RPC_GetIndexInfo(""),
+        std::string("{\"txindex\":{\"synced\":false,\"best_block_height\":-1}}"));
+
+    // (c) Run the reindex to completion, then check the synced shape.
+    g_tx_index->StartBackgroundSync();
+    BOOST_REQUIRE(WaitForSync(*g_tx_index, std::chrono::seconds(5)));
+    BOOST_CHECK(g_tx_index->IsSynced());
+    BOOST_CHECK_EQUAL(g_tx_index->LastIndexedHeight(), kN - 1);
+    BOOST_CHECK_EQUAL(
+        CRPCServer::RPC_GetIndexInfo(""),
+        std::string("{\"txindex\":{\"synced\":true,\"best_block_height\":3}}"));
+
+    // Tear down: g_tx_index destruction joins the reindex thread.
+    g_tx_index->Stop();
+    g_tx_index.reset();
+
+    // Post-teardown: back to the {} shape.
+    BOOST_CHECK_EQUAL(CRPCServer::RPC_GetIndexInfo(""), std::string("{}"));
 
     g_chainstate.Cleanup();
 }

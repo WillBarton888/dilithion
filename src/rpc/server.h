@@ -628,6 +628,12 @@ public:
      * @return true if initialized successfully
      */
     bool InitializeWebSocket(uint16_t port = 0);
+
+    // Index introspection (Bitcoin Core port: getindexinfo, src/rpc/blockchain.cpp v28.0).
+    // Static because it is stateless w.r.t. CRPCServer instance state -- it reads only the
+    // process-wide `g_tx_index` global. Public + static lets tests exercise the formatter
+    // directly without standing up a full HTTP server (schema-lock-in coverage).
+    static std::string RPC_GetIndexInfo(const std::string& params);
 };
 
 #endif // DILITHION_RPC_SERVER_H
