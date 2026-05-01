@@ -636,6 +636,58 @@ public:
     // directly without standing up a full HTTP server (schema-lock-in coverage).
     static std::string RPC_GetIndexInfo(const std::string& params);
 
+    // ------------------------------------------------------------------------
+    // Small RPCs cluster (T1.B) -- Bitcoin Core port v28.0.
+    //
+    // The wait-* RPCs and `verifytxoutproof` are STATIC + PUBLIC for the
+    // same reason as RPC_GetIndexInfo: they read only process-wide
+    // globals (g_chainstate / cluster condition variable) or operate on
+    // pure-input hex, neither of which is CRPCServer instance state.
+    // Static exposure also keeps them callable from unit tests without
+    // standing up an HTTP server.
+    //
+    // `gettxoutproof` is an instance method because it needs to reach
+    // into m_blockchain / m_utxo_set / m_chainstate.
+    //
+    // Default timeout 30s, cap 300s (DoS guard -- worker threads in the
+    // RPC thread-pool would otherwise be tied up by an unbounded number
+    // of long-poll clients).
+    //
+    // getblockstats is intentionally not in this cluster: it requires
+    // per-tx fee fields that depend on undo-data exposure (separate
+    // workstream alongside coinstatsindex).
+    static std::string RPC_WaitForNewBlock(const std::string& params);
+    static std::string RPC_WaitForBlock(const std::string& params);
+    static std::string RPC_WaitForBlockHeight(const std::string& params);
+    std::string RPC_GetTxOutProof(const std::string& params);
+    static std::string RPC_VerifyTxOutProof(const std::string& params);
+
+    // Hook for the chainstate block-connect callback to wake any RPC worker
+    // currently parked on the cluster's condition variable. Registered once
+    // from each node's startup path (dilithion-node.cpp / dilv-node.cpp)
+    // alongside the existing wallet / index callbacks. Idempotent and
+    // exception-safe so a callback storm never trips the chainstate's
+    // outer try/catch loop.
+    static void NotifyBlockTipChanged();
+
+    // PR #38 red-team C5: called from Stop() to release any worker thread
+    // parked in a wait-* RPC. Sets a shutdown flag and notify_all()s the
+    // cluster CV; the wait predicates check the flag and return the
+    // current tip immediately (timeout-equivalent fast path). Without
+    // this, Ctrl+C would hang the node up to 5 minutes per outstanding
+    // wait-* call.
+    static void NotifyClusterShutdown();
+
+    // Test-only: clear the cluster shutdown flag so wait-* RPCs called
+    // after a prior test's Stop() don't short-circuit. Called from
+    // test fixtures, NOT from production code paths. Production
+    // resets the flag implicitly via Start() instead.
+    static void ResetClusterStateForTests();
+
+    // Default and maximum wait-* timeouts in milliseconds. Exposed for tests.
+    static constexpr int kDefaultWaitTimeoutMs = 30000;   // 30 seconds
+    static constexpr int kMaxWaitTimeoutMs     = 300000;  // 5 minutes
+
     // Mempool persistence operator-on-demand save (Bitcoin Core port:
     // savemempool, src/rpc/mempool.cpp v28.0). Triggers an immediate
     // mempool.dat write without restarting the node. Returns
