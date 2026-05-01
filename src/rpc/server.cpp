@@ -29,6 +29,7 @@
 #include <consensus/pow.h>
 #include <consensus/validation.h>  // For DeserializeBlockTransactions
 #include <index/tx_index.h>  // PR-5: txindex fast-path for getrawtransaction/gettransaction
+#include <node/mempool_persist.h>  // PR-MP-3: savemempool RPC handler
 #include <cmath>  // For pow()
 #include <util/base58.h>           // For EncodeBase58Check
 #include <dfmp/dfmp.h>  // DFMP v2.0
@@ -263,6 +264,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["getrawtransaction"] = [this](const std::string& p) { return RPC_GetRawTransaction(p); };
     m_handlers["decoderawtransaction"] = [this](const std::string& p) { return RPC_DecodeRawTransaction(p); };
     m_handlers["getindexinfo"] = [](const std::string& p) { return RPC_GetIndexInfo(p); };
+    m_handlers["savemempool"] = [this](const std::string& p) { return RPC_SaveMempool(p); };
     m_handlers["addnode"] = [this](const std::string& p) { return RPC_AddNode(p); };
     m_handlers["disconnectnode"] = [this](const std::string& p) { return RPC_DisconnectNode(p); };  // v4.0.22 manual peer disconnect
 
@@ -5345,6 +5347,7 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"getblockhash - Get block hash by height\",";
     oss << "\"gettxout - Get UTXO information\",";
     oss << "\"getindexinfo - Get sync state of all enabled indexes (txindex, ...)\",";
+    oss << "\"savemempool - Save mempool.dat to disk on demand (returns {filename: <path>})\",";
     oss << "\"checkchain - Verify your chain matches official checkpoints (detect forks)\",";
     oss << "\"checkblockdb - Check for missing blocks in database (diagnostic)\",";
     oss << "\"repairblocks - Repair blocks stored under wrong hashes (Bug #243 fix)\",";
@@ -5501,6 +5504,54 @@ std::string CRPCServer::RPC_GetIndexInfo(const std::string& params) {
     }
 
     oss << "}";
+    return oss.str();
+}
+
+// Bitcoin Core port: src/rpc/mempool.cpp::savemempool (v28.0).
+//
+// Triggers an immediate mempool.dat write while the node is running.
+// Useful for ops scenarios such as: pre-restart drain + verification,
+// migrating a mempool snapshot to another datadir, sanity-check that
+// the persistence subsystem is healthy without waiting for shutdown.
+//
+// Returns: {"filename": "<absolute-path>"} on success. Field name
+// matches Bitcoin Core v28.0 (and has done since v23.0) so client
+// tooling targeting BC's savemempool schema works against Dilithion
+// without modification.
+//
+// Throws: std::runtime_error on failure (mempool not registered, datadir
+// not set, or DumpMempool failure -- e.g. disk full, permissions).
+//
+// No params. Object-style empty params object expected by JSON-RPC
+// dispatcher; we ignore the params content. The path string is JSON-
+// escaped for `\` and `"`; control characters (U+0000-U+001F) are
+// assumed not present because the path is operator-controlled (it's
+// the configured datadir, not attacker input).
+std::string CRPCServer::RPC_SaveMempool(const std::string& params) {
+    (void)params;
+
+    if (!m_mempool) {
+        throw std::runtime_error("Mempool not registered with RPC server");
+    }
+    if (m_dataDir.empty()) {
+        throw std::runtime_error("Data directory not registered with RPC server");
+    }
+
+    const auto result = mempool_persist::DumpMempool(
+        *m_mempool, std::filesystem::path(m_dataDir));
+    if (!result.success) {
+        throw std::runtime_error("savemempool failed: " + result.error_message);
+    }
+
+    std::ostringstream oss;
+    oss << "{\"filename\":\"";
+    // Escape backslashes in Windows paths so the JSON stays valid.
+    for (char c : result.final_path) {
+        if (c == '\\') oss << "\\\\";
+        else if (c == '"') oss << "\\\"";
+        else oss << c;
+    }
+    oss << "\"}";
     return oss.str();
 }
 

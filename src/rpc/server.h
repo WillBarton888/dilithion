@@ -673,6 +673,14 @@ public:
     // Default and maximum wait-* timeouts in milliseconds. Exposed for tests.
     static constexpr int kDefaultWaitTimeoutMs = 30000;   // 30 seconds
     static constexpr int kMaxWaitTimeoutMs     = 300000;  // 5 minutes
+
+    // Mempool persistence operator-on-demand save (Bitcoin Core port:
+    // savemempool, src/rpc/mempool.cpp v28.0). Triggers an immediate
+    // mempool.dat write without restarting the node. Returns
+    // {"path": "<absolute-path>"} on success or throws on failure.
+    // Instance method (NOT static) because it consults m_mempool +
+    // m_dataDir; tests exercise via constructed CRPCServer instance.
+    std::string RPC_SaveMempool(const std::string& params);
 };
 
 #endif // DILITHION_RPC_SERVER_H
