@@ -207,6 +207,23 @@ public:
      */
     uint64_t GetRebroadcastCount() const { return metric_rebroadcasts.load(); }
 
+    /**
+     * T1.B-2 H3: Read-only state-integrity accessors used by
+     * `testaccept_concurrent_no_state_leak` to assert that a no-mutation
+     * RPC like `testmempoolaccept` leaves the mempool BYTE-IDENTICAL.
+     *
+     * NOT for production use -- the names carry the
+     * `*ForStateIntegrityTests` suffix to make their test-only purpose clear
+     * at every call site. If a non-test caller needs these views, add a
+     * separate accessor with a production-grade name and contract.
+     *
+     * Each method takes `cs` and returns a snapshot copy of the underlying
+     * data structure. Cost is O(N); fine for tests, not for hot paths.
+     */
+    std::set<uint256> GetTxIdsForStateIntegrityTests() const;
+    std::set<COutPoint> GetSpentOutpointsForStateIntegrityTests() const;
+    std::map<uint256, std::set<uint256>> GetDescendantsForStateIntegrityTests() const;
+
 private:
     // Phase 3.3: Rebroadcast tracking
     std::atomic<uint64_t> metric_rebroadcasts{0};
