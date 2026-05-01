@@ -7,3 +7,6 @@
 [submodule "depends/chiavdf"]
 	path = depends/chiavdf
 	url = https://github.com/dilithion/chiavdf.git
+[submodule "depends/libzmq"]
+	path = depends/libzmq
+	url = https://github.com/zeromq/libzmq

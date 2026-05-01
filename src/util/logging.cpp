@@ -322,6 +322,7 @@ std::string CLogger::FormatLogMsg(LogCategory category, LogLevel level, const st
         case LogCategory::CONSENSUS: catStr = "CONSENSUS"; break;
         case LogCategory::IBD: catStr = "IBD"; break;
         case LogCategory::VALIDATION: catStr = "VALIDATION"; break;
+        case LogCategory::ZMQ: catStr = "ZMQ"; break;
         default: catStr = ""; break;
     }
     if (catStr[0] != '\0') {
