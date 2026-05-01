@@ -2994,14 +2994,24 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             std::cout << "  [OK] Transaction index initialized" << std::endl;
         }
 
-        // PR-EF-2: Fee estimator init. Default ON. Allocate the process-wide
-        // CBlockPolicyEstimator BEFORE LoadMempool runs (LoadMempool calls
-        // AddTx with bypass_fee_check=true; my AddTx wiring then passes
-        // valid_fee_estimate=false to processTx so replayed txs do not
-        // pollute the estimator) and BEFORE P2P listens (so peers cannot
-        // relay txs while we restore on-disk estimator state). Order
-        // mirrors Bitcoin Core init.cpp Shutdown's inverse: shutdown
-        // saves AFTER P2P stop AFTER RPC stop AFTER mempool dump.
+        // PR-EF-2: Fee estimator init. Default ON.
+        //
+        // PR-EF-2 fixup F#9: corrected ordering rationale.
+        //
+        // We allocate the CBlockPolicyEstimator and call LoadFeeEstimates
+        // BEFORE LoadMempool. The reason is NOT "before P2P listens" --
+        // P2P-listen happens later regardless. The actual reason is that
+        // LoadMempool replays each persisted tx through CTxMemPool::AddTx
+        // with bypass_fee_check=true, which the AddTx wiring maps to
+        // valid_fee_estimate=false. For that skip to take effect, the
+        // estimator must already exist when the replay runs; and for the
+        // restored on-disk estimator state to NOT see those replays as
+        // duplicate-admit attempts, LoadFeeEstimates must populate
+        // m_tracked first. Ordering: alloc -> LoadFeeEstimates ->
+        // (later) LoadMempool replay.
+        //
+        // Shutdown ordering (DumpMempool -> DumpFeeEstimates) is set in
+        // the Shutdown body and mirrors Bitcoin Core init.cpp Shutdown.
         //
         // The chainstate BlockConnect callback registered below walks
         // each connected block's transactions and feeds confirmed-tx
