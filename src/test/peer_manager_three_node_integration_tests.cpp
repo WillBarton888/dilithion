@@ -24,22 +24,30 @@
 //
 // Cases (5):
 //   1. routing_connman_round_trip
-//      — A→B unknown_command via routing connman; B's port_scorer
+//      — A→B "junk_msg" via routing connman; B's port_scorer
 //        ticks for sender=A_idx, A's scorer untouched. Smoke-test
-//        for the routing path.
+//        for the routing path. (Command must be ≤11 chars to fit
+//        the 12-byte CMessageHeader.command field without
+//        truncation; per PR6.5b.7-c-RT-MEDIUM-1.)
 //   2. cross_node_gamma_ownership
-//      — All 3 fixtures hold port_scorer + a "legacy_scorer" stub.
-//        A sends unknown_command to B and to C, separately. Asserts
+//      — A sends "junk_msg" to B and to C, separately. Asserts
 //        port_scorer of the RECIPIENT ticks; port_scorer of the
-//        SENDER and legacy_scorer of EVERY fixture stay at 0.
-//        Strengthens the "γ ownership held cross-fixture" guarantee.
+//        SENDER untouched. Legacy-side transport-integrity
+//        scoring intentionally NOT asserted at integration level
+//        (port-only fixtures cannot exercise legacy outbound paths
+//        under γ); unit-level coverage at parity gate Test 13
+//        (`ParityGate_TransportIntegrity_LegacyScoresOnly_RealConnmanWiring`)
+//        in peer_manager_misbehavior_tests.cpp. See
+//        PR6.5b.7-c-RT-HIGH-2 ledger entry.
 //   3. multithreaded_three_node_concurrent_inbound
-//      — 3 worker threads (one per fixture) routing unknown_garbage
-//        in a tight loop to neighbours. TSAN sweep.
+//      — 3 worker threads (one per fixture) routing "junk_msg"
+//        in a tight loop to neighbours. Asserts score == kHits
+//        exactly per (recipient, sender) tuple → no lost updates.
 //   4. multithreaded_three_node_lifecycle_churn
 //      — Each fixture's main thread connects/disconnects peers from
-//        the disjoint id range (0..7, 100..107, 200..207). Plus a
-//        Tick thread per fixture. Stresses cross-fixture state.
+//        disjoint id ranges (500..507, 600..607, 700..707) — chosen
+//        disjoint from cross-fixture peer ids {0,1,2}. Plus a Tick
+//        thread per fixture. Stresses cross-fixture state.
 //   5. mixed_full_load_three_nodes
 //      — Combined: per-fixture inbound routing + per-fixture Tick +
 //        per-fixture lifecycle churn, all concurrent.
