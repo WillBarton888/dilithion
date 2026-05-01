@@ -195,6 +195,14 @@ struct ClusterChainFixture {
 
         g_chainstate.Cleanup();
 
+        // PR #38 red-team C5 follow-up: clear the cluster shutdown flag.
+        // Other test suites in the same binary may have called
+        // CRPCServer::Stop() (which sets the flag) before us. Without
+        // this reset, wait-* RPC predicates would short-circuit on
+        // shutdown=true and the cluster tests would fail with the chain
+        // returning immediately at the wrong height.
+        CRPCServer::ResetClusterStateForTests();
+
         // PR #38 red-team C6: capture prior g_chainParams BEFORE we
         // potentially overwrite it.
         m_prev_chain_params = Dilithion::g_chainParams;

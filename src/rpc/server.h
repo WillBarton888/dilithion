@@ -678,6 +678,12 @@ public:
     // wait-* call.
     static void NotifyClusterShutdown();
 
+    // Test-only: clear the cluster shutdown flag so wait-* RPCs called
+    // after a prior test's Stop() don't short-circuit. Called from
+    // test fixtures, NOT from production code paths. Production
+    // resets the flag implicitly via Start() instead.
+    static void ResetClusterStateForTests();
+
     // Default and maximum wait-* timeouts in milliseconds. Exposed for tests.
     static constexpr int kDefaultWaitTimeoutMs = 30000;   // 30 seconds
     static constexpr int kMaxWaitTimeoutMs     = 300000;  // 5 minutes

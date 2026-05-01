@@ -412,6 +412,16 @@ bool CRPCServer::Start() {
         return false;
     }
 
+    // PR #38 red-team C5 follow-up: clear the cluster shutdown flag on
+    // every Start(). Required because Boost test suites in this binary
+    // run sequentially; a prior test's Stop() sets the flag, and without
+    // a reset subsequent server starts would not properly handle
+    // wait-* RPC traffic. Production also benefits: restarting an RPC
+    // server (e.g. after re-init) returns to a clean wait-state.
+    // (Reuses the test-only reset method since the operation is
+    // identical.)
+    ResetClusterStateForTests();
+
 #ifdef _WIN32
     WSADATA wsaData;
     if (WSAStartup(MAKEWORD(2, 2), &wsaData) != 0) {
@@ -8786,6 +8796,16 @@ void CRPCServer::NotifyBlockTipChanged() {
 void CRPCServer::NotifyClusterShutdown() {
     g_wait_cluster_shutdown.store(true, std::memory_order_relaxed);
     g_wait_cluster_cv.notify_all();
+}
+
+// Test-only reset: Boost test suites in this binary run sequentially and
+// share process-wide state. A prior test that called CRPCServer::Stop()
+// leaves g_wait_cluster_shutdown=true, which would short-circuit
+// wait-* RPC predicates in subsequent tests. Test fixtures call this
+// at setup to get a clean slate. Production paths reset implicitly
+// via Start().
+void CRPCServer::ResetClusterStateForTests() {
+    g_wait_cluster_shutdown.store(false, std::memory_order_relaxed);
 }
 
 
