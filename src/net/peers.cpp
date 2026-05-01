@@ -707,6 +707,18 @@ void CPeerManager::InitializeSeedNodes() {
     // Check which network we're on
     bool isTestnet = Dilithion::g_chainParams && Dilithion::g_chainParams->IsTestnet();
     bool isDilV = Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV();
+    bool isRegtest = Dilithion::g_chainParams && Dilithion::g_chainParams->IsRegtest();
+
+    // Regtest must NEVER reach out to public seed nodes. The 4-node harness
+    // wires peers via --addnode and the regtest network is air-gapped from
+    // mainnet/testnet/DilV public infra. Without this short-circuit, regtest
+    // falls through the isTestnet/isDilV checks into the mainnet branch and
+    // attempts to dial 138.197.68.128:8444 etc., which causes peer churn,
+    // CPU contention, and stalled mining templates.
+    if (isRegtest) {
+        dns_seeds.clear();
+        return;
+    }
 
     if (isDilV) {
         // ============================================
