@@ -2930,9 +2930,18 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                           << " (chain tip " << tip << ", gap=" << (tip - last)
                           << " blocks)" << std::endl;
             }
+            // PR-7G R1: live connect/disconnect callbacks are GATED on
+            // IsSynced(). While the reindex thread is catching up
+            // (m_synced=false), incoming chain blocks are NOT written by
+            // these lambdas — the reindex thread's outer loop in SyncLoop
+            // catches them via tip-rebase. This is the Bitcoin Core
+            // BaseIndex pattern; it closes the FA-HI-1 leapfrog vector
+            // by separating reindex and live writers temporally rather
+            // than relying on the C1 monotonicity guard alone.
             g_chainstate.RegisterBlockConnectCallback(
                 [](const CBlock& b, int h, const uint256& hh) {
-                    if (g_tx_index && !g_tx_index->WriteBlock(b, h, hh)) {
+                    if (g_tx_index && g_tx_index->IsSynced() &&
+                        !g_tx_index->WriteBlock(b, h, hh)) {
                         std::cerr << "[txindex] WriteBlock failed at height " << h
                                   << " (hash " << hh.GetHex().substr(0, 16) << "...) "
                                   << "-- index now lagging chain" << std::endl;
@@ -2940,7 +2949,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 });
             g_chainstate.RegisterBlockDisconnectCallback(
                 [](const CBlock& b, int h, const uint256& hh) {
-                    if (g_tx_index && !g_tx_index->EraseBlock(b, h, hh)) {
+                    if (g_tx_index && g_tx_index->IsSynced() &&
+                        !g_tx_index->EraseBlock(b, h, hh)) {
                         std::cerr << "[txindex] EraseBlock failed at height " << h
                                   << " (hash " << hh.GetHex().substr(0, 16) << "...) "
                                   << "-- index may contain stale entries" << std::endl;
@@ -7772,6 +7782,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         #endif
         std::cerr << "===========================================================" << std::endl;
 
+        // PR-7G R3: release tx_index before chainParams cleanup so the
+        // reindex thread (which reads g_chainstate.GetBlocksAtHeight /
+        // GetBlockIndex) is joined before any global it depends on can
+        // be torn down by the static destructor sequence. Mirrors the
+        // normal-shutdown ordering at line 7725.
+        g_tx_index.reset();
+
         // Cleanup on error (P0-5 FIX: use load/store for atomic)
         auto* relay_mgr = g_tx_relay_manager.load();
         if (relay_mgr) {
@@ -7822,6 +7839,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         }
         #endif
         std::cerr << "===========================================================" << std::endl;
+
+        // PR-7G R3: release tx_index before chainParams cleanup. See the
+        // matching note in the std::exception catch above.
+        g_tx_index.reset();
 
         // Cleanup on error (P0-5 FIX: use load/store for atomic)
         auto* relay_mgr = g_tx_relay_manager.load();

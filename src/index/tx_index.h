@@ -36,6 +36,13 @@ public:
     bool IsBuiltUpToHeight(int h) const;
     bool IsSynced() const;
 
+    // PR-7G R2: sticky corruption flag set on EraseBlock leveldb-write
+    // failure. Never auto-cleared at runtime; reset to false only by
+    // (a) WipeIndex() succeeding (i.e. C7 / --reindex path), or
+    // (b) destruction (process restart with a fresh g_tx_index). The
+    // flag is intentionally sticky to give the operator a clear signal.
+    bool IsCorrupted() const;
+
     // PR-4 will fill in actual thread bodies.
     void StartBackgroundSync();
     void Interrupt();
@@ -62,6 +69,9 @@ private:
     std::atomic<bool>     m_interrupt{false};
     std::atomic<uint64_t> m_mismatches_observed{0};
 
+    // PR-7G R2: sticky corruption flag (see IsCorrupted() above).
+    std::atomic<bool>     m_corrupted{false};
+
     // SEC-MD-1: gates the spawn-vs-stop race. Set under m_mutex inside
     // StartBackgroundSync before m_mutex is released for the chainstate
     // query. Cleared after m_sync_thread has been assigned. Stop() waits
@@ -82,7 +92,31 @@ private:
     // Reindex thread body. Spawned by StartBackgroundSync; reads g_chainstate
     // and m_chain_db without holding m_mutex (m_mutex is acquired only inside
     // WriteBlock). Honors m_interrupt between blocks.
-    void SyncLoop(int snapshotted_tip_height);
+    //
+    // PR-7G R1: SyncLoop now wraps an outer loop around WalkBlockRange.
+    // After each inner walk completes, the loop re-reads g_chainstate's
+    // tip height and, if the tip advanced during the walk, walks the
+    // newly-visible range. m_synced is set to true ONLY when the tip is
+    // stable across a full walk pass (i.e. no advancement during the
+    // most recent walk). This is the Bitcoin Core BaseIndex pattern.
+    void SyncLoop(int initial_snapshotted_tip);
+
+    // PR-7G R1: extracted inner-walk helper. Walks heights [start, end]
+    // inclusive, calling WriteBlock for each main-chain block. Returns
+    // true on clean completion; false on m_interrupt OR an unrecoverable
+    // WriteBlock failure (R4) -- caller must NOT set m_synced=true if false.
+    //
+    // R6 contested-height behavior: when MULTIPLE candidates exist at a
+    // height and NONE is on the main chain (mid-reorg), the walk BAILS
+    // by returning false and m_last_height is NOT advanced past the
+    // contested height. SyncLoop's outer loop will return without setting
+    // m_synced=true, and the next StartBackgroundSync will re-walk from
+    // m_last_height+1 once the reorg settles. Single-candidate non-main-
+    // chain heights (the normal "current tip" case where pnext==nullptr
+    // because nothing extends the tip yet) still fall through to
+    // hashes.front() -- there is no ambiguity when only one candidate
+    // exists.
+    bool WalkBlockRange(int start, int end);
 };
 
 extern std::unique_ptr<CTxIndex> g_tx_index;

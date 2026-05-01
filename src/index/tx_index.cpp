@@ -26,14 +26,29 @@ std::unique_ptr<CTxIndex> g_tx_index;
 
 const std::string CTxIndex::META_KEY = std::string("\x00meta", 5);
 
-// Test-observability hook (U3, Cursor 2nd-pass): counts the number of
-// m_db->Write() calls issued by WipeIndex. Lives in a dedicated namespace
-// so production code never reads it. Cost in production: 8 bytes of static
-// storage and one relaxed atomic increment per wipe — wipes happen at most
-// once per startup on a corrupted index. The counter proves the wipe is
-// implemented as a SINGLE WriteBatch (criterion U3).
+// Test-observability hooks. Live in a dedicated namespace so production
+// code never reads them. Cost in production: a few bytes of static
+// storage and one relaxed atomic touch per gated event. All hooks are
+// inert (no behavior change) unless tests explicitly set the gating
+// atomic.
+//
+// - g_wipe_write_count (U3): counts the number of m_db->Write() calls
+//   issued by WipeIndex AFTER the leveldb status is OK (PR-7G A4). The
+//   counter proves the wipe is implemented as a SINGLE WriteBatch and
+//   measures committed writes, not attempts.
+//
+// - g_walk_iteration_count (PR-7G E.2): incremented each time
+//   WalkBlockRange enters a new height inside its inner loop. Tests can
+//   poll this counter to inject blocks mid-walk deterministically.
+//
+// - g_force_eraseblock_failure (PR-7G E.4): when set true by a test,
+//   makes EraseBlock skip the leveldb write and return false (as if the
+//   underlying leveldb write had failed). Drives the m_corrupted-on-
+//   failure path without filesystem fragility on Windows MSYS2.
 namespace tx_index_test_hooks {
 std::atomic<uint64_t> g_wipe_write_count{0};
+std::atomic<uint64_t> g_walk_iteration_count{0};
+std::atomic<bool>     g_force_eraseblock_failure{false};
 }
 
 CTxIndex::CTxIndex() = default;
@@ -101,8 +116,16 @@ bool CTxIndex::Init(const std::string& datadir, CBlockchainDB* chain_db) {
         // U4 (Cursor 2nd-pass): stale-LOCK path — when leveldb fails to open
         // because another process holds the LOCK file, surface the exact path
         // and remediation step. No retry, no crash, no infinite loop.
+        //
+        // PR-7G A2: prefer the typed predicate IsIOError() — leveldb returns
+        // an IOError status whenever it cannot acquire the LOCK file (see
+        // depends/leveldb/util/env_*.cc PosixEnv::LockFile / WindowsEnv).
+        // Substring fallback is retained for portability across leveldb
+        // versions whose error text we cannot inspect at compile time, but
+        // the typed predicate is the primary signal.
         const std::string status_str = status.ToString();
         const bool likely_lock =
+            status.IsIOError() ||
             status_str.find("lock") != std::string::npos ||
             status_str.find("LOCK") != std::string::npos ||
             status_str.find("Resource temporarily unavailable") != std::string::npos;
@@ -153,6 +176,32 @@ bool CTxIndex::Init(const std::string& datadir, CBlockchainDB* chain_db) {
 
     int32_t height = 0;
     std::memcpy(&height, &meta_value[1], 4);
+
+    // PR-7G R5: bound-check the meta height. The on-disk value is a signed
+    // 32-bit int; the only legitimate values are -1 (cold) or [0, tip].
+    // Anything outside [-1, kMaxReasonableHeight] is provable corruption
+    // (e.g. a forged INT_MAX would overflow `current = height + 1` in
+    // SyncLoop, wrapping to INT_MIN and producing a near-2^31-iteration
+    // hang). Wipe and treat as cold-start. The 100M cap is well above any
+    // plausible chain depth in this lifetime.
+    constexpr int32_t kMaxReasonableHeight = 100'000'000;
+    if (height < -1 || height > kMaxReasonableHeight) {
+        std::cerr << "[txindex] meta height " << height
+                  << " is out of bounds [-1, " << kMaxReasonableHeight
+                  << "] -- treating as corrupt and wiping" << std::endl;
+        lock.unlock();
+        const bool wiped = WipeIndex();
+        lock.lock();
+        if (!wiped) {
+            std::cerr << "[txindex] integrity wipe failed; closing index" << std::endl;
+            m_db.reset();
+            return false;
+        }
+        m_last_height.store(-1);
+        m_synced.store(false);
+        return true;
+    }
+
     m_last_height.store(height);
     m_synced.store(false);
 
@@ -273,12 +322,20 @@ bool CTxIndex::WipeIndex() {
     batch.Delete(leveldb::Slice(META_KEY.data(), META_KEY.size()));
 
     leveldb::Status status = m_db->Write(leveldb::WriteOptions(), &batch);
-    tx_index_test_hooks::g_wipe_write_count.fetch_add(1, std::memory_order_relaxed);
     if (!status.ok()) {
         std::cerr << "[txindex] WipeIndex write failed: "
                   << status.ToString() << std::endl;
         return false;
     }
+    // PR-7G A4: counter measures committed writes only (post-status.ok()),
+    // not attempts. Failed writes shouldn't bump the counter; otherwise
+    // U3's "exactly 1 db->Write call" assertion is inflated by failures.
+    tx_index_test_hooks::g_wipe_write_count.fetch_add(1, std::memory_order_relaxed);
+    // PR-7G R2 (CONCERN-B2): the only legitimate runtime reset for the
+    // sticky m_corrupted flag is a successful wipe (C7 / --reindex). The
+    // index has just been reduced to a clean cold-start state on disk;
+    // any prior staleness has been erased.
+    m_corrupted.store(false);
     return true;
 }
 
@@ -371,14 +428,38 @@ bool CTxIndex::EraseBlock(const CBlock& block, int height, const uint256& block_
         return false;
     }
 
-    leveldb::Status status = m_db->Write(leveldb::WriteOptions(), &batch);
+    // PR-7G R2: optimistic m_last_height decrement BEFORE issuing the
+    // leveldb write. Without this, a write failure leaves m_last_height==H
+    // while the (intended) on-disk state is height H-1; a subsequent
+    // connect-replacement at height H would hit the C1 monotonicity guard
+    // (`height <= m_last_height` is `H <= H` = true) and silently no-op,
+    // so the replacement block's tx records would never be written.
+    // Decrementing first allows the replacement WriteBlock to succeed
+    // (its height becomes > new_height); we then set the sticky m_corrupted
+    // flag to give RPC operators a signal that the on-disk index may
+    // contain stale records for the failed-erase block.
+    m_last_height.store(new_height);
+
+    // PR-7G E.4 test-hook seam: when set, simulate a leveldb write failure
+    // without touching the filesystem. Production cost is one relaxed
+    // atomic load on the EraseBlock path, fired only on real disconnects.
+    const bool force_fail =
+        tx_index_test_hooks::g_force_eraseblock_failure.load(std::memory_order_relaxed);
+
+    leveldb::Status status =
+        force_fail ? leveldb::Status::IOError("forced EraseBlock failure (test)")
+                   : m_db->Write(leveldb::WriteOptions(), &batch);
     if (!status.ok()) {
         std::cerr << "[txindex] EraseBlock failed at height " << height
                   << ": " << status.ToString() << std::endl;
+        // PR-7G R2: sticky flag — the on-disk records for `height` may be
+        // stale (the optimistic m_last_height already decremented but the
+        // delete-batch never landed). Operators see corruption via RPC
+        // mismatch counters and the IsCorrupted() getter; recovery is
+        // --reindex (which calls WipeIndex and clears the flag).
+        m_corrupted.store(true);
         return false;
     }
-
-    m_last_height.store(new_height);
     (void)block_hash;
     return true;
 }
@@ -425,6 +506,10 @@ bool CTxIndex::IsBuiltUpToHeight(int h) const {
 
 bool CTxIndex::IsSynced() const {
     return m_synced.load();
+}
+
+bool CTxIndex::IsCorrupted() const {
+    return m_corrupted.load();
 }
 
 void CTxIndex::StartBackgroundSync() {
@@ -475,20 +560,36 @@ void CTxIndex::StartBackgroundSync() {
     m_starting.store(false);        // thread is now joinable; gate released
 }
 
-void CTxIndex::SyncLoop(int snapshotted_tip_height) {
-    // R3 (Cursor 2nd-pass) — load-bearing comment, NOT decoration:
-    // Chain reads (`g_chainstate.GetTip()`, `g_chainstate.GetBlockIndex(hash)`)
-    // acquire `cs_main` internally. `m_mutex` MUST NOT be held across these
-    // calls. The callback path only enters CTxIndex through `WriteBlock` /
-    // `EraseBlock`, which acquire `m_mutex` themselves; the reindex thread
-    // acquires `m_mutex` only via the same `WriteBlock` call site.
-
-    int current = m_last_height.load() + 1;
-    int blocks_indexed_this_run = 0;
-    while (current <= snapshotted_tip_height) {
+// R3 (Cursor 2nd-pass) — load-bearing comment, NOT decoration:
+// Chain reads (`g_chainstate.GetTip()`, `g_chainstate.GetBlockIndex(hash)`)
+// acquire `cs_main` internally. `m_mutex` MUST NOT be held across these
+// calls. The callback path only enters CTxIndex through `WriteBlock` /
+// `EraseBlock`, which acquire `m_mutex` themselves; the reindex thread
+// acquires `m_mutex` only via the same `WriteBlock` call site.
+//
+// PR-7G R1 (Bitcoin Core BaseIndex pattern):
+//   SyncLoop wraps an outer loop around WalkBlockRange. After each inner
+//   walk completes, it re-reads `g_chainstate.GetTip()->nHeight` and, if
+//   the tip advanced during the walk, walks the newly-visible range.
+//   m_synced is set to true ONLY when the tip is stable across a full
+//   walk pass. Live callbacks short-circuit at the lambda site while
+//   `!IsSynced()` (see dilithion-node.cpp / dilv-node.cpp), so the
+//   reindex thread is the SOLE writer to the index until catchup
+//   completes — closing the FA-HI-1 leapfrog vector by separating
+//   reindex and live writers temporally rather than relying on the C1
+//   monotonicity guard alone.
+bool CTxIndex::WalkBlockRange(int start, int end) {
+    int current = start;
+    while (current <= end) {
         if (m_interrupt.load()) {
-            break;
+            return false;
         }
+
+        // PR-7G E.2 test-hook seam: tests can poll this counter to inject
+        // blocks mid-walk deterministically. Production cost: one relaxed
+        // atomic increment per height, on the rare reindex path only.
+        tx_index_test_hooks::g_walk_iteration_count.fetch_add(
+            1, std::memory_order_relaxed);
 
         // Resolve current height -> block hash via g_chainstate. We do NOT
         // hold m_mutex across this call (R1).
@@ -496,10 +597,23 @@ void CTxIndex::SyncLoop(int snapshotted_tip_height) {
         if (hashes.empty()) {
             std::cerr << "[txindex] reindex: no block index entry at height "
                       << current << "; aborting reindex" << std::endl;
-            break;
+            return false;
         }
 
-        // Prefer the on-main-chain block at this height; fall back to any.
+        // Prefer the on-main-chain block at this height. PR-7G R6: when
+        // MULTIPLE blocks exist at this height and NONE is on main chain
+        // (e.g. mid-reorg where DisconnectTip cleared pnext on the old
+        // block but the new ConnectTip hasn't fired yet), do NOT fall
+        // back to hashes.front(). hashes.front() is non-deterministic
+        // (mapBlockIndex ordering) and can land on a stale side-chain
+        // block whose tx records would then persist forever (FA-MD-5).
+        // Skip the height with a log line and rely on the outer-loop
+        // tip-rebase to revisit it once the reorg settles.
+        //
+        // The hashes.size()==1 single-block case still falls through to
+        // hashes.front() — this is the normal "current tip" case where
+        // pnext is null for the genuine tip block. There is no ambiguity
+        // when there's only one candidate.
         uint256 block_hash;
         bool found_main = false;
         for (const uint256& h : hashes) {
@@ -511,6 +625,20 @@ void CTxIndex::SyncLoop(int snapshotted_tip_height) {
             }
         }
         if (!found_main) {
+            if (hashes.size() > 1) {
+                // PR-7G R6: stop the walk here. m_last_height is NOT
+                // advanced past the contested height; the reindex is
+                // not yet complete. SyncLoop's outer loop will return
+                // without setting m_synced=true, so operators detect
+                // via IsSynced()==false. After the reorg settles, a
+                // subsequent StartBackgroundSync will re-walk from
+                // m_last_height+1 and find a single main-chain block.
+                std::cerr << "[txindex] reindex: no main-chain block at height "
+                          << current << " (mid-reorg, " << hashes.size()
+                          << " candidates) -- bailing walk; outer loop will "
+                          << "revisit when the reorg settles" << std::endl;
+                return false;
+            }
             block_hash = hashes.front();
         }
 
@@ -525,27 +653,72 @@ void CTxIndex::SyncLoop(int snapshotted_tip_height) {
 
         // WriteBlock acquires m_mutex internally. The reindex thread does
         // NOT hold m_mutex across this call.
+        //
+        // PR-7G R4: a WriteBlock failure during reindex is unrecoverable
+        // for THIS walk pass — the local meta is now inconsistent with
+        // the writer's intent. Break and signal failure to the outer
+        // loop; the outer loop will return without setting m_synced=true
+        // so operators detect via `IsSynced()` polling that the index is
+        // not fully built. (Under the new gating, C1 same-height no-op
+        // is impossible during reindex because live callbacks are gated
+        // off — so a `false` return here is always a real disk error.)
         if (!WriteBlock(block, current, block_hash)) {
-            // WriteBlock already logged the cause. C1 monotonicity means a
-            // racing live-callback WriteBlock at the same height returns
-            // true (no-op); a real error here is rare.
+            std::cerr << "[txindex] reindex: WriteBlock failed at height "
+                      << current << "; aborting walk (m_synced stays false)"
+                      << std::endl;
+            return false;
         }
 
-        ++blocks_indexed_this_run;
         if ((current % 1000) == 0) {
             std::cout << "[txindex] indexed " << current
-                      << "/" << snapshotted_tip_height << " blocks" << std::endl;
+                      << "/" << end << " blocks" << std::endl;
         }
         ++current;
     }
 
-    if (!m_interrupt.load() && current > snapshotted_tip_height) {
-        std::cout << "[txindex] indexed " << snapshotted_tip_height
-                  << "/" << snapshotted_tip_height << " blocks (sync complete)"
-                  << std::endl;
-        m_synced.store(true);
+    return true;
+}
+
+void CTxIndex::SyncLoop(int initial_snapshotted_tip) {
+    int current_target = initial_snapshotted_tip;
+
+    while (!m_interrupt.load()) {
+        // PR-7G R1: each iteration walks `[m_last_height+1, current_target]`,
+        // then re-reads the live tip. If the tip advanced during the walk,
+        // bump current_target and walk again. Only when the tip is stable
+        // across a full walk pass do we set m_synced=true.
+        const int walk_start = m_last_height.load() + 1;
+        if (walk_start > current_target) {
+            // Either we resumed already at-or-past the target (warm-stale
+            // resume case), or the previous iteration completed up to
+            // current_target. Fall through to the tip re-read below.
+        } else {
+            const bool walk_completed = WalkBlockRange(walk_start, current_target);
+            if (m_interrupt.load() || !walk_completed) {
+                // Bail without setting m_synced=true. Operators detect the
+                // incomplete state via IsSynced()==false. R4 path.
+                return;
+            }
+        }
+
+        // Re-read the chain tip. If it advanced during the walk, continue;
+        // otherwise we're synced.
+        CBlockIndex* tip = g_chainstate.GetTip();
+        if (tip == nullptr) {
+            // Chainstate vanished mid-walk (shutdown in progress?) — bail
+            // without setting m_synced.
+            return;
+        }
+        const int tip_now = tip->nHeight;
+        if (tip_now <= current_target) {
+            std::cout << "[txindex] indexed " << current_target
+                      << "/" << current_target << " blocks (sync complete)"
+                      << std::endl;
+            m_synced.store(true);
+            return;
+        }
+        current_target = tip_now;
     }
-    (void)blocks_indexed_this_run;
 }
 
 void CTxIndex::Interrupt() {

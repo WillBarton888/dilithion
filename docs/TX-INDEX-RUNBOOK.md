@@ -74,6 +74,32 @@ will refuse to start otherwise.
 5. **After "(sync complete)" appears, the index is ready.** RPC calls
    to `getrawtransaction` / `gettransaction` will hit the fast path.
 
+### Behavior during the initial reindex (PR-7G R1)
+
+While the reindex thread is catching up (i.e. between startup and the
+"(sync complete)" log line), live blocks arriving via P2P are **NOT
+immediately indexed**. The reindex thread's outer loop catches them on
+its next pass via tip-rebase: after walking up to the snapshotted tip,
+it re-reads the live tip; if the tip advanced during the walk, the
+outer loop walks the newly-visible range; only when the tip is stable
+does it set `IsSynced()` to `true`.
+
+What this means operationally:
+
+- Until `(sync complete)` fires, `getrawtransaction` calls for newly-
+  arrived (post-startup) txs may fall through to the legacy tip-walk
+  (slower but correct). This is the "default-OFF behavior" semantically:
+  the fast path simply isn't populated yet for those heights.
+- The outer loop does NOT race the live-callback writers; live
+  callbacks are gated on `IsSynced()`. This is the Bitcoin Core
+  BaseIndex pattern. It eliminates the "leapfrog" failure mode where
+  a live callback writing at the chain tip caused the reindex's
+  catchup writes to silently no-op via the C1 monotonicity guard
+  (TXINDEX-FA-HI-1).
+- If you see `(sync complete)` and then a flood of new-chain activity,
+  the live callbacks pick up immediately after the gate opens. There
+  is no second-pass reindex needed.
+
 ### Subsequent restarts
 
 After the first cold rebuild, restart the node with `--txindex` only —
@@ -97,12 +123,15 @@ Once the index is built, the next time a fast-path tx lookup happens you
 will see (operator-visible info log):
 
 ```
-[RPC] Found transaction <txid> at block <blockhash> [txindex]
+[RPC] Found transaction <txid> in block <blockhash> (height N, M confirmations) [txindex]
 ```
 
 The `[txindex]` suffix indicates the response came from the fast path
 instead of the legacy tip-walk. If you don't see the suffix on confirmed
 non-mempool tx lookups, the index isn't being consulted — see §Troubleshooting.
+
+(PR-7G L2: literal log text matches code emission verbatim. The runbook
+previously said "at block" but the code emits "in block".)
 
 To benchmark the speedup, time a `getrawtransaction` call against a tx
 deep in the chain (e.g., > 10000 blocks back). With the fast path the

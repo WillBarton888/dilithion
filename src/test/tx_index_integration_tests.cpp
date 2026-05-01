@@ -967,4 +967,103 @@ BOOST_AUTO_TEST_CASE(tc7_mempool_first_ordering) {
     }
 }
 
+// PR-7G E.7 / L3: pIdx == nullptr in the RPC fast-path is treated as a
+// paranoia mismatch — log WARN, IncrementMismatches, and fall through to
+// the legacy tip-walk. Pre-fix, the code silently reported height=0 /
+// conf=0 (genesis), a valid-looking-but-wrong response.
+//
+// Test mechanism (no chainstate-side seam needed): plant an indexed
+// record whose block_hash is an arbitrary value NOT in chainstate's
+// mapBlockIndex. Then `FindTx(txid) -> (block_hash_unknown, ...)` and
+// `GetBlockIndex(block_hash_unknown) -> nullptr`. The fast-path branch
+// fires WARN + IncrementMismatches + falls through to legacy walk,
+// which either finds the genuine tx (if forged for a real txid) or
+// surfaces a not-found error.
+BOOST_AUTO_TEST_CASE(pidx_null_treated_as_paranoia_mismatch) {
+    IntegrationFixture fix("e7");
+    constexpr int kN = 3;
+    fix.BuildChain(kN);
+
+    g_tx_index = std::make_unique<CTxIndex>();
+    BOOST_REQUIRE(g_tx_index->Init(fix.idx_scope.path(), &fix.chain_db));
+    g_tx_index->StartBackgroundSync();
+    BOOST_REQUIRE(WaitForSync(*g_tx_index, std::chrono::seconds(5)));
+    g_tx_index->Stop();
+
+    // Drop the index so leveldb releases its lock for direct mutation.
+    g_tx_index.reset();
+
+    // Construction: take the genuine tx from block 2 (the regular tx at
+    // vtx[1], NOT the coinbase at vtx[0]). Plant block 2's full content
+    // into chain_db at an alternate key `unknown_block_hash` that we
+    // never add to chainstate's mapBlockIndex. Then plant an index
+    // record that maps the genuine txid -> (unknown_block_hash, 1).
+    //
+    // RPC fast-path for `getrawtransaction(genuine_txid)`:
+    //   FindTx -> (unknown_block_hash, 1)            [success]
+    //   ReadBlock(unknown_block_hash) -> block 2 data [success]
+    //   DeserializeBlockTransactions -> [coinbase, genuine_tx]
+    //   txPos=1 < 2 [ok]
+    //   txs[1]->GetHash() == genuine_txid [matches]
+    //   GetBlockIndex(unknown_block_hash) -> nullptr  [L3 trigger]
+    //
+    // PR-7G L3: pIdx==nullptr fires WARN + IncrementMismatches + falls
+    // through. Pre-fix, the code returned a synthetic height=0/conf=0
+    // response despite tx hash matching — silently wrong.
+    const uint256& genuine_txid = fix.per_height_tx[2]->GetHash();   // vtx[1]
+    uint256 unknown_block_hash;
+    std::memset(unknown_block_hash.data, 0xC9, 32);
+
+    // Plant block 2's data at the unknown_block_hash key.
+    {
+        CBlock block2_copy;
+        BOOST_REQUIRE(fix.chain_db.ReadBlock(fix.per_height_hash[2], block2_copy));
+        BOOST_REQUIRE(fix.chain_db.WriteBlock(unknown_block_hash, block2_copy));
+    }
+
+    {
+        leveldb::DB* raw = nullptr;
+        leveldb::Options opts;
+        opts.create_if_missing = false;
+        BOOST_REQUIRE(leveldb::DB::Open(opts, fix.idx_scope.path(), &raw).ok());
+        std::unique_ptr<leveldb::DB> raw_db(raw);
+
+        std::string key;
+        key.push_back('t');
+        key.append(reinterpret_cast<const char*>(genuine_txid.data), 32);
+        char value[40];
+        std::memset(value, 0, 40);
+        value[0] = 0x01;
+        std::memcpy(&value[1], unknown_block_hash.data, 32);
+        uint32_t pos = 1;        // genuine_txid lives at vtx[1] in block 2
+        std::memcpy(&value[33], &pos, 4);
+        BOOST_REQUIRE(raw_db->Put(leveldb::WriteOptions(),
+                                  leveldb::Slice(key.data(), key.size()),
+                                  leveldb::Slice(value, 40)).ok());
+    }
+
+    g_tx_index = std::make_unique<CTxIndex>();
+    BOOST_REQUIRE(g_tx_index->Init(fix.idx_scope.path(), &fix.chain_db));
+    const uint64_t pre_mismatch = g_tx_index->MismatchCount();
+
+    CerrCapture cap;
+    std::string env = SendRPCRequest(fix.port, "getrawtransaction",
+                                     TxidParams(genuine_txid, true));
+    std::string captured = cap.str();
+
+    // (a) the L3 WARN log fired (pIdx==nullptr was treated as paranoia
+    // mismatch, NOT silently substituted with height=0)
+    BOOST_CHECK_NE(captured.find("[txindex] WARN paranoia mismatch txid="),
+                   std::string::npos);
+    // (b) MismatchCount incremented
+    BOOST_CHECK_EQUAL(g_tx_index->MismatchCount() - pre_mismatch, 1u);
+    // (c) the legacy tip-walk found the genuine tx in block 2; response
+    // contains the genuine txid hex AND the real block-2 hash — NOT the
+    // forged unknown hash.
+    BOOST_CHECK_NE(env.find("\"result\""), std::string::npos);
+    BOOST_CHECK_NE(env.find(genuine_txid.GetHex()), std::string::npos);
+    BOOST_CHECK_NE(env.find(fix.per_height_hash[2].GetHex()), std::string::npos);
+    BOOST_CHECK_EQUAL(env.find(unknown_block_hash.GetHex()), std::string::npos);
+}
+
 BOOST_AUTO_TEST_SUITE_END()
