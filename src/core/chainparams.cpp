@@ -693,6 +693,18 @@ ChainParams ChainParams::Regtest() {
     params.minBlockTimestampGap = 0;
     params.minBlockTimestampGapHeight = 0;
 
+    // Phase 10 PR10.6-followup-2 (2026-05-02): disable Patch E (time-based
+    // cooldown expiry retirement) on regtest. Patch E is a DilV-mainnet
+    // incident-recovery rule that retires the "MIN_COOLDOWN=2 solo miner
+    // waits ~95s via time-based expiry" path. Regtest inherits Testnet's
+    // value of 0 (active from genesis), which deadlocks the single-miner
+    // smoke harness at height 1: with cooldown=2 and time-based expiry
+    // retired, the only escape is block-gap >= 2, but block 2 can never
+    // be produced because block 2 IS what's blocked. Set to 999999999
+    // (DIL-style sentinel) to keep the legacy time-based expiry path
+    // active on regtest, matching the cooldown_tracker.h design comment.
+    params.timeBasedCooldownExpiryRetiredHeight = 999999999;
+
     return params;
 }
 
