@@ -39,11 +39,18 @@
 //   constants verbatim is the correct call.
 //
 // Concurrency:
-//   All public methods acquire a single std::mutex. The estimator's working
-//   set is small (~1 MB even at maximum bucket count) so coarse locking is
-//   adequate; we follow Bitcoin Core's pattern of a single estimator-wide
-//   lock rather than per-collection locks. Default seq_cst ordering on the
-//   atomics.
+//   All public methods acquire m_mutex on entry and hold it for the entire
+//   call body. processBlock in particular holds the lock continuously
+//   across the height-update + per-tx-confirm + decay+age phases (see
+//   processBlockTxLocked); a concurrent snapshot()/DumpFeeEstimates
+//   between phases would otherwise persist internally inconsistent state.
+//   The estimator's working set is small (~1 MB even at maximum bucket
+//   count) so coarse locking is adequate; we follow Bitcoin Core's
+//   pattern of a single estimator-wide lock rather than per-collection
+//   locks. Default seq_cst ordering on the atomics.
+//   (PR-EF-1-FIX Finding F2 corrected the previous claim that "coarse
+//   locking suffices" without surfacing the lock-release-reacquire
+//   between phases.)
 
 #include <amount.h>
 #include <uint256.h>
@@ -116,13 +123,13 @@ constexpr double SUCCESS_PCT_CONSERVATIVE = 0.85;
 // "insufficient data" (BC behavior; matches the C3 acceptance criterion).
 constexpr unsigned int ACCUMULATION_BLOCKS_MIN = 25;
 
-// Maximum number of confirmations we track. Anything older than this is
-// treated as "didn't confirm" for the failure stats. BC: 1008 = ~1 week
-// of mainnet blocks; we keep the same sentinel.
-constexpr unsigned int MAX_CONFIRM_TRACK = 1008;
-
 // File-format version for fee_estimates.dat. Bump on any wire-format
 // change; LoadFeeEstimates returns cold-start on mismatch.
+//
+// (PR-EF-1-FIX Finding F8: dead constant MAX_CONFIRM_TRACK removed.
+// Per-horizon confirmation tracking is bounded by the SHORT/MED/LONG
+// _BLOCK_PERIODS constants and the per-horizon scale; no need for a
+// global cap that nothing referenced.)
 constexpr uint8_t FEE_ESTIMATES_FILE_VERSION = 0x01;
 
 // Estimate mode -- matches Bitcoin Core's FeeEstimateMode enum (only
@@ -285,6 +292,18 @@ public:
     bool restore(Snapshot s);
 
 private:
+    // Caller must hold m_mutex. Body of processBlockTx, extracted so
+    // processBlock can call it without releasing/reacquiring the lock.
+    // PR-EF-1-FIX Finding F2.
+    bool processBlockTxLocked(unsigned int block_height, const uint256& txhash);
+
+    // Caller must hold m_mutex. Body of getBlocksObserved, extracted so
+    // estimateRawFee's accumulation gate can use it without nested
+    // locking. Returns 0 when no blocks have been observed; otherwise
+    // (m_historical_best - m_historical_first + 1) -- the +1 closes
+    // PR-EF-1-FIX Finding F1's off-by-one.
+    unsigned int getBlocksObservedLocked() const;
+
     mutable std::mutex m_mutex;
 
     // Bucket ladder: bucket[i] is the upper bound (ions/kB) of feerate

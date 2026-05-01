@@ -491,6 +491,30 @@ LoadResult LoadFeeEstimates(CBlockPolicyEstimator& estimator,
         snap.historical_first = stream.ReadUint32();
         snap.historical_best  = stream.ReadUint32();
 
+        // PR-EF-1-FIX Finding F7: validate historical ordering. A footer-
+        // valid file (the file is on operator-controlled disk; an attacker
+        // with FS write access could compute a fresh SHA3 footer over
+        // forged bytes) could declare historical_first > historical_best.
+        // Without this check, the unsigned subtraction
+        // `historical_best - historical_first` wraps to a huge number,
+        // which the accumulation gate at fees.cpp ~370 then "passes",
+        // bypassing the insufficient-data window. Treat inconsistent
+        // ordering as cold-start.
+        // Both-zero is the legitimate "never observed a block" state.
+        if (snap.historical_first != 0 &&
+            snap.historical_first > snap.historical_best) {
+            result.success = true;
+            result.cold_start = true;
+            result.cold_start_reason = "historical_first (" +
+                std::to_string(snap.historical_first) +
+                ") > historical_best (" +
+                std::to_string(snap.historical_best) + ")";
+            std::cerr << "[fee_estimator] LoadFeeEstimates: "
+                      << result.cold_start_reason
+                      << " -- starting fresh" << std::endl;
+            return result;
+        }
+
         const uint32_t bucket_count = stream.ReadUint32();
         if (bucket_count == 0 || bucket_count > MAX_BUCKET_COUNT) {
             result.success = true;

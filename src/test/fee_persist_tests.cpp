@@ -151,6 +151,17 @@ BOOST_AUTO_TEST_CASE(roundtrip_basic) {
                                       EstimateHorizon::MED_HALFLIFE);
     auto rl = est_load.estimateRawFee(2, 0.80,
                                       EstimateHorizon::MED_HALFLIFE);
+    // PR-EF-1-FIX Finding F3: pin that the estimate is non-null on the
+    // dump side (else the equality check below is satisfied trivially
+    // by both sides being -1). A regression that loses all conf_avg
+    // data on persistence would otherwise pass under the previous
+    // toothless equality assertion.
+    BOOST_REQUIRE_MESSAGE(rd.feerate > 0,
+        "dump-side estimate must be non-null for the equality check below "
+        "to be load-bearing; got feerate=" << static_cast<double>(rd.feerate));
+    BOOST_REQUIRE_MESSAGE(rl.feerate > 0,
+        "load-side estimate must be non-null after restore; got feerate="
+        << static_cast<double>(rl.feerate));
     BOOST_CHECK_EQUAL(static_cast<double>(rd.feerate),
                       static_cast<double>(rl.feerate));
 }

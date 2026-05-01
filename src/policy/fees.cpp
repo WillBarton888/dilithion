@@ -217,6 +217,14 @@ void CBlockPolicyEstimator::processTx(const uint256& txhash,
 bool CBlockPolicyEstimator::processBlockTx(unsigned int block_height,
                                            const uint256& txhash) {
     std::lock_guard<std::mutex> lk(m_mutex);
+    return processBlockTxLocked(block_height, txhash);
+}
+
+// PR-EF-1-FIX Finding F2: extracted from processBlockTx so processBlock
+// can call it WITHOUT releasing/reacquiring the lock between phases.
+// Caller MUST hold m_mutex.
+bool CBlockPolicyEstimator::processBlockTxLocked(unsigned int block_height,
+                                                 const uint256& txhash) {
     auto it = m_tracked.find(txhash);
     if (it == m_tracked.end()) return false;
 
@@ -242,20 +250,24 @@ bool CBlockPolicyEstimator::processBlockTx(unsigned int block_height,
 void CBlockPolicyEstimator::processBlock(
         unsigned int block_height,
         const std::vector<uint256>& confirmed_txhashes) {
-    {
-        std::lock_guard<std::mutex> lk(m_mutex);
-        if (m_historical_first == 0) m_historical_first = block_height;
-        if (block_height > m_best_seen_height) m_best_seen_height = block_height;
-        m_historical_best = block_height;
-    }
-
-    // Confirm each tx (each acquires the lock briefly).
-    for (const auto& h : confirmed_txhashes) {
-        processBlockTx(block_height, h);
-    }
-
-    // Decay + age unconfirmed ring once per block.
+    // PR-EF-1-FIX Finding F2: hold the lock for the ENTIRE call. Pre-fix
+    // the lock was released between (a) the height update, (b) the
+    // per-tx confirm loop, and (c) the decay+age phase. A concurrent
+    // snapshot()/DumpFeeEstimates between phases would persist
+    // internally inconsistent state (height advanced but unconf_txs
+    // ring not yet aged). The header docstring claimed "single mutex"
+    // and "coarse locking is adequate" -- both were lies pre-fix.
+    // Now true: one acquire, one release, full atomicity.
     std::lock_guard<std::mutex> lk(m_mutex);
+
+    if (m_historical_first == 0) m_historical_first = block_height;
+    if (block_height > m_best_seen_height) m_best_seen_height = block_height;
+    m_historical_best = block_height;
+
+    for (const auto& h : confirmed_txhashes) {
+        processBlockTxLocked(block_height, h);
+    }
+
     decayStats(m_short);
     decayStats(m_med);
     decayStats(m_long);
@@ -354,11 +366,20 @@ EstimationResult CBlockPolicyEstimator::estimateRawFee(
 
     std::lock_guard<std::mutex> lk(m_mutex);
 
+    // PR-EF-1-FIX Finding F1: off-by-one. Number of observed blocks is
+    // (best - first + 1), not (best - first). With heights 1..25 observed
+    // (count = 25), pre-fix `25 - 1 = 24 < 25` → still accumulating. The
+    // gate would only release after 26 blocks, contradicting the contract
+    // C3 claim "Estimator returns null until enough data accumulated
+    // (~25 blocks)" and the docstring "Below this many blocks of
+    // accumulation, the estimator must report 'insufficient data'."
+    // Use getBlocksObserved() which already includes the +1 correctly.
     if (m_historical_best == 0 ||
-        (m_historical_best - m_historical_first) < ACCUMULATION_BLOCKS_MIN) {
+        getBlocksObservedLocked() < ACCUMULATION_BLOCKS_MIN) {
         out.error = "insufficient data: estimator still in accumulation window "
-                    "(need >= " + std::to_string(ACCUMULATION_BLOCKS_MIN) +
-                    " blocks observed)";
+                    "(observed " + std::to_string(getBlocksObservedLocked()) +
+                    " blocks, need >= " +
+                    std::to_string(ACCUMULATION_BLOCKS_MIN) + ")";
         return out;
     }
 
@@ -433,6 +454,11 @@ unsigned int CBlockPolicyEstimator::getBestSeenHeight() const {
 
 unsigned int CBlockPolicyEstimator::getBlocksObserved() const {
     std::lock_guard<std::mutex> lk(m_mutex);
+    return getBlocksObservedLocked();
+}
+
+// Caller must hold m_mutex.
+unsigned int CBlockPolicyEstimator::getBlocksObservedLocked() const {
     if (m_historical_best == 0) return 0;
     return m_historical_best - m_historical_first + 1;
 }
