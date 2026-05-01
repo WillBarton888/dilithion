@@ -238,13 +238,25 @@ public:
      * exercising the timeout predicate need to backdate m_lastBlockTime
      * without sleeping — this seam writes it directly.
      *
-     * Not gated behind a #ifdef because (a) the existing test file already
-     * mutates ForkBlock::status as a public field for the same reason and
-     * (b) calling this on a live ForkCandidate has no consensus impact
-     * (timeout is observability only; cancellation is driver-initiated).
+     * **PR8.6-RT-MEDIUM-1 hardening (Layer-2 red-team finding 2026-05-01):**
+     *   Annotated `[[deprecated]]` so any production caller (RPC handler,
+     *   debug helper, future maintainer who didn't read the rationale)
+     *   gets a compile-time warning. Test files silence the warning
+     *   locally with a #pragma. This is the lighter-weight alternative
+     *   to an `#ifdef DILITHION_TEST_HOOKS` gate (which would require
+     *   splitting CORE_OBJECTS into prod-vs-test compilation modes — a
+     *   bigger Makefile restructuring than the MEDIUM warrants).
+     *
+     *   Misuse risk being mitigated: IsTimedOut() is consumed by the
+     *   production Tick handler at fork_manager.cpp triggering CancelFork.
+     *   A misuse from any future caller could artificially fire the
+     *   timeout path on a live fork → premature cancellation → reorg-
+     *   window misbehavior. The deprecated attribute makes the foot-gun
+     *   visible at compile time.
      *
      * @param t New value for m_lastBlockTime.
      */
+    [[deprecated("test-only seam — do NOT call from production code (PR8.6-RT-MEDIUM-1)")]]
     void SetLastBlockTimeForTest(std::chrono::steady_clock::time_point t);
 
     /**

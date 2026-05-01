@@ -19,27 +19,42 @@
 //     GetActiveFork agree under all transitions).
 //
 // End-to-end paths NOT covered by this unit-level suite, by design:
-//   The following are exercised by Phase 8's bash harness
-//   `scripts/four_node_local.sh` (test-of-record for the integration
-//   layer; see queue.md PR8.2/PR8.3 + four_node_local.sh stress scenario).
-//   Splitting them this way is intentional: this file owns the state-
-//   machine; the bash harness owns the system-integration surface.
+//   The following are exercised AT THE INTEGRATION LEVEL by Phase 8's
+//   bash harness `scripts/four_node_local.sh` (test-of-record for the
+//   integration outcome; see queue.md PR8.2/PR8.3 + four_node_local.sh
+//   stress scenario). Splitting this way is intentional: this file owns
+//   the state-machine; the bash harness owns the system-integration
+//   outcome surface.
+//
+//   PR8.6-RT-MEDIUM-3 honesty correction: the harness asserts on the
+//   integration OUTCOME (convergence + getchaintips agreement + reorg
+//   depth ≤ 1 + UndoBlock GREP) but does NOT in general isolate which
+//   code MECHANISM produced the outcome. A regression in any of the
+//   below paths that left convergence intact through some other route
+//   would not be caught by harness greps alone. The "exercised by"
+//   wording below is therefore "OUTCOME-level coverage" not "MECHANISM-
+//   level coverage" — direct mechanism isolation deferred to Phase 9+.
 //
 //   * PreValidateBlock end-to-end — requires block.vtx coinbase +
-//     pindexParent ancestry + GetNextWorkRequired evaluation.
-//     Exercised by stress scenario when miners produce real-PoW blocks
-//     under multi-miner race. The legacy block_processing path that
-//     invokes PreValidateBlock fires under flag=0 (no port adapter
-//     bypass).
-//   * TriggerChainSwitch / ActivateBestChain end-to-end — exercised by
-//     stress scenario reorg events (verified in stress 6 acceptance:
-//     reorg depth ≤ 1).
-//   * block_processing::ProcessNewBlock end-to-end — exercised by every
-//     mined block under the harness (full NodeContext active in dilv-node
-//     binaries). 9 ProcessNewBlock call sites covered per the legacy-
-//     path enumeration in `port_phase_7_implementation_plan.md` v0.3.
-//   * block_fetcher.cpp:109-124 fork-bias path — exercised by the
-//     stress scenario's outbound-request path between competing miners.
+//     pindexParent ancestry + GetNextWorkRequired evaluation. Exercised
+//     at outcome-level when miners produce real-PoW blocks under multi-
+//     miner race. Mechanism isolation requires either a unit test with
+//     real-PoW + ancestry fixture infra (Phase 9+) or a PreValidateBlock-
+//     specific log grep added to the harness (Phase 9+ telemetry).
+//   * TriggerChainSwitch / ActivateBestChain end-to-end — exercised at
+//     outcome-level via stress scenario reorg events (stress 6: reorg
+//     depth ≤ 1). Mechanism isolation: same options as above.
+//   * block_processing::ProcessNewBlock end-to-end — exercised at
+//     outcome-level by every mined block under the harness (full
+//     NodeContext active in dilv-node binaries). 9 ProcessNewBlock call
+//     sites enumerated per `port_phase_7_implementation_plan.md` v0.3.
+//   * block_fetcher.cpp:109-124 fork-bias path — INDIRECTLY exercised
+//     by stress scenario outbound-request behavior between competing
+//     miners. PR8.6-RT-MEDIUM-3 explicitly flagged this as outcome-only
+//     coverage; a regression in the fork-bias path that left convergence
+//     intact would not be caught. Recommended Phase 9+ enhancement: add
+//     fork-bias-path-specific log line + harness grep alongside PR9.3
+//     telemetry helpers.
 //
 // PR8.5 deferred-finding cleanup (PR7.2-RT-MEDIUM-1 + INFO-1 + INFO-2):
 //   Cases 1-3 in their original form had both "scaffolding consistency"
@@ -109,6 +124,13 @@
 #include <cstring>
 #include <iostream>
 #include <map>
+
+// PR8.6-RT-MEDIUM-1: ForkCandidate::SetLastBlockTimeForTest is annotated
+// [[deprecated]] in production headers as a foot-gun mitigation. This test
+// file is the legitimate caller; silence the warning locally rather than
+// at the call site (cleaner than per-line #pragma push/pop).
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 namespace {
 
@@ -412,10 +434,17 @@ void test_legacy_pre_validation_failure()
 //   - Once all 4 are staged + PREVALIDATED, AllReceivedBlocksPrevalidated()
 //     and GetHighestPrevalidatedHeight() return the expected values.
 //
-// Load-bearing behavioral observables (per PR7.2-RT-INFO-2 cleanup):
-//   * GetReceivedBlockCount monotonically increases through out-of-order
-//     delivery (proves the stager indexes by height, not by arrival
-//     order — out-of-order would otherwise overwrite or drop entries).
+// Load-bearing behavioral observables (per PR7.2-RT-INFO-2 cleanup +
+// PR8.6-RT-LOW-1 attribution fix):
+//   * GetBlockAtHeight(h) returns non-null for each h post-delivery.
+//     This is the actual proof of HEIGHT-INDEXED storage: under arrival-
+//     order indexing, GetBlockAtHeight(34) (third delivered) would search
+//     a different storage slot than (h=34) and return nullptr. The
+//     non-null retrievability across the [31..34] heights after out-of-
+//     order [31, 33, 34, 32] delivery is the height-indexing assertion.
+//   * GetReceivedBlockCount monotonically increases through delivery
+//     (proves no duplicate-collision or delivery-drop, but is consistent
+//     with either height OR arrival-order indexing — see above).
 //   * Mid-state: AllReceivedBlocksPrevalidated == false with all PENDING.
 //   * Post-transition: AllReceivedBlocksPrevalidated == true.
 //   * GetHighestPrevalidatedHeight returns fork tip (34), NOT block 33
@@ -457,9 +486,8 @@ void test_legacy_out_of_order_arrival()
         assert(fork->IsExpectedBlock(hash, h));
 
         // Load-bearing: stager accepts out-of-order arrivals; counter
-        // monotonically increases (proves it indexes by height, not by
-        // arrival order — otherwise the third out-of-order delivery
-        // would overwrite the first or fail).
+        // increases on each AddBlockToFork (consistent with height-
+        // indexed OR arrival-order-indexed storage).
         assert(fm.AddBlockToFork(blk, hash, h));
         ++expected_received;
         assert(fork->GetReceivedBlockCount() == expected_received);
@@ -467,6 +495,18 @@ void test_legacy_out_of_order_arrival()
 
     assert(fork->GetReceivedBlockCount() == 4);
     assert(fork->HasAllBlocks());
+
+    // PR8.6-RT-LOW-1: explicit height-indexing proof.
+    //   Under arrival-order indexing, GetBlockAtHeight(34) (delivered
+    //   third) would search storage slot 2 vs the height-keyed map's
+    //   key=34, and return nullptr. The non-null retrievability across
+    //   ALL [forkPoint+1 .. expectedTip] heights after out-of-order
+    //   delivery is the height-indexing assertion.
+    for (int32_t h = kForkPoint + 1; h <= kExpectedTip; ++h) {
+        ForkBlock* fb = fork->GetBlockAtHeight(h);
+        assert(fb != nullptr);  // height-indexed retrievability
+        assert(fb->height == h);  // stored height matches retrieval key
+    }
 
     // Mid-state observable: with all 4 PENDING, AllReceivedBlocksPrevalidated
     // is false. Proves the gate is real (not constant-true).
@@ -659,3 +699,5 @@ int main()
     std::cout << "  5 cases: happy / failure / out-of-order / hash-mismatch / timeout.\n";
     return 0;
 }
+
+#pragma GCC diagnostic pop  // PR8.6-RT-MEDIUM-1 deprecated-decl scope close
