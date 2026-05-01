@@ -1,5 +1,7 @@
 # Overnight Phase 6 Implementation — Handoff (2026-04-26 → 2026-04-27)
 
+> **NOTE 2026-05-01 (Phase 7 v0.2.1 supersedes prior framing):** any reference to "Phase 7 = ForkManager retirement / deletion" in this document predates the 2026-05-01 re-scope. Phase 7's current scope is "fork-staging port-accounting + integration test"; ForkManager file lifetime defers to Phase 9+ alongside `ibd_coordinator` retirement. See `.claude/contracts/port_phase_7_implementation_plan.md` v0.2.1 for the current plan.
+
 **Authored by:** Claude (Opus 4.7), running autonomously while user slept.
 **Working tree state:** UNCOMMITTED diffs against `port/bitcoin-core-peer-ibd` HEAD (commit `beea2fa`).
 **Reviewers:** Cursor (plan-integrity) + red-team subagent (ground-truth).

@@ -23,6 +23,28 @@ namespace Dilithion {
 /**
  * @brief Singleton manager for fork validation and chain switching
  *
+ * ## Port-survival note (Phase 7 v0.2.1, 2026-05-01)
+ *
+ * The ForkManager + ForkCandidate pair is a Dilithion-specific
+ * consensus-adjacent layer that wraps chain_selector. It is NOT present
+ * in upstream Bitcoin Core: upstream relies on max-cumulative-work
+ * selection alone, accepting transient reorg windows that the
+ * 2026-04-25 incident demonstrated are unsafe at Dilithion's current
+ * scale and miner topology. Validate-Before-Disconnect (this class) is
+ * how Dilithion mitigates that.
+ *
+ * This file SURVIVES the v4.1 port. Its retirement clusters with
+ * `ibd_coordinator` retirement at Phase 9+ (post `--usenewpeerman`
+ * default flip + burn-in window per consensus_activation_policy.md).
+ * At that point a project decision is required between (a) re-implement
+ * Validate-Before-Disconnect on top of chain_selector primitives, or
+ * (b) drop fork-staging in favor of pure max-cumulative-work selection.
+ * That choice is Track A / consensus-adjacent and explicitly out of
+ * Phase 7 scope. See `.claude/contracts/port_phase_7_implementation_plan.md`
+ * v0.2.1 for the current Phase 7 framing.
+ *
+ * ## What ForkManager does
+ *
  * The ForkManager implements "validate before disconnect" - fork blocks
  * are staged and pre-validated (PoW + MIK) before any chain changes occur.
  *
