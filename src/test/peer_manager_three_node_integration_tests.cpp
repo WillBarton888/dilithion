@@ -62,6 +62,7 @@
 #include <atomic>
 #include <cassert>
 #include <cstdint>
+#include <cstring>
 #include <iostream>
 #include <memory>
 #include <mutex>
@@ -129,9 +130,9 @@ public:
 
         // Translate command. CMessageHeader stores the command as a
         // NUL-padded fixed-size char array; trim trailing NULs.
-        std::string cmd(msg.header.command.data(),
-                        strnlen(msg.header.command.data(),
-                                msg.header.command.size()));
+        std::string cmd(msg.header.command,
+                        strnlen(msg.header.command,
+                                sizeof(msg.header.command)));
 
         // Recipient's view of the sender = m_self_idx (this fixture).
         ::CDataStream stream(msg.payload);
