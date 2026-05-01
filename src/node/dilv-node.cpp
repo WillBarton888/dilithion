@@ -2897,9 +2897,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                           << " tracked txs" << std::endl;
             }
 
+            // PR-EF-2 fixup F#2: IBD gate -- see dilithion-node.cpp callback
+            // for full rationale. Without this gate, IBD blocks decay the
+            // estimator's histograms and the accumulation window releases
+            // on a degenerate state.
             g_chainstate.RegisterBlockConnectCallback(
                 [](const CBlock& b, int h, const uint256& /*hh*/) {
                     if (!g_fee_estimator || h < 0) return;
+                    if (!g_node_context.ibd_coordinator ||
+                        !g_node_context.ibd_coordinator->IsSynced()) {
+                        return;
+                    }
                     CBlockValidator validator;
                     std::vector<CTransactionRef> txs;
                     std::string err;

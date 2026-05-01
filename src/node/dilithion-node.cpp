@@ -3041,9 +3041,29 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // avoids needless map lookups. height comes through as int;
             // we cast to unsigned (height is always >= 0 for connected
             // blocks).
+            // PR-EF-2 fixup F#2: IBD gate. processBlock unconditionally
+            // decays + ages the histograms, so feeding it every block during
+            // IBD blows the accumulation window: after 25 IBD blocks the
+            // gate releases on a fully-decayed (effectively empty) state and
+            // operators see "no bucket met success_threshold" instead of the
+            // accurate "still accumulating". Mirrors the pattern at
+            // g_tx_index's callback above (which also gates on IsSynced()).
+            // We use the IBD coordinator since it owns the canonical
+            // synced-vs-still-catching-up signal for the live chain.
+            // During IBD the live mempool admit path is also degenerate
+            // (peer relays gated by IBD), so the estimator's tracked-set
+            // does not advance either -- skipping processBlock keeps both
+            // sides of the equation aligned.
             g_chainstate.RegisterBlockConnectCallback(
                 [](const CBlock& b, int h, const uint256& /*hh*/) {
                     if (!g_fee_estimator || h < 0) return;
+                    // F#2: skip during IBD. If coordinator missing (very
+                    // early init), skip too -- estimator state should not
+                    // advance until we've registered the coordinator.
+                    if (!g_node_context.ibd_coordinator ||
+                        !g_node_context.ibd_coordinator->IsSynced()) {
+                        return;
+                    }
                     CBlockValidator validator;
                     std::vector<CTransactionRef> txs;
                     std::string err;
