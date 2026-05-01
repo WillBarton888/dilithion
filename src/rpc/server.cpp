@@ -5269,7 +5269,18 @@ std::string CRPCServer::RPC_GetSyncStatus(const std::string& params) {
         return "{\"error\":\"headers_manager not initialized\"}";
     }
 
-    // All getters below are existing public CHeadersManager surface.
+    // PR9.6-RT-MEDIUM-2 documented race window: each of GetSyncProgress(),
+    // GetBestHeight(), and GetBestHeaderHash() acquires cs_headers
+    // independently. A header arriving mid-RPC can shift the tip between
+    // calls, leaving best_header_height + best_header_hash referring to
+    // different blocks (height N hash; or height N+1 hash with a height-N-1
+    // progress reading). Race window is bounded by: (a) header arrival
+    // rate (~1/45s on DilV mainnet), (b) lock-acquisition overhead
+    // (microseconds). Operationally negligible for an observability RPC;
+    // a single-call atomic-snapshot getter would require new CHeadersManager
+    // API surface and is filed as a Phase 10+ enhancement opportunity.
+    // Operators monitoring this RPC should expect ±1 header drift between
+    // height and hash fields under high header-arrival load.
     double progress = g_node_context.headers_manager->GetSyncProgress();
     int best_height = g_node_context.headers_manager->GetBestHeight();
     uint256 best_hash = g_node_context.headers_manager->GetBestHeaderHash();
@@ -5301,7 +5312,16 @@ std::string CRPCServer::RPC_GetBlockDownloadStats(const std::string& params) {
     size_t total_in_flight = g_node_context.block_fetcher->GetInFlightCount();
     size_t total_pending = g_node_context.block_fetcher->GetPendingCount();
 
-    // Per-peer breakdown via existing GetPeerBlocksInFlight(NodeId).
+    // PR9.6-RT-MEDIUM-2 documented race window: GetConnectedPeers() returns
+    // a snapshot vector, then we iterate calling GetPeerBlocksInFlight(id)
+    // per peer. Between the snapshot and each per-peer read, a peer may
+    // disconnect; GetPeerBlocksInFlight on a disconnected NodeId returns 0
+    // (CBlockTracker drops the peer's entries on disconnect, so it's not
+    // stale data — just 0). Conversely a NEW peer connecting between the
+    // snapshot and iteration won't appear in this response. Race window
+    // is bounded by peer-event rate; operationally negligible. Atomic-
+    // snapshot would require new joint API across CPeerManager + CBlock-
+    // Fetcher; filed as Phase 10+ enhancement opportunity.
     std::ostringstream oss;
     oss << "{";
     oss << "\"total_blocks_in_flight\":" << total_in_flight << ",";
@@ -5324,9 +5344,11 @@ std::string CRPCServer::RPC_GetBlockDownloadStats(const std::string& params) {
     }
     oss << "],";
 
-    // Stalled blocks via existing GetStalledBlocks(60s) — non-const because
-    // the underlying CBlockTracker::CheckTimeouts mutates internal state to
-    // mark stalled entries; we surface the read-out vector at top level.
+    // Stalled blocks via existing GetStalledBlocks(60s) — non-mutating read.
+    // (PR9.6-RT-MEDIUM-3 correction: an earlier draft of this comment claimed
+    // CheckTimeouts mutates internal state. It does not — block_tracker.h:267
+    // declares CheckTimeouts() const; it iterates m_heights and returns
+    // entries past the timeout without modifying any state.)
     oss << "\"stalled_blocks\":[";
     {
         auto stalled = g_node_context.block_fetcher->GetStalledBlocks(std::chrono::seconds(60));

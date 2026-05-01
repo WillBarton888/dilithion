@@ -85,6 +85,13 @@ If any criterion fails, execute the rollback procedure (§4) immediately.
 
 Three new RPCs ship in PR9.3 specifically for burn-in observability. Use them every 10min during burn-in.
 
+> **RPC port reference (PR9.6-RT-LOW-1):** examples below use mainnet DIL port `8332`. Replace as needed for other networks:
+> - DilV mainnet: `9332`
+> - DIL testnet: `18332`
+> - DilV testnet (if used): `19332`
+>
+> See CLAUDE.md "Dilithion RPC commands" for the full port reference.
+
 ### `getsyncstatus` — headers-sync progress + best-header snapshot
 
 ```bash
@@ -129,7 +136,7 @@ Expected response shape:
 
 **Observe:**
 - `total_blocks_in_flight` should oscillate (request → arrive → request next); a stuck non-zero value for >5min indicates a stall.
-- `stalled_blocks` should be empty most of the time. Non-empty → the listed peers timed out on those heights; expect to see them rotated out shortly.
+- `stalled_blocks` is a non-mutating snapshot (PR9.6-RT-MEDIUM-3): blocks listed have exceeded the 60s timeout but the RPC does NOT itself trigger requeue/rotation. Subsequent calls may return the same entries until block_fetcher's normal Tick path requeues them. If the same `(height, peer_id)` pair persists across multiple RPC calls separated by >30s, investigate the peer's responsiveness via `getpeerinfo`.
 - Per-peer `blocks_in_flight` distribution should be roughly even across all connected peers (no single peer monopolizing requests).
 
 ### `getpeerinfo` (extended) — per-peer manager-class + standard fields
@@ -172,13 +179,36 @@ If any §2 success criterion fails, OR an operator observes any unexpected behav
 
 4. **Verify chain state intact:**
    ```bash
-   ssh root@167.172.56.119 "curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json' --data-binary '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getblockchaininfo\",\"params\":[]}' http://127.0.0.1:8332/ | head"
+   ssh root@167.172.56.119 "curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json' --data-binary '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"getblockchaininfo\",\"params\":[]}' http://127.0.0.1:8332/"
    ```
    Expected: `"chain":"main"`, `"blocks":` matches LDN's known tip from monitoring.
 
-**State migration NOT required.** The port adapter is stateless from the operator's POV; LevelDB blocks + chainstate are shared between flag values. The pre-flip snapshot from §2 step 1 is a safety belt, not a required restoration step.
+5. **CRITICAL — Divergence check before re-joining the network** (PR9.6-RT-MEDIUM-1 hardening). The burn-in EXISTS to detect cases where the port-CPeerManager (γ dual-dispatch) leads the node to accept a block sequence the legacy path would have rejected. If burn-in failed for that reason, the on-disk chainstate at rollback time is already corrupted from the legacy path's POV — restarting flag=0 against that chainstate boots legacy on top of port-touched state, NOT a clean recovery. Cross-check `getbestblockhash` against the OTHER mainnet seeds (NYC, SGP, SYD — none of which ran flag=1 during this burn-in):
+   ```bash
+   # LDN (flag=1 burn-in target, just rolled back):
+   LDN_HASH=$(curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json' --data-binary '{"jsonrpc":"2.0","id":1,"method":"getbestblockhash","params":[]}' http://167.172.56.119:8332/ | jq -r '.result')
+   # NYC / SGP / SYD (clean cohort):
+   for seed in 138.197.68.128 165.22.103.114 134.199.159.83; do
+     SEED_HASH=$(curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json' --data-binary '{"jsonrpc":"2.0","id":1,"method":"getbestblockhash","params":[]}' http://${seed}:8332/ | jq -r '.result')
+     echo "  $seed → $SEED_HASH"
+   done
+   echo "  LDN  → $LDN_HASH"
+   ```
 
-5. **Open an incident report at `.claude/contracts/incident_<YYYY-MM-DD>_usenewpeerman_burnin.md`** capturing the symptom, telemetry snapshots, and rollback timestamp.
+   **Decision matrix:**
+   - **If LDN_HASH matches at least 2 of {NYC, SGP, SYD}:** chain state intact; LDN can re-join the network. Continue to step 6.
+   - **If LDN_HASH diverges from majority cohort by ≤ 6 blocks:** legacy reorg machinery should resolve on its own; monitor for 30 minutes via `getblockchaininfo` polling. If LDN converges with cohort, continue. If not, restore from snapshot (next bullet).
+   - **If LDN_HASH diverges by > 6 blocks OR LDN's chain is on a different fork lineage:** **STOP**. The chainstate has been touched by port-pm in a way legacy cannot resolve. Restore from §2 step 1 snapshot:
+     ```bash
+     ssh root@167.172.56.119 "pkill dilithion-node && sleep 5"
+     ssh root@167.172.56.119 "rm -rf /root/.dilithion/blocks /root/.dilithion/chainstate"
+     ssh root@167.172.56.119 "cp -a /root/.dilithion-blocks.pre-flip-* /root/.dilithion/blocks"
+     ssh root@167.172.56.119 "cp -a /root/.dilithion-chainstate.pre-flip-* /root/.dilithion/chainstate"
+     ssh root@167.172.56.119 "cd /root && nohup ./dilithion-node --relay-only --public-api > /root/node.log 2>&1 &"
+     ```
+     The §2 step 1 snapshot is **NOT** a "safety belt that's optional" — under the divergence > 6 blocks branch, snapshot restoration is REQUIRED.
+
+6. **Open an incident report at `.claude/contracts/incident_<YYYY-MM-DD>_usenewpeerman_burnin.md`** capturing the symptom, telemetry snapshots from §3, divergence-check results from step 5, and rollback timestamp.
 
 ---
 
