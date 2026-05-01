@@ -48,7 +48,6 @@
 #include <consensus/chain.h>
 #include <core/chainparams.h>
 #include <core/node_context.h>
-#include <crypto/randomx_hash.h>
 #include <net/connman.h>
 #include <net/iconnection_manager.h>
 #include <net/ipeer_scorer.h>
@@ -158,6 +157,15 @@ private:
 // Per-fixture state. Each fixture owns its own routing connman, scorer,
 // addrman, chain_selector, and CPeerManager. The shared ThreeNodeNetwork
 // pointer table is populated post-construction.
+//
+// Note: this fixture intentionally does NOT carry a `legacy_scorer`
+// member — see PR6.5b.7-c-RT-HIGH-2 (red-team finding 2026-05-01).
+// Cross-fixture transport-integrity scoring (legacy owns transport
+// under γ) requires real ::CPeerManager wiring which is heavier than
+// 3 in-process port fixtures; deferred to Phase 7+. The unit-level
+// parity gate `ParityGate_TransportIntegrity_LegacyScoresOnly_RealConnmanWiring`
+// (peer_manager_misbehavior_tests.cpp Test 13) covers the legacy-side
+// transport-integrity scoring assertion at the unit level.
 struct NodeFixture {
     static const ::Dilithion::ChainParams chainparams;
 
@@ -166,7 +174,6 @@ struct NodeFixture {
     TestRoutingConnman routing_connman;
     dilithion::net::port::CAddrMan_v2 addrman;
     dilithion::net::port::CPeerScorer port_scorer;
-    dilithion::net::port::CPeerScorer legacy_scorer;  // simulated legacy side
     dilithion::net::port::CPeerManager pm;
 
     NodeFixture(ThreeNodeNetwork& net, int idx)
@@ -224,13 +231,13 @@ void test_routing_connman_round_trip()
 
     ThreeNodeHarness h;
 
-    // Construct an "unknown_garbage" CNetMessage (empty payload, mock
+    // Construct an "junk_msg" CNetMessage (empty payload, mock
     // command) and push it from fixture 0 to fixture 1. ProcessMessage
     // on fixture 1 will tick fixture 1's port_scorer with weight=1 for
     // the unknown command (UnknownMessage default weight).
     {
         std::vector<uint8_t> payload;
-        ::CNetMessage msg("unknown_garbage", payload);
+        ::CNetMessage msg("junk_msg", payload);
         bool ok = h.fix(0).routing_connman.PushMessage(1, msg);
         assert(ok);
     }
@@ -255,12 +262,12 @@ void test_cross_node_gamma_ownership()
 
     ThreeNodeHarness h;
 
-    // Fixture 0 sends "unknown_garbage" to fixture 1 AND to fixture 2,
+    // Fixture 0 sends "junk_msg" to fixture 1 AND to fixture 2,
     // each via the routing connman (mirrors a node misbehaving toward
     // both of its peers).
     for (int dest : {1, 2}) {
         std::vector<uint8_t> payload;
-        ::CNetMessage msg("unknown_garbage", payload);
+        ::CNetMessage msg("junk_msg", payload);
         bool ok = h.fix(0).routing_connman.PushMessage(dest, msg);
         assert(ok);
     }
@@ -274,15 +281,9 @@ void test_cross_node_gamma_ownership()
     assert(h.fix(0).port_scorer.GetScore(1) == 0);
     assert(h.fix(0).port_scorer.GetScore(2) == 0);
 
-    // Legacy scorers on EVERY fixture untouched (γ ownership: port owns
-    // protocol misbehavior; legacy owns transport-integrity. Routing
-    // never touches legacy scorers.)
-    for (int i = 0; i < 3; ++i) {
-        for (int peer : {0, 1, 2}) {
-            if (peer == i) continue;
-            assert(h.fix(i).legacy_scorer.GetScore(peer) == 0);
-        }
-    }
+    // Legacy-side transport-integrity scoring assertion intentionally
+    // omitted — see NodeFixture comment + PR6.5b.7-c-RT-HIGH-2 ledger
+    // entry. Unit-level parity gate covers it.
 
     std::cout << " OK\n";
 }
@@ -304,7 +305,7 @@ void test_multithreaded_three_node_concurrent_inbound()
             for (int to_idx = 0; to_idx < 3; ++to_idx) {
                 if (to_idx == from_idx) continue;
                 std::vector<uint8_t> payload;
-                ::CNetMessage msg("unknown_garbage", payload);
+                ::CNetMessage msg("junk_msg", payload);
                 h.fix(from_idx).routing_connman.PushMessage(to_idx, msg);
             }
         }
@@ -412,7 +413,7 @@ void test_mixed_full_load_three_nodes()
             for (int to_idx = 0; to_idx < 3; ++to_idx) {
                 if (to_idx == from_idx) continue;
                 std::vector<uint8_t> payload;
-                ::CNetMessage msg("unknown_garbage", payload);
+                ::CNetMessage msg("junk_msg", payload);
                 h.fix(from_idx).routing_connman.PushMessage(to_idx, msg);
             }
         }

@@ -58,7 +58,6 @@
 #include <consensus/chain.h>
 #include <core/chainparams.h>
 #include <core/node_context.h>
-#include <crypto/randomx_hash.h>
 #include <net/connman.h>
 #include <net/iconnection_manager.h>
 #include <net/ipeer_scorer.h>
