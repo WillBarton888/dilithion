@@ -1281,8 +1281,13 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
     pindex->nStatus |= CBlockIndex::BLOCK_VALID_CHAIN;
 
     // BUG #56 FIX: Notify block connect callbacks (wallet update)
-    // NOTE: We don't hold cs_main during callbacks to prevent deadlock
-    // The wallet has its own lock (cs_wallet)
+    // NOTE: cs_main IS held during these callbacks. ConnectTip is called
+    // from ActivateBestChain (line 208) and reorg paths (lines 663/749/773
+    // /822) which all acquire cs_main; the lock is held for the full
+    // duration of ConnectTip. (Compare with DisconnectTip, which releases
+    // cs_main BEFORE invoking its callbacks -- see line ~1425.) Callbacks
+    // that touch their own subsystem locks (cs_wallet, etc.) must order
+    // them consistently with cs_main to avoid deadlock.
     // IBD OPTIMIZATION: Pass cached hash to avoid RandomX recomputation
     for (size_t i = 0; i < m_blockConnectCallbacks.size(); ++i) {
         try {
@@ -1458,8 +1463,11 @@ bool CChainState::DisconnectTip(CBlockIndex* pindex, bool force_skip_utxo) {
     }
 
     // BUG #56 FIX: Notify block disconnect callbacks (wallet update)
-    // NOTE: We don't hold cs_main during callbacks to prevent deadlock
-    // The wallet has its own lock (cs_wallet)
+    // NOTE: cs_main is NOT held during these callbacks. The cs_main scope
+    // ends at line ~1425 above ("cs_main released here"); the disconnect
+    // callbacks fire afterwards. (Compare with ConnectTip, where cs_main
+    // IS held during its callbacks -- see line ~1283.) The wallet has its
+    // own lock (cs_wallet).
     for (size_t i = 0; i < m_blockDisconnectCallbacks.size(); ++i) {
         try {
             m_blockDisconnectCallbacks[i](block, disconnectHeight, disconnectHash);

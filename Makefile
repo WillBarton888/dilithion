@@ -166,7 +166,9 @@ CRYPTO_SOURCES := src/crypto/randomx_hash.cpp \
                   src/crypto/pbkdf2_sha3.cpp \
                   src/crypto/siphash.cpp
 
-INDEX_SOURCES := src/index/tx_index.cpp
+INDEX_SOURCES := src/index/tx_index.cpp \
+                 src/index/coinstatsindex.cpp \
+                 src/kernel/coinstats.cpp
 
 MINER_SOURCES := src/miner/controller.cpp \
                  src/miner/vdf_miner.cpp
@@ -629,6 +631,8 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/fork_detection_tests.o \
 	$(OBJ_DIR)/test/tx_index_tests.o \
 	$(OBJ_DIR)/test/tx_index_integration_tests.o \
+	$(OBJ_DIR)/test/coinstatsindex_tests.o \
+	$(OBJ_DIR)/test/coinstatsindex_integration_tests.o \
 	$(OBJ_DIR)/test/mempool_persist_tests.o \
 	$(OBJ_DIR)/test/rpc_small_cluster_tests.o \
 	$(OBJ_DIR)/test/undo_data_tests.o \
@@ -728,6 +732,7 @@ $(OBJ_DIR)/crypto \
 $(OBJ_DIR)/db \
 $(OBJ_DIR)/dfmp \
 $(OBJ_DIR)/index \
+$(OBJ_DIR)/kernel \
 $(OBJ_DIR)/miner \
 $(OBJ_DIR)/net \
 $(OBJ_DIR)/node \
@@ -748,7 +753,7 @@ $(OBJ_DIR)/test/fuzz:
 	@mkdir -p $@
 
 # Compile C++ source files
-$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/index $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/policy $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/test
+$(OBJ_DIR)/%.o: src/%.cpp | $(OBJ_DIR)/attestation $(OBJ_DIR)/consensus $(OBJ_DIR)/core $(OBJ_DIR)/crypto $(OBJ_DIR)/db $(OBJ_DIR)/dfmp $(OBJ_DIR)/index $(OBJ_DIR)/kernel $(OBJ_DIR)/miner $(OBJ_DIR)/net $(OBJ_DIR)/node $(OBJ_DIR)/primitives $(OBJ_DIR)/rpc $(OBJ_DIR)/wallet $(OBJ_DIR)/util $(OBJ_DIR)/api $(OBJ_DIR)/vdf $(OBJ_DIR)/digital_dna $(OBJ_DIR)/script $(OBJ_DIR)/policy $(OBJ_DIR)/tools $(OBJ_DIR)/x402 $(OBJ_DIR)/test
 	@echo "$(COLOR_BLUE)[CXX]$(COLOR_RESET)  $<"
 	@$(CXX) $(CXXFLAGS) $(INCLUDES) -c $< -o $@
 
