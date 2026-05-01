@@ -18,11 +18,11 @@ $config = getChainConfig();
 $chainSuffix = $config['chain'] === 'dilv' ? '-dilv' : '';
 $cacheFile = __DIR__ . "/../cache/supply{$chainSuffix}.json";
 
-// Check cache (30s TTL)
+// Check cache (10s TTL)
 $supplyData = null;
 if (file_exists($cacheFile)) {
     $cacheAge = time() - filemtime($cacheFile);
-    if ($cacheAge < 30) {
+    if ($cacheAge < 10) {
         $cached = file_get_contents($cacheFile);
         if ($cached !== false) {
             $supplyData = json_decode($cached, true);

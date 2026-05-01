@@ -25,9 +25,9 @@ const WDIL_BASE  = '0x30629128d1d3524F1A01B9c385FbE84fDCbD36C2';
 const WDILV_BASE = '0xF162F6B432FeeD73458D4653ef8E74Ba014403E8';
 $tokenAddr = $chain === 'dilv' ? WDILV_BASE : WDIL_BASE;
 
-// 2 min cache — prices don't move that fast and dexscreener has rate limits.
+// 1 min cache — prices don't move that fast and dexscreener has rate limits.
 $cacheFile = __DIR__ . "/../cache/financial-{$chain}.json";
-if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 120) {
+if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 60) {
     $cached = @file_get_contents($cacheFile);
     if ($cached !== false) {
         $data = json_decode($cached, true);

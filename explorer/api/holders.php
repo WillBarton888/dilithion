@@ -21,7 +21,7 @@ $cacheFile = __DIR__ . "/../cache/topholders{$chainSuffix}-{$count}.json";
 // Check cache (60s TTL - expensive query)
 if (file_exists($cacheFile)) {
     $cacheAge = time() - filemtime($cacheFile);
-    if ($cacheAge < 60) {
+    if ($cacheAge < 30) {
         $cached = file_get_contents($cacheFile);
         if ($cached !== false) {
             $data = json_decode($cached, true);

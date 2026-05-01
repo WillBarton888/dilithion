@@ -6,8 +6,8 @@
 
 // Chain configuration: ports, units, rewards
 function getChainConfig() {
-    $chain = $_GET['chain'] ?? 'dil';
-    if ($chain !== 'dilv') $chain = 'dil';  // sanitize
+    $chain = strtolower($_GET['chain'] ?? 'dil');
+    if ($chain !== 'dilv') $chain = 'dil';  // sanitize: anything non-dilv → dil
 
     $configs = [
         'dil'  => ['rpc_port' => 8332, 'rest_port' => 8334, 'unit' => 'DIL', 'reward' => 50, 'name' => 'Dilithion'],
@@ -34,7 +34,10 @@ function dilithionRPC($method, $params = []) {
         $_rpcCurlHandle = curl_init();
         curl_setopt($_rpcCurlHandle, CURLOPT_URL, "http://127.0.0.1:{$port}/");
         curl_setopt($_rpcCurlHandle, CURLOPT_RETURNTRANSFER, true);
-        curl_setopt($_rpcCurlHandle, CURLOPT_TIMEOUT, 5);
+        // 15s read timeout: long enough to catch a 7s getrawtransaction
+        // chain-scan when txindex isn't enabled. Drop back to 5s once
+        // txindex=1 is on the node and scans are O(1).
+        curl_setopt($_rpcCurlHandle, CURLOPT_TIMEOUT, 15);
         curl_setopt($_rpcCurlHandle, CURLOPT_CONNECTTIMEOUT, 5);
         curl_setopt($_rpcCurlHandle, CURLOPT_POST, true);
         curl_setopt($_rpcCurlHandle, CURLOPT_HTTPHEADER, [

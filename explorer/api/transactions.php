@@ -10,17 +10,20 @@
  */
 
 require_once __DIR__ . "/rpc.php";
+require_once __DIR__ . "/_v0_shapes.php";
 
 $config = getChainConfig();
 $chainSuffix = $config['chain'] === 'dilv' ? '-dilv' : '';
 $limit = min(max((int)($_GET['limit'] ?? 50), 1), 200);
+$shape = strtolower($_GET['shape'] ?? '');  // 'v0' triggers camelCase shape
 
 $cacheFile = __DIR__ . "/../cache/transactions{$chainSuffix}.json";
 
-// Check cache (30s TTL)
+// Check cache (30s TTL). The cache stores the raw shape; v0 transform is
+// applied on read since it's a tiny pass.
 if (file_exists($cacheFile)) {
     $cacheAge = time() - filemtime($cacheFile);
-    if ($cacheAge < 30) {
+    if ($cacheAge < 10) {
         $cached = file_get_contents($cacheFile);
         if ($cached !== false) {
             $data = json_decode($cached, true);
@@ -28,6 +31,9 @@ if (file_exists($cacheFile)) {
                 // Trim to requested limit
                 if (isset($data['transactions'])) {
                     $data['transactions'] = array_slice($data['transactions'], 0, $limit);
+                    if ($shape === 'v0') {
+                        $data['transactions'] = array_map('transformTxV0', $data['transactions']);
+                    }
                 }
                 $data['cached'] = true;
                 $data['cacheAge'] = $cacheAge;
@@ -110,17 +116,7 @@ while ($currentHash !== null && count($transactions) < 200 && $blocksScanned < $
     $blocksScanned++;
 }
 
-$response = [
-    'transactions' => array_slice($transactions, 0, $limit),
-    'total_found' => count($transactions),
-    'blocks_scanned' => $blocksScanned,
-    'tip_height' => $tipHeight,
-    'unit' => $config['unit'],
-    'chain' => $config['chain'],
-    'updated_at' => time(),
-];
-
-// Cache full result
+// Cache the raw shape (so other consumers and v0 share the same cache).
 @file_put_contents($cacheFile, json_encode([
     'transactions' => $transactions,
     'total_found' => count($transactions),
@@ -130,5 +126,21 @@ $response = [
     'chain' => $config['chain'],
     'updated_at' => time(),
 ]));
+
+$slicedTxs = array_slice($transactions, 0, $limit);
+if ($shape === 'v0') {
+    $slicedTxs = array_map('transformTxV0', $slicedTxs);
+}
+
+$response = [
+    'transactions' => $slicedTxs,
+    'total_found' => count($transactions),
+    'blocks_scanned' => $blocksScanned,
+    'tip_height' => $tipHeight,
+    'tipHeight' => $tipHeight,  // alias for v0
+    'unit' => $config['unit'],
+    'chain' => $config['chain'],
+    'updated_at' => time(),
+];
 
 sendJSON($response);

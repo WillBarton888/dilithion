@@ -15,12 +15,19 @@
  */
 
 require_once __DIR__ . '/rpc.php';
+require_once __DIR__ . '/_v0_shapes.php';
 
 $hash = $_GET['hash'] ?? null;
 $height = isset($_GET['height']) ? intval($_GET['height']) : null;
 $page = max(1, intval($_GET['page'] ?? 1));
 $limit = min(50, max(1, intval($_GET['limit'] ?? 20)));
 $verbosity = max(0, min(2, intval($_GET['verbosity'] ?? 1)));
+$shape = strtolower($_GET['shape'] ?? '');  // 'v0' triggers camelCase shape
+
+// shape=v0 needs coinbase vouts (verbosity=2) to compute reward/miner address
+if ($shape === 'v0' && $verbosity < 2) {
+    $verbosity = 2;
+}
 
 // Single block by hash
 if ($hash !== null) {
@@ -33,6 +40,9 @@ if ($hash !== null) {
         sendError('Block not found.', 404);
     }
 
+    if ($shape === 'v0') {
+        sendJSON(['block' => transformBlockV0($block)]);
+    }
     sendJSON(['block' => $block]);
 }
 
@@ -56,6 +66,9 @@ if ($height !== null) {
         sendError('Failed to retrieve block data.', 500);
     }
 
+    if ($shape === 'v0') {
+        sendJSON(['block' => transformBlockV0($block)]);
+    }
     sendJSON(['block' => $block]);
 }
 
@@ -66,9 +79,10 @@ $cacheSuffix = $chainConfig['chain'] === 'dilv' ? '-dilv' : '';
 $cacheFile = __DIR__ . "/../cache/latest-blocks{$cacheSuffix}.json";
 $noCache = isset($_GET['nocache']) && $_GET['nocache'] === '1';
 
-if (!$noCache && $page === 1 && file_exists($cacheFile)) {
+// Cache: skip for shape=v0 (cache stores raw shape; v0 transform runs live)
+if ($shape !== 'v0' && !$noCache && $page === 1 && file_exists($cacheFile)) {
     $cacheAge = time() - filemtime($cacheFile);
-    if ($cacheAge < 60) {
+    if ($cacheAge < 15) {
         $cached = json_decode(file_get_contents($cacheFile), true);
         if ($cached !== null && isset($cached['blocks'])) {
             // Slice the cached blocks to match the requested limit
@@ -114,8 +128,8 @@ for ($i = 0; $i < $limit && $currentHash !== null; $i++) {
     $currentHash = $block['previousblockhash'] ?? null;
 }
 
-// Cache page 1 results
-if ($page === 1 && !empty($blocks)) {
+// Cache page 1 results (raw shape only — v0 doesn't share this cache)
+if ($shape !== 'v0' && $page === 1 && !empty($blocks)) {
     $cacheDir = dirname($cacheFile);
     if (!is_dir($cacheDir)) {
         @mkdir($cacheDir, 0755, true);
@@ -127,10 +141,16 @@ if ($page === 1 && !empty($blocks)) {
     ]));
 }
 
+if ($shape === 'v0') {
+    $blocks = array_map('transformBlockV0', $blocks);
+}
+
 sendJSON([
     'blocks' => $blocks,
     'page' => $page,
     'limit' => $limit,
     'totalHeight' => $tipHeight,
+    'tipHeight' => $tipHeight,  // alias for v0 consistency
+    'chain' => getChainConfig()['chain'],
     'cached' => false
 ]);
