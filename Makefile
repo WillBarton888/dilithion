@@ -414,12 +414,20 @@ all: dilithion-node dilv-node genesis_gen check-wallet-balance
 # Main Binaries
 # ============================================================================
 
-dilithion-node: $(CORE_OBJECTS) $(OBJ_DIR)/node/dilithion-node.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+# PR-Z-1 red-team F7: libzmq is an order-only prerequisite of every binary
+# that links it. Without this, a fresh clone + `make` races: object compiles
+# proceed in parallel before depends/libzmq/build*/lib/libzmq.a exists, and
+# the link step fails. Order-only ('|') means the dependency triggers a
+# build of libzmq if missing, but does not force a relink when libzmq's
+# mtime changes (libzmq is a vendored submodule, pinned).
+#
+# (RandomX has the same gap; deferred to a future cleanup -- out of scope.)
+dilithion-node: $(CORE_OBJECTS) $(OBJ_DIR)/node/dilithion-node.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS) | libzmq
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ dilithion-node built successfully$(COLOR_RESET)"
 
-dilv-node: $(CORE_OBJECTS) $(OBJ_DIR)/node/dilv-node.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+dilv-node: $(CORE_OBJECTS) $(OBJ_DIR)/node/dilv-node.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS) | libzmq
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ dilv-node built successfully$(COLOR_RESET)"
@@ -662,7 +670,8 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(CRYPTO_PROPERTY_OBJECTS)
 
 # Link test objects + full library (CORE_OBJECTS) to avoid hand-picked object drift
-test_dilithion: $(BOOST_TEST_OBJECTS) $(CORE_OBJECTS) $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+# PR-Z-1 red-team F7: order-only libzmq prerequisite (see dilithion-node).
+test_dilithion: $(BOOST_TEST_OBJECTS) $(CORE_OBJECTS) $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS) | libzmq
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ Boost test suite built successfully$(COLOR_RESET)"
