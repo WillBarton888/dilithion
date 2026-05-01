@@ -443,6 +443,18 @@ bool CCoinStatsIndex::WriteBlock(const CBlock& block, int height, const uint256&
 
     if (!m_db) return false;
 
+    // H1 fail-fast: a corrupted index refuses further writes. Without this
+    // guard, an EraseBlock leveldb-write failure that left m_corrupted=true
+    // would still admit subsequent WriteBlocks that fold onto a stale parent
+    // and persist further-corrupt records. Operator must --reindex to
+    // recover.
+    if (m_corrupted.load()) {
+        std::cerr << "[coinstatsindex] WriteBlock refused at height " << height
+                  << ": index is in corrupted state -- restart with --reindex"
+                  << std::endl;
+        return false;
+    }
+
     if (height <= m_last_height.load()) {
         // Already indexed; monotonicity no-op.
         return true;
@@ -456,6 +468,39 @@ bool CCoinStatsIndex::WriteBlock(const CBlock& block, int height, const uint256&
                   << height << " (last=" << m_last_height.load() << ")"
                   << std::endl;
         return false;
+    }
+
+    // H3 parent-mismatch detection: verify the block's claimed parent
+    // matches the chainstate's main-chain block at height-1. The reindex
+    // thread reads chainstate per-height without holding cs_main between
+    // iterations; if a reorg fires mid-walk and the inner walk has already
+    // advanced m_last_height past the divergence point, a subsequent
+    // WriteBlock based on the now-orphaned parent would persist a corrupt
+    // record. Detect by comparing the just-supplied block's hashPrevBlock
+    // against the canonical main-chain hash at height-1.
+    if (height > 0) {
+        const std::vector<uint256> prev_hashes =
+            g_chainstate.GetBlocksAtHeight(height - 1);
+        uint256 expected_prev;
+        bool have_prev = false;
+        for (const uint256& h : prev_hashes) {
+            CBlockIndex* pi = g_chainstate.GetBlockIndex(h);
+            if (pi != nullptr && pi->IsOnMainChain()) {
+                expected_prev = pi->GetBlockHash();
+                have_prev = true;
+                break;
+            }
+        }
+        if (have_prev && expected_prev != block.hashPrevBlock) {
+            std::cerr << "[coinstatsindex] WriteBlock parent-mismatch at "
+                      << "height " << height << ": expected prev="
+                      << expected_prev.GetHex().substr(0, 16) << "..., "
+                      << "got prev=" << block.hashPrevBlock.GetHex().substr(0, 16)
+                      << "... (likely reorg during reindex) -- setting "
+                      << "corrupt flag and refusing write" << std::endl;
+            m_corrupted.store(true);
+            return false;
+        }
     }
 
     CoinStats parent = m_running;
@@ -484,6 +529,17 @@ bool CCoinStatsIndex::EraseBlock(const CBlock& block, int height, const uint256&
     std::lock_guard<std::mutex> lock(m_mutex);
 
     if (!m_db) return false;
+
+    // H1 fail-fast: a corrupted index refuses further erases too. (The
+    // sticky m_corrupted flag is set by an earlier failure; only WipeIndex
+    // / restart can clear it.) We deliberately fail rather than no-op so
+    // operators see the corruption signal.
+    if (m_corrupted.load()) {
+        std::cerr << "[coinstatsindex] EraseBlock refused at height " << height
+                  << ": index is in corrupted state -- restart with --reindex"
+                  << std::endl;
+        return false;
+    }
 
     // Stray double-disconnect or out-of-order: idempotent no-op (mirrors
     // txindex C1).
@@ -523,11 +579,15 @@ bool CCoinStatsIndex::EraseBlock(const CBlock& block, int height, const uint256&
 
     if (!WriteMeta(batch, new_height, prev_hash)) return false;
 
-    // Mirrors txindex R2: optimistic m_last_height decrement BEFORE write,
-    // so a write failure does not block a subsequent connect-replacement
-    // at H from running.
-    m_last_height.store(new_height);
-
+    // H1 FIX: write FIRST, then commit the in-memory rollback. The previous
+    // implementation decremented m_last_height optimistically BEFORE writing,
+    // and on write failure left m_running pointing at the after-failed-block
+    // state -- so a subsequent WriteBlock at H folded onto a stale parent and
+    // persisted a corrupt record. Now: snapshot pre-rollback state, attempt
+    // write, commit rollback only on success; on failure leave both
+    // m_last_height and m_running unchanged and set m_corrupted=true. The
+    // IsCorrupted() guard at the top of WriteBlock / EraseBlock then
+    // refuses further writes until WipeIndex / --reindex.
     const bool force_fail =
         coin_stats_index_test_hooks::g_force_eraseblock_failure.load(
             std::memory_order_relaxed);
@@ -537,11 +597,15 @@ bool CCoinStatsIndex::EraseBlock(const CBlock& block, int height, const uint256&
                    : m_db->Write(leveldb::WriteOptions(), &batch);
     if (!status.ok()) {
         std::cerr << "[coinstatsindex] EraseBlock failed at height " << height
-                  << ": " << status.ToString() << std::endl;
+                  << ": " << status.ToString() << " -- index now in corrupted "
+                  << "state; restart with --reindex" << std::endl;
         m_corrupted.store(true);
+        // Leave m_last_height and m_running unchanged.
         return false;
     }
 
+    // Commit rollback only after the write succeeded.
+    m_last_height.store(new_height);
     m_running = restored;
     (void)block_hash;
     return true;
