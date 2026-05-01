@@ -210,9 +210,14 @@ BOOST_AUTO_TEST_CASE(zmq_publish_lifecycle_roundtrip)
     zmq_ctx_term(ctx);
 }
 
-// 4. Address sharing: two notifiers on the same address share one socket
-// and Shutdown() of one does not break the other. Mirrors the BC behaviour
-// for operators who route hashblock + hashtx to a single endpoint.
+// 4. Address sharing: notifiers on the same address share one socket and
+// Shutdown() of one MUST NOT break the others. Mirrors the BC behaviour for
+// operators who route hashblock + hashtx + rawtx to a single endpoint.
+//
+// Mutation-test contract: a regression that closed the underlying socket on
+// the FIRST Shutdown() (instead of refcounting via the multimap) MUST cause
+// this test to fail, because we send through the surviving notifier b AFTER
+// a is shut down, and again through c after b is shut down.
 BOOST_AUTO_TEST_CASE(zmq_publish_shared_address)
 {
     void* ctx = zmq_ctx_new();
@@ -226,18 +231,33 @@ BOOST_AUTO_TEST_CASE(zmq_publish_shared_address)
     b.SetType("hashtx");
     b.SetAddress("tcp://127.0.0.1:28334");
 
+    TestNotifier c;
+    c.SetType("rawtx");
+    c.SetAddress("tcp://127.0.0.1:28334");
+
     BOOST_REQUIRE(a.Initialize(ctx));
     BOOST_REQUIRE(b.Initialize(ctx));
+    BOOST_REQUIRE(c.Initialize(ctx));
 
     // Sending from each must succeed without needing its own bind.
     unsigned char payload[8] = {1, 2, 3, 4, 5, 6, 7, 8};
     BOOST_CHECK(a.SendZmqMessage("hashblock", payload, sizeof(payload)));
     BOOST_CHECK(b.SendZmqMessage("hashtx", payload, sizeof(payload)));
+    BOOST_CHECK(c.SendZmqMessage("rawtx", payload, sizeof(payload)));
 
-    // Shutdown order should not matter; the second shutdown is what
-    // actually closes the underlying socket (refcount-by-multimap).
+    // Tear down a; b and c must still be able to publish on the shared
+    // socket. This is the load-bearing assertion that fails if anything
+    // regresses to closing the socket on the first Shutdown().
     a.Shutdown();
+    BOOST_CHECK(b.SendZmqMessage("hashtx", payload, sizeof(payload)));
+    BOOST_CHECK(c.SendZmqMessage("rawtx", payload, sizeof(payload)));
+
+    // Tear down b; c must still be able to publish.
     b.Shutdown();
+    BOOST_CHECK(c.SendZmqMessage("rawtx", payload, sizeof(payload)));
+
+    // Final shutdown closes the underlying socket (refcount-by-multimap).
+    c.Shutdown();
 
     zmq_ctx_term(ctx);
 }
