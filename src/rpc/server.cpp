@@ -5688,10 +5688,14 @@ std::string CRPCServer::RPC_TestMempoolAccept(const std::string& params) {
     // BC v28.0 also accepts a "maxfeerate" key. We accept it for schema
     // compatibility but ignore it (Dilithion uses one fee policy).
     // Validate type if present so a typo (string vs number) surfaces.
+    // L2: reject negative numeric values (BC also rejects negative fee rates).
     if (req.contains("maxfeerate") && !req["maxfeerate"].is_null()) {
         const auto& mfr = req["maxfeerate"];
         if (!mfr.is_number() && !mfr.is_string()) {
             throw std::runtime_error("maxfeerate must be a number or string");
+        }
+        if (mfr.is_number() && mfr.get<double>() < 0.0) {
+            throw std::runtime_error("maxfeerate must be non-negative");
         }
         // Otherwise: deliberately a no-op; documented in handler docstring.
     }
