@@ -360,7 +360,59 @@ void CRegistrationManager::HandleCheckEligibility_() {
     EnterState_(State::DNA_PENDING);
 }
 
+// ----------------------------------------------------------------------
+// Phase 10 PR10.5b regtest fast-path helpers.
+// ----------------------------------------------------------------------
+
+bool CRegistrationManager::DnaCommitmentRequiredAtTip_() const {
+    return static_cast<int>(latestTipHeight_.load()) >=
+           env_->DNACommitmentActivationHeight();
+}
+
+bool CRegistrationManager::AttestationsRequiredAtTip_() const {
+    return static_cast<int>(latestTipHeight_.load()) >=
+           env_->SeedAttestationActivationHeight();
+}
+
+std::array<uint8_t, 32> CRegistrationManager::ComputeRegtestPlaceholderDnaHash_() {
+    // Phase 10 PR10.5b: deterministic placeholder DNA hash for the regtest
+    // fast-path. ASCII tag "REGTEST-DNA-PLACEHOLDER-v1" (26 bytes) followed
+    // by 0xFF padding (6 bytes) = 32 bytes. Properties:
+    //   - Non-zero (passes the `allZero` check at line 368-369 below).
+    //   - Deterministic (every regtest registration uses the same value).
+    //   - Identifiable at audit time (ASCII tag visible in hex dumps).
+    //   - Non-confusable with a real DNA hash (real DNA hashes are SHA-3
+    //     digests of stable hardware/software fingerprints — uniformly
+    //     distributed bytes, no ASCII tag prefix, no 0xFF tail).
+    std::array<uint8_t, 32> h{};
+    static const char kTag[] = "REGTEST-DNA-PLACEHOLDER-v1";
+    constexpr size_t kTagLen = sizeof(kTag) - 1;  // 26
+    std::memcpy(h.data(), kTag, kTagLen);
+    for (size_t i = kTagLen; i < 32; ++i) h[i] = 0xFF;
+    return h;
+}
+
 void CRegistrationManager::HandleDnaPending_() {
+    // Phase 10 PR10.5b regtest fast-path. If consensus does NOT require
+    // DNA at the current tip (DNA commitment activation height is in the
+    // future), short-circuit DNA collection with a deterministic
+    // placeholder hash. Pure activation-height gate — chain identity
+    // never checked.
+    if (!DnaCommitmentRequiredAtTip_()) {
+        session_.dnaHash = ComputeRegtestPlaceholderDnaHash_();
+        session_.hasDnaHash = true;
+        Transition_(Event::DNA_READY);
+        // If attestations also not required, skip ATTEST_PENDING entirely.
+        if (!AttestationsRequiredAtTip_()) {
+            session_.hasValidAttestations = true;  // not required AND not collected
+            Transition_(Event::ATTEST_READY);
+            EnterState_(State::POW_PENDING);
+        } else {
+            EnterState_(State::ATTEST_PENDING);
+        }
+        return;
+    }
+
     session_.dnaPolls++;
     std::array<uint8_t, 32> hash{};
     if (env_->TryGetDNAHash(hash)) {
@@ -383,6 +435,18 @@ void CRegistrationManager::HandleAttestPending_() {
     if (!session_.hasDnaHash) {
         // Sanity: should never happen per transition rules.
         OnFatalError_("ATTEST_PENDING without DNA hash — invariant violated");
+        return;
+    }
+
+    // Phase 10 PR10.5b regtest fast-path (re-entry case): if attestations
+    // are not required at the current tip, skip to POW_PENDING. Covers
+    // the path where SUBMIT_TIMEOUT_OR_REJECTED demoted state to
+    // ATTEST_PENDING (line 572 below) on a chain where attestations
+    // aren't actually required.
+    if (!AttestationsRequiredAtTip_()) {
+        session_.hasValidAttestations = true;
+        Transition_(Event::ATTEST_READY);
+        EnterState_(State::POW_PENDING);
         return;
     }
 
@@ -567,8 +631,13 @@ void CRegistrationManager::Transition_(Event ev, const std::string& detail) {
                 break;
             }
             // Decide which state to fall back to based on attestation freshness.
-            bool attestFresh = session_.attestations &&
-                env_->IsAttestationFreshEnough(*session_.attestations, env_->NowSeconds());
+            // Phase 10 PR10.5b regtest fast-path: if attestations aren't
+            // required at the current tip, treat them as "fresh" and stay
+            // in READY (don't re-enter ATTEST_PENDING which would block
+            // forever on regtest).
+            bool attestFresh = !AttestationsRequiredAtTip_() ||
+                (session_.attestations &&
+                 env_->IsAttestationFreshEnough(*session_.attestations, env_->NowSeconds()));
             EnterState_(attestFresh ? State::READY : State::ATTEST_PENDING);
             if (!attestFresh) session_.attestations.reset();
             nextRetryAt_ = std::chrono::system_clock::now() + submitRetryBackoff_;

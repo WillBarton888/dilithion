@@ -4802,6 +4802,32 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     std::cerr << "  Please check that your recovery phrase is correct" << std::endl;
                     return 1;
                 }
+            } else if (config.regtest) {
+                // Phase 10 PR10.5b: regtest auto-create wallet path. Regtest is
+                // a deterministic lab environment — no operator at the keyboard
+                // to answer the interactive prompt. Auto-create a fresh HD
+                // wallet with a generated mnemonic (deterministic per-run; the
+                // wallet is throwaway anyway since regtest datadirs are wiped
+                // between runs). Skips the interactive prompt at line 4824
+                // which would loop forever on EOF in a backgrounded harness.
+                //
+                // Production behavior unchanged: this branch fires ONLY when
+                // config.regtest is true. Mainnet/testnet still hit the
+                // interactive prompt below.
+                std::cout << "  Regtest auto-create: generating fresh HD wallet..." << std::endl;
+                std::string generated_mnemonic;
+                if (wallet.GenerateHDWallet(generated_mnemonic, "")) {
+                    std::cout << "  [OK] Regtest wallet created successfully." << std::endl;
+                    CDilithiumAddress addr = wallet.GetNewHDAddress();
+                    std::cout << "  First address: " << addr.ToString() << std::endl;
+                    // generated_mnemonic goes out of scope at the closing
+                    // brace; for regtest (a deterministic lab environment with
+                    // throwaway wallets) the higher-grade memory_cleanse used
+                    // on production paths is not load-bearing here.
+                } else {
+                    std::cerr << "  ERROR: Regtest auto-create wallet failed" << std::endl;
+                    return 1;
+                }
             } else {
             // Interactive prompt: Create new or restore?
             // NOTE: Network threads may already be running, but we need user input here

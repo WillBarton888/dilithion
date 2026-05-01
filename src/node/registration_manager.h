@@ -367,6 +367,24 @@ private:
     void HandleLongBackoff_();
 
     // ------------------------------------------------------------------
+    // Phase 10 PR10.5b regtest fast-path helpers.
+    //
+    // Gate: pure activation-height comparison against latestTipHeight_.
+    // No chain identity is checked. Mainnet/testnet at production heights
+    // (DNA: 40000 / 0; Attest: 40000 / 2000) have activation in the past
+    // and the requirement-checks return TRUE → fast-path NOT entered.
+    // Regtest (inherited from Testnet's 999999999 / 999999999 sentinels)
+    // has activation in the future indefinitely → fast-path entered.
+    //
+    // Layer-2 review (PR10.5b close) verifies (a) the gate excludes
+    // mainnet/testnet at all production heights and (b) the placeholder
+    // hash is non-confusable with a real DNA hash.
+    // ------------------------------------------------------------------
+    bool DnaCommitmentRequiredAtTip_() const;
+    bool AttestationsRequiredAtTip_() const;
+    static std::array<uint8_t, 32> ComputeRegtestPlaceholderDnaHash_();
+
+    // ------------------------------------------------------------------
     // Session management
     // ------------------------------------------------------------------
     void StartNewSession_(uint32_t tipHeight);
