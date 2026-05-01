@@ -6333,6 +6333,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.SetPublicAPI(config.public_api);  // Light wallet REST API (for seed nodes)
         rpc_server.SetAttestationRateLimit(config.attestation_rate_limit);  // Sybil defense Phase 0
         rpc_server.SetDataDir(Dilithion::g_chainParams->dataDir);  // For swap state persistence
+        rpc_server.SetPersistMempool(config.persistmempool);  // PR-MP-FIX F#8: gate savemempool RPC
 
         // Phase 2+3: Seed attestation initialization (relay-only DilV nodes only)
         // Loads ASN database and attestation signing key so seeds can serve

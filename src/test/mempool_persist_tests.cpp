@@ -10,6 +10,7 @@
 #include <crypto/sha3.h>
 #include <primitives/transaction.h>
 #include <uint256.h>
+#include <3rdparty/json.hpp>
 
 #include <atomic>
 #include <chrono>
@@ -607,33 +608,42 @@ BOOST_AUTO_TEST_CASE(c6_bypass_fee_check_regression) {
     BOOST_CHECK_EQUAL(mp_load.Size(), 1u);
 }
 
-// ---- PR-MP-3: savemempool RPC handler smoke test -----------------------
+// ---- PR-MP-3: savemempool RPC handler tests ----------------------------
+// PR-MP-FIX (Findings #6, #9): tests parse JSON via nlohmann::json instead
+// of substring-matching, and pin the EXACT error message (not just throw
+// std::runtime_error). A future bug producing malformed JSON or swapping
+// the error-message order would surface here.
 
-// Verifies the RPC handler triggers DumpMempool correctly. We don't stand
-// up an HTTP server -- we exercise the handler directly via a minimal
-// CRPCServer instance, mirroring the getindexinfo schema-lock-in pattern.
+// Verifies the RPC handler triggers DumpMempool correctly + the response
+// is valid JSON with the documented schema.
 BOOST_AUTO_TEST_CASE(savemempool_rpc_handler) {
     TempDir scope("savemempool_rpc");
 
     CTxMemPool mp;
     BOOST_REQUIRE_EQUAL(PopulateMempool(mp, 3), 3u);
 
-    // Stand up a CRPCServer just for the handler call. We don't call Start();
-    // the handler does not depend on the network being up.
     CRPCServer server(/*port=*/18999);
     server.RegisterMempool(&mp);
     server.SetDataDir(scope.path().string());
+    // SetPersistMempool defaults to true; explicitly set to make the
+    // intent visible in the test.
+    server.SetPersistMempool(true);
 
-    // Call the handler directly. It returns JSON {"filename": "<absolute-path>"}
-    // matching Bitcoin Core v28.0's savemempool response schema.
     const std::string response = server.RPC_SaveMempool("");
 
-    // Response shape lock: must contain "filename" key and the file's
-    // absolute path. We don't pin the exact bytes of the path because
-    // absolute paths are platform-specific (Windows backslashes get
-    // JSON-escaped to "\\\\").
-    BOOST_CHECK(response.find("\"filename\"") != std::string::npos);
-    BOOST_CHECK(response.find(mempool_persist::FILENAME) != std::string::npos);
+    // PR-MP-FIX F#6: parse the response as JSON. Substring matches passed
+    // on malformed JSON like {"filename":"abc" (missing brace) or doubled
+    // keys. Real parsing locks the schema.
+    nlohmann::json parsed;
+    BOOST_REQUIRE_NO_THROW(parsed = nlohmann::json::parse(response));
+    BOOST_CHECK(parsed.is_object());
+    BOOST_CHECK_EQUAL(parsed.size(), 1u);
+    BOOST_REQUIRE(parsed.contains("filename"));
+    BOOST_CHECK(parsed["filename"].is_string());
+
+    // The filename field must contain the canonical mempool.dat name.
+    const std::string filename = parsed["filename"].get<std::string>();
+    BOOST_CHECK(filename.find(mempool_persist::FILENAME) != std::string::npos);
 
     // File must actually exist on disk and round-trip correctly.
     const auto fp = scope.path() / mempool_persist::FILENAME;
@@ -646,7 +656,10 @@ BOOST_AUTO_TEST_CASE(savemempool_rpc_handler) {
     BOOST_CHECK_EQUAL(load.txs_admitted, 3u);
 }
 
-// Negative path: missing mempool registration must throw with a clear error.
+// Negative path: missing mempool registration must throw with the EXACT
+// "Mempool not registered" error message. F#9: a future bug that swapped
+// the order of the two early-return checks would otherwise pass under a
+// generic BOOST_CHECK_THROW(..., runtime_error).
 BOOST_AUTO_TEST_CASE(savemempool_rpc_no_mempool) {
     TempDir scope("savemempool_no_mempool");
 
@@ -654,10 +667,19 @@ BOOST_AUTO_TEST_CASE(savemempool_rpc_no_mempool) {
     // Deliberately do NOT call RegisterMempool(); m_mempool stays null.
     server.SetDataDir(scope.path().string());
 
-    BOOST_CHECK_THROW(server.RPC_SaveMempool(""), std::runtime_error);
+    try {
+        server.RPC_SaveMempool("");
+        BOOST_FAIL("expected runtime_error");
+    } catch (const std::runtime_error& e) {
+        const std::string msg(e.what());
+        BOOST_CHECK_MESSAGE(
+            msg.find("Mempool not registered") != std::string::npos,
+            "expected 'Mempool not registered' in error, got: " << msg);
+    }
 }
 
-// Negative path: empty datadir must throw with a clear error.
+// Negative path: empty datadir must throw with the EXACT "Data directory"
+// error message.
 BOOST_AUTO_TEST_CASE(savemempool_rpc_no_datadir) {
     CTxMemPool mp;
 
@@ -665,7 +687,45 @@ BOOST_AUTO_TEST_CASE(savemempool_rpc_no_datadir) {
     server.RegisterMempool(&mp);
     // Deliberately do NOT call SetDataDir(); m_dataDir stays empty.
 
-    BOOST_CHECK_THROW(server.RPC_SaveMempool(""), std::runtime_error);
+    try {
+        server.RPC_SaveMempool("");
+        BOOST_FAIL("expected runtime_error");
+    } catch (const std::runtime_error& e) {
+        const std::string msg(e.what());
+        BOOST_CHECK_MESSAGE(
+            msg.find("Data directory") != std::string::npos,
+            "expected 'Data directory' in error, got: " << msg);
+    }
+}
+
+// PR-MP-FIX F#8: when the operator set -persistmempool=0, the handler
+// must refuse to dump and return BC v28.0's exact error wording
+// "Mempool was not loaded". An operator who explicitly disabled
+// persistence should not have on-disk state mutated by any RPC user.
+BOOST_AUTO_TEST_CASE(savemempool_rpc_persistmempool_disabled) {
+    TempDir scope("savemempool_persistmempool_off");
+
+    CTxMemPool mp;
+    BOOST_REQUIRE_EQUAL(PopulateMempool(mp, 2), 2u);
+
+    CRPCServer server(/*port=*/18996);
+    server.RegisterMempool(&mp);
+    server.SetDataDir(scope.path().string());
+    server.SetPersistMempool(false);  // operator's --persistmempool=0
+
+    try {
+        server.RPC_SaveMempool("");
+        BOOST_FAIL("expected runtime_error when persistence disabled");
+    } catch (const std::runtime_error& e) {
+        const std::string msg(e.what());
+        BOOST_CHECK_MESSAGE(
+            msg.find("Mempool was not loaded") != std::string::npos,
+            "expected BC v28.0 'Mempool was not loaded' wording, got: " << msg);
+    }
+
+    // mempool.dat MUST NOT exist -- the handler refused before any disk write.
+    const auto fp = scope.path() / mempool_persist::FILENAME;
+    BOOST_CHECK(!std::filesystem::exists(fp));
 }
 
 BOOST_AUTO_TEST_SUITE_END()
