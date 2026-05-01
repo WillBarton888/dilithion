@@ -261,6 +261,7 @@ CRPCServer::CRPCServer(uint16_t port)
     m_handlers["generatetoaddress"] = [this](const std::string& p) { return RPC_GenerateToAddress(p); };
     m_handlers["getrawtransaction"] = [this](const std::string& p) { return RPC_GetRawTransaction(p); };
     m_handlers["decoderawtransaction"] = [this](const std::string& p) { return RPC_DecodeRawTransaction(p); };
+    m_handlers["getindexinfo"] = [](const std::string& p) { return RPC_GetIndexInfo(p); };
     m_handlers["addnode"] = [this](const std::string& p) { return RPC_AddNode(p); };
 
     // x402 payment methods (DilV only)
@@ -5324,6 +5325,7 @@ std::string CRPCServer::RPC_Help(const std::string& params) {
     oss << "\"getblock - Get block by hash\",";
     oss << "\"getblockhash - Get block hash by height\",";
     oss << "\"gettxout - Get UTXO information\",";
+    oss << "\"getindexinfo - Get sync state of all enabled indexes (txindex, ...)\",";
     oss << "\"checkchain - Verify your chain matches official checkpoints (detect forks)\",";
     oss << "\"checkblockdb - Check for missing blocks in database (diagnostic)\",";
     oss << "\"repairblocks - Repair blocks stored under wrong hashes (Bug #243 fix)\",";
@@ -5424,6 +5426,56 @@ std::string CRPCServer::RPC_GetBestBlockHash(const std::string& params) {
     }
 
     return "\"" + hashBestBlock.GetHex() + "\"";
+}
+
+// Bitcoin Core port: src/rpc/blockchain.cpp::getindexinfo (v28.0).
+//
+// Returns a JSON object keyed by index name. Each enabled index reports
+// its sync state via {synced, best_block_height}. Indexes that are not
+// enabled at runtime are omitted entirely -- a stock node started without
+// any index flags returns "{}".
+//
+// Currently Dilithion exposes only the txindex (PR #32 + PR #33). Future
+// ports (BIP 157/158 block filter index, coinstatsindex) will register
+// here with the same schema. The "first" comma-handling pattern is a
+// no-op while there is only one index, but is retained for forward
+// compatibility -- when the second index lands, no structural change to
+// the loop body is needed.
+//
+// best_block_height = -1 is a valid response value when the txindex has
+// been enabled but has not yet written its first row (the cold-start
+// window after `-txindex=1 -reindex` startup, before SyncLoop begins
+// emitting rows). Consumers should treat -1 as "no progress yet" rather
+// than as a sync error.
+//
+// Race-safety: in the normal shutdown path, the RPC server stops
+// accepting new requests BEFORE `g_tx_index.reset()` runs (see node
+// shutdown sequence in dilithion-node.cpp / dilv-node.cpp), so
+// g_tx_index cannot be torn down concurrently with a live request. The
+// error-path catch handlers also call `g_tx_index.reset()`, but they
+// rely on the RPC server destructor running during stack unwind before
+// main() returns -- the same exposure already exists for the
+// connect/disconnect callback lambdas at dilithion-node.cpp:2945,2952.
+// The atomic loads (IsSynced, LastIndexedHeight) are inherently
+// race-free.
+std::string CRPCServer::RPC_GetIndexInfo(const std::string& params) {
+    (void)params;   // takes no arguments
+
+    std::ostringstream oss;
+    oss << "{";
+
+    bool first = true;
+    if (g_tx_index) {
+        if (!first) oss << ",";
+        oss << "\"txindex\":{"
+            << "\"synced\":" << (g_tx_index->IsSynced() ? "true" : "false") << ","
+            << "\"best_block_height\":" << g_tx_index->LastIndexedHeight()
+            << "}";
+        first = false;
+    }
+
+    oss << "}";
+    return oss.str();
 }
 
 std::string CRPCServer::RPC_GetChainTips(const std::string& params) {
