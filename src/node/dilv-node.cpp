@@ -6335,6 +6335,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.SetDataDir(Dilithion::g_chainParams->dataDir);  // For swap state persistence
         rpc_server.SetPersistMempool(config.persistmempool);  // PR-MP-FIX F#8: gate savemempool RPC
 
+        // T1.B: wake any RPC worker parked on the wait-* condition variable.
+        // Static dispatch so the callback never holds a stale CRPCServer
+        // pointer; NotifyBlockTipChanged is exception-safe.
+        g_chainstate.RegisterBlockConnectCallback(
+            [](const CBlock& /*block*/, int /*height*/, const uint256& /*hash*/) {
+                CRPCServer::NotifyBlockTipChanged();
+            });
+
         // Phase 2+3: Seed attestation initialization (relay-only DilV nodes only)
         // Loads ASN database and attestation signing key so seeds can serve
         // getmikattestation RPC requests from miners.

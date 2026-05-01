@@ -6,6 +6,7 @@
 
 #include <primitives/transaction.h>
 #include <primitives/block.h>
+#include <node/undo_data.h>
 #include <leveldb/db.h>
 #include <string>
 #include <memory>
@@ -181,6 +182,50 @@ public:
      * @return true if an undo_<blockhash> entry exists in LevelDB
      */
     bool HasUndoData(const uint256& blockHash) const;
+
+    /**
+     * Read undo data for a block as a structured CBlockUndo.
+     *
+     * Read-only accessor on the existing on-disk format (key "undo_<blockhash>"
+     * written by ApplyBlock; consumed and deleted by UndoBlock). Does NOT
+     * mutate disk or the UTXO cache.
+     *
+     * Layout, validation, and the deviation from Bitcoin Core's per-tx
+     * grouping are documented in node/undo_data.h. The SHA3-256 footer is
+     * verified before parsing; corruption surfaces as a `false` return with
+     * `undo_out` left in an unspecified state, never a crash.
+     *
+     * Foundational accessor for block-analytics consumers (per-block fee
+     * aggregation, coinstatsindex). PR-BA-1 in the block-analytics bundle.
+     *
+     * Behaviour notes for downstream consumers (PR-BA-2 / PR-BA-3):
+     *
+     *   - **Reorged-out blocks return false.** UndoBlock deletes the entry
+     *     after applying the rollback. A successful write followed by a
+     *     reorg produces "missing-block" on this reader. Consumers querying
+     *     historical blocks should ensure the block is on the active chain
+     *     before invoking; otherwise a false-negative window exists during
+     *     reorg processing.
+     *   - **Memory bounds.** Allocates O(spentCount) records; with the
+     *     writer's current block-size cap (`maxBlockSize` in chainparams)
+     *     this is bounded by ~maxBlockSize / kMinRecordBytes records and
+     *     ~maxBlockSize bytes of script payload. Consumers should not call
+     *     this in unbounded loops over arbitrary blockhashes; rate-limit at
+     *     the caller (e.g. RPC handler) if invoked from operator input.
+     *   - **No schema version byte.** The on-disk format is the writer's
+     *     existing layout (see node/undo_data.h). Any future writer-side
+     *     schema change must be coordinated with all readers in the same
+     *     commit (currently `UndoBlock` and `ReadUndoBlock`); a content-
+     *     compatible-shape change without a version byte will be silently
+     *     misparsed by stale readers.
+     *
+     * @param blockHash The block hash whose undo data to read
+     * @param undo_out  Filled with the parsed block undo on success
+     * @return true on success; false if the entry is missing (never
+     *         written or reorged out), truncated, or the SHA3-256 footer
+     *         fails to verify.
+     */
+    bool ReadUndoBlock(const uint256& blockHash, CBlockUndo& undo_out) const;
 
     /**
      * Flush all pending changes to disk
