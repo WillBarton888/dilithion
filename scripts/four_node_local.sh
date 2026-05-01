@@ -47,10 +47,16 @@ SCENARIO="${1:-smoke}"
 MIN_HEIGHT="${2:-20}"
 MAX_WAIT="${3:-180}"
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-BIN="$REPO/dilv-node.exe"
-
-if [[ ! -x "$BIN" ]]; then
-    echo "ERROR: dilv-node.exe not found at $BIN" >&2
+# Cross-platform binary name resolution (MSYS2/Windows produces .exe;
+# Linux/macOS produces no extension). Try .exe first (Windows), then
+# bare name (Linux/macOS). Persisted as a runtime check so the harness
+# is portable across the build hosts (Windows MSYS2 dev box + Linux CI).
+if [[ -x "$REPO/dilv-node.exe" ]]; then
+    BIN="$REPO/dilv-node.exe"
+elif [[ -x "$REPO/dilv-node" ]]; then
+    BIN="$REPO/dilv-node"
+else
+    echo "ERROR: dilv-node binary not found at $REPO/dilv-node[.exe]" >&2
     exit 2
 fi
 
