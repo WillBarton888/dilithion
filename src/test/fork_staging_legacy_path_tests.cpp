@@ -46,12 +46,47 @@
 //   port_phase_7_implementation_plan.md v0.3 §"ForkManager surface"). If
 //   THIS suite passes, the dispatch from line 457 produces expected results.
 //
-// Cursor v0.3 anti-vacuous-assertion mitigation (CONCERN #2 carryover):
-//   Each case asserts at least two staging-internal observables, not just
-//   HasActiveFork(). Specifically: ForkBlockStatus enum transitions
-//   (PENDING -> PREVALIDATED or INVALID), invalidReason non-emptiness on
-//   failure, AllReceivedBlocksPrevalidated() result, fork-state changes
-//   post-cancel.
+// Cursor v0.3 anti-vacuous-assertion mitigation (CONCERN #2 carryover) +
+// Layer-2 red-team finding PR7.2-RT-MEDIUM-1 honest qualification:
+//   Each case has both "scaffolding consistency" and "load-bearing
+//   behavioral" observables. The two categories are NOT equivalent; the
+//   honest framing matters for future readers + Phase 8 follow-up.
+//
+//   "Scaffolding consistency" assertions read back fields the test JUST
+//   set synthetically — e.g. asserting `fb->status == PREVALIDATED`
+//   immediately after `fb->status = PREVALIDATED`. These are tautological
+//   with the synthetic field-set; they do NOT exercise production state-
+//   machine logic. Their value is consistency-checking the test's own
+//   scaffolding (ensuring the synthetic transition was applied at the
+//   correct ForkBlock instance). They are NOT anti-vacuous evidence.
+//
+//   "Load-bearing behavioral" observables exercise production code:
+//     - AllReceivedBlocksPrevalidated() — fork_manager.cpp gate logic,
+//       iterates m_blocks and checks each status (NON-tautological;
+//       passes false-then-true through the synthetic transitions).
+//     - GetHighestPrevalidatedHeight() — production iteration logic.
+//     - GetReceivedBlockCount() / GetBlockCount() — counter logic.
+//     - RecordHashMismatch() return value — counter monotonicity
+//       (fork_manager.cpp:212-215 ++m_hashMismatchCount).
+//     - HasExcessiveHashMismatches() threshold predicate.
+//     - IsExpectedBlock(hash, height) — hash-matching logic against
+//       m_expectedHashes (fork_manager.cpp:44-72).
+//     - CreateForkCandidate / AddBlockToFork / CancelFork plumbing —
+//       singleton state transitions + ForkCandidate construction.
+//     - HasActiveFork() / GetActiveFork() pre/post cancel — singleton
+//       observability.
+//
+//   Case 4 (excessive hash-mismatch) is the cleanest of the four: every
+//   assertion is load-bearing (RecordHashMismatch counter monotonicity +
+//   HasExcessiveHashMismatches() threshold flip). It is the model the
+//   other cases should evolve toward in Phase 8 follow-up — see
+//   PR7.2-RT-INFO-2 in phase_7_deferred_findings.md.
+//
+//   Filed as PR7.2-RT-MEDIUM-1 for Phase 8 follow-up (drop the
+//   scaffolding-consistency assertions OR keep them as consistency
+//   checks but stop framing them as anti-vacuous evidence). The load-
+//   bearing observables alone provide adequate regression coverage for
+//   Phase 7 close.
 //
 // Cases:
 //   1. test_legacy_happy_fork_path

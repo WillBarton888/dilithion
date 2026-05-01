@@ -42,9 +42,15 @@ namespace Dilithion {
  * entry points, so fork-staging is fully operational. At Phase 9+ default
  * flip + ibd_coordinator retirement, an explicit Track A decision is
  * required: re-implement fork-staging in the port adapter (Path A1) or
- * accept the bypass (Path A2). Both are consensus-adjacent. Until that
- * decision lands, do not retire ibd_coordinator or change the
- * --usenewpeerman default. Retirement of this file clusters with
+ * accept the bypass (Path A2). Both are consensus-adjacent. Note: the
+ * bypass under Path A2 is PARTIAL — even at Phase 9+ default flip,
+ * BIP152 compact-block reconstruction sites (in dilithion-node.cpp +
+ * dilv-node.cpp main loops) plus mining and RPC submission paths
+ * continue to invoke `block_processing::ProcessNewBlock`, so fork-
+ * staging continues to fire for those paths regardless of the A1/A2
+ * choice. P2P-arriving blocks under flag=1 are the bypass surface.
+ * Until the A1/A2 decision lands, do not retire ibd_coordinator or
+ * change the --usenewpeerman default. Retirement of this file clusters with
  * `ibd_coordinator` retirement at Phase 9+ (post `--usenewpeerman`
  * default flip + burn-in window per consensus_activation_policy.md).
  * See `.claude/contracts/port_phase_7_implementation_plan.md` v0.3 for
