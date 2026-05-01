@@ -85,7 +85,7 @@ Once synced, the node will register your miner identity (MIK). You'll see:
 [Mining] First-time setup: Registering miner identity...
 [Mining] This is a one-time process. Mining starts automatically after.
 ```
-This is a one-time proof-of-work computation that can take 30 minutes or more. It only happens on your very first run — don't close the terminal! Once complete, mining starts automatically:
+This is a one-time proof-of-work computation that takes around 25-30 minutes on consumer hardware. It only happens on your very first run — don't close the terminal! Once complete, mining starts automatically:
 ```
 [Mining] Miner identity registered successfully!
 Mining block at height 35001...
@@ -146,7 +146,7 @@ Or `./setup-and-start.sh` for the setup wizard.
 
 DilV syncs faster than DIL — usually just a few minutes.
 
-Once synced, the node will register your miner identity (MIK) — a one-time process that can take 30 minutes or more. Don't close the terminal! Mining starts automatically after:
+Once synced, the node will register your miner identity (MIK) — a one-time process that takes around 25-30 minutes on consumer hardware. Don't close the terminal! Mining starts automatically after:
 ```
 [Mining] Miner identity registered successfully!
 VDF mining started...
@@ -168,7 +168,7 @@ cp ~/.dilv/wallet.dat ~/Desktop/wallet-dilv-backup.dat
 
 - **Block time:** ~45 seconds (network average)
 - **Block reward:** 98 DilV per block you find (100 DilV base reward minus 2% mining tax)
-- **CPU usage:** Moderate — VDF uses one CPU core, computing each proof takes 4-11 seconds
+- **CPU usage:** Moderate — VDF uses one CPU core, computing each proof takes 4-8 seconds
 - **Fair distribution:** A MacBook Air has the same odds as a Mac Studio
 
 ---

@@ -48,10 +48,10 @@ Go to **https://github.com/dilithion/dilithion/releases/latest**
 
 Download: `dilithion-vX.X.X-mainnet-linux-x64.tar.gz`
 
-Or from the command line:
+Or from the command line (replace `vX.X.X` with the current release version shown on the releases page):
 ```
 cd ~
-wget https://github.com/dilithion/dilithion/releases/latest/download/dilithion-v4.0.6-mainnet-linux-x64.tar.gz
+wget https://github.com/dilithion/dilithion/releases/download/vX.X.X/dilithion-vX.X.X-mainnet-linux-x64.tar.gz
 ```
 
 ### Step 2: Extract
@@ -86,7 +86,7 @@ Once synced, the node will register your miner identity (MIK). You'll see:
 [Mining] First-time setup: Registering miner identity...
 [Mining] This is a one-time process. Mining starts automatically after.
 ```
-This is a one-time proof-of-work computation that can take 30 minutes or more. It only happens on your very first run — don't close the terminal! Once complete, mining starts automatically:
+This is a one-time proof-of-work computation that takes around 25-30 minutes on consumer hardware. It only happens on your very first run — don't close the terminal! Once complete, mining starts automatically:
 ```
 [Mining] Miner identity registered successfully!
 Mining block at height 35001...
@@ -124,10 +124,10 @@ Go to **https://github.com/dilithion/dilithion/releases/latest**
 
 Download: `dilv-vX.X.X-mainnet-linux-x64.tar.gz` (separate download from DIL)
 
-Or from the command line:
+Or from the command line (replace `vX.X.X` with the current release version shown on the releases page):
 ```
 cd ~
-wget https://github.com/dilithion/dilithion/releases/latest/download/dilv-v4.0.6-mainnet-linux-x64.tar.gz
+wget https://github.com/dilithion/dilithion/releases/download/vX.X.X/dilv-vX.X.X-mainnet-linux-x64.tar.gz
 ```
 
 ### Step 2: Extract
@@ -150,7 +150,7 @@ Or `./setup-and-start.sh` for the setup wizard.
 
 DilV syncs faster than DIL — usually just a few minutes.
 
-Once synced, the node will register your miner identity (MIK) — a one-time process that can take 30 minutes or more. Don't close the terminal! Mining starts automatically after:
+Once synced, the node will register your miner identity (MIK) — a one-time process that takes around 25-30 minutes on consumer hardware. Don't close the terminal! Mining starts automatically after:
 ```
 [Mining] Miner identity registered successfully!
 VDF mining started...
@@ -172,7 +172,7 @@ cp ~/.dilv/wallet.dat ~/wallet-dilv-backup.dat
 
 - **Block time:** ~45 seconds (network average)
 - **Block reward:** 98 DilV per block you find (100 DilV base reward minus 2% mining tax)
-- **CPU usage:** Moderate — VDF uses one CPU core, computing each proof takes 4-11 seconds
+- **CPU usage:** Moderate — VDF uses one CPU core, computing each proof takes 4-8 seconds
 - **Fair distribution:** A Raspberry Pi has the same odds as a server
 
 ---
@@ -240,7 +240,7 @@ After=network-online.target
 [Service]
 Type=simple
 User=YOUR_USERNAME
-ExecStart=/home/YOUR_USERNAME/dilithion-v4.0.6/dilithion-node --mine --threads=4
+ExecStart=/home/YOUR_USERNAME/dilithion/dilithion-node --mine --threads=4
 Restart=on-failure
 RestartSec=10
 
@@ -249,7 +249,7 @@ WantedBy=multi-user.target
 EOF
 ```
 
-Replace `YOUR_USERNAME` and the path, then:
+Replace `YOUR_USERNAME` and the `ExecStart` path with the actual path to where you extracted the release, then:
 ```
 sudo systemctl daemon-reload
 sudo systemctl enable dilithion
