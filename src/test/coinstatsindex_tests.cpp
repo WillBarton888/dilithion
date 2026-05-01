@@ -769,9 +769,14 @@ BOOST_AUTO_TEST_CASE(c7_wipe_on_mismatch_resets_to_minus_one) {
 }
 
 // ===========================================================================
-// Live-callback gated until IsSynced (E.1 mirror).
+// Contiguity guard rejects non-contiguous WriteBlock against m_last_height=-1.
+// (M4 fix: was previously named live_callback_gated_until_synced and
+// claimed to test the IsSynced gate, but the actual lambda gate lives in
+// dilithion-node.cpp; this case exercises the in-class contiguity guard
+// instead, which is the real defense if a stray callback ever bypasses
+// the lambda gate.)
 // ===========================================================================
-BOOST_AUTO_TEST_CASE(live_callback_gated_until_synced) {
+BOOST_AUTO_TEST_CASE(writeblock_rejects_non_contiguous_height_when_unsynced) {
     TempDbScope scope_idx("e1idx");
     TempDbScope scope_chain("e1chain");
     TempDbScope scope_utxo("e1utxo");
@@ -788,18 +793,19 @@ BOOST_AUTO_TEST_CASE(live_callback_gated_until_synced) {
     CCoinStatsIndex idx;
     BOOST_REQUIRE(idx.Init(scope_idx.path(), &chain_db, &utxo_set));
     BOOST_REQUIRE_EQUAL(idx.IsSynced(), false);
+    BOOST_REQUIRE_EQUAL(idx.LastIndexedHeight(), -1);
 
-    // Simulate the live callback gate at the test boundary -- IsSynced is
-    // false, so the lambda body would NOT call WriteBlock. We assert that
-    // calling WriteBlock here directly is a contract violation (non-
-    // contiguous height since the index is at -1) and would be skipped by
-    // the gate.
-    if (idx.IsSynced()) {
-        BOOST_REQUIRE(idx.WriteBlock(fix.per_height_block[2], 2, fix.per_height_hash[2]));
-    }
+    // WriteBlock at height=2 against last_height=-1: the contiguity guard
+    // (height != last+1) must reject the write. This is the real defense
+    // if a stray callback ever fired before reindex completed.
+    BOOST_CHECK(!idx.WriteBlock(fix.per_height_block[2], 2, fix.per_height_hash[2]));
     BOOST_CHECK_EQUAL(idx.LastIndexedHeight(), -1);
 
-    // Now run reindex.
+    // TODO: the actual lambda-level IsSynced gate lives in
+    // src/node/dilithion-node.cpp; an integration test exercising that
+    // gate end-to-end belongs in coinstatsindex_integration_tests.cpp.
+
+    // Now run reindex; reindex is permitted and will fill 0..kN-1 in order.
     idx.StartBackgroundSync();
     BOOST_REQUIRE(WaitForSync(idx, std::chrono::seconds(5)));
     BOOST_REQUIRE(idx.IsSynced());
