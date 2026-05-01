@@ -252,7 +252,11 @@ Hard failure (operator action REQUIRED):
 ```json
 {
   "txindex": { "synced": true, "best_block_height": 12345 },
-  "coinstatsindex": { "synced": true, "best_block_height": 12345 }
+  "coinstatsindex": {
+    "synced": true,
+    "best_block_height": 12345,
+    "corrupted": false
+  }
 }
 ```
 
@@ -262,6 +266,12 @@ A node started without any index flag returns `{}`.
 `best_block_height = -1` is a valid response: the index has been opened
 but no rows written yet (cold-start window after `-coinstatsindex=1
 -reindex` startup, before SyncLoop emits its first row).
+
+`corrupted: true` means the sticky `m_corrupted` flag is set -- an
+EraseBlock leveldb-write failure or a parent-mismatch detected during
+reindex. The index will refuse further writes until cleared by `WipeIndex`
+(C7 path) or process restart with `-reindex`. Operators should treat this
+as an actionable alert.
 
 ## Recovery / disaster runbook
 

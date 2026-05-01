@@ -5522,14 +5522,21 @@ std::string CRPCServer::RPC_GetIndexInfo(const std::string& params) {
         first = false;
     }
     // PR-BA-2: register coinstatsindex alongside txindex when enabled.
-    // Same shape as txindex: {synced, best_block_height}. Omitted when
-    // not enabled at runtime; -1 best_block_height means the index has
-    // been opened but no rows written yet (cold-start window).
+    // Shape: {synced, best_block_height, corrupted}. The `corrupted` field
+    // (M2 fix) exposes the sticky m_corrupted flag so operators / monitoring
+    // can detect EraseBlock leveldb-write failures and parent-mismatch
+    // bails (H3) without having to scrape logs. A value of `true` means
+    // "restart with --reindex" -- the index will not write further rows
+    // until WipeIndex clears the flag.
+    //
+    // Omitted when not enabled at runtime; -1 best_block_height means the
+    // index has been opened but no rows written yet (cold-start window).
     if (g_coin_stats_index) {
         if (!first) oss << ",";
         oss << "\"coinstatsindex\":{"
             << "\"synced\":" << (g_coin_stats_index->IsSynced() ? "true" : "false") << ","
-            << "\"best_block_height\":" << g_coin_stats_index->LastIndexedHeight()
+            << "\"best_block_height\":" << g_coin_stats_index->LastIndexedHeight() << ","
+            << "\"corrupted\":" << (g_coin_stats_index->IsCorrupted() ? "true" : "false")
             << "}";
         first = false;
     }

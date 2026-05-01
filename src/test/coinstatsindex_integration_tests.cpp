@@ -244,19 +244,20 @@ BOOST_AUTO_TEST_CASE(getindexinfo_schema_lock_in_coinstats) {
     g_coin_stats_index = std::make_unique<CCoinStatsIndex>();
     BOOST_REQUIRE(g_coin_stats_index->Init(scope_cs.path(), &chain_db, &utxo_set));
 
-    // (b) Cold-start.
+    // (b) Cold-start. Schema includes the M2 `corrupted` field.
     BOOST_CHECK(!g_coin_stats_index->IsSynced());
     BOOST_CHECK_EQUAL(g_coin_stats_index->LastIndexedHeight(), -1);
+    BOOST_CHECK(!g_coin_stats_index->IsCorrupted());
     BOOST_CHECK_EQUAL(
         CRPCServer::RPC_GetIndexInfo(""),
-        std::string("{\"coinstatsindex\":{\"synced\":false,\"best_block_height\":-1}}"));
+        std::string("{\"coinstatsindex\":{\"synced\":false,\"best_block_height\":-1,\"corrupted\":false}}"));
 
     // (c) Synced.
     g_coin_stats_index->StartBackgroundSync();
     BOOST_REQUIRE(WaitForSync(*g_coin_stats_index, std::chrono::seconds(5)));
     BOOST_CHECK_EQUAL(
         CRPCServer::RPC_GetIndexInfo(""),
-        std::string("{\"coinstatsindex\":{\"synced\":true,\"best_block_height\":2}}"));
+        std::string("{\"coinstatsindex\":{\"synced\":true,\"best_block_height\":2,\"corrupted\":false}}"));
 
     // (d) Add txindex too. Must be listed BEFORE coinstatsindex per the
     // handler's ordering (txindex first, coinstatsindex second).
@@ -276,7 +277,7 @@ BOOST_AUTO_TEST_CASE(getindexinfo_schema_lock_in_coinstats) {
     BOOST_CHECK_EQUAL(
         CRPCServer::RPC_GetIndexInfo(""),
         std::string("{\"txindex\":{\"synced\":true,\"best_block_height\":2},"
-                    "\"coinstatsindex\":{\"synced\":true,\"best_block_height\":2}}"));
+                    "\"coinstatsindex\":{\"synced\":true,\"best_block_height\":2,\"corrupted\":false}}"));
 
     // Teardown.
     g_tx_index->Stop();
