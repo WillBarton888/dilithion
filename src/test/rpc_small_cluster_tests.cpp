@@ -34,10 +34,13 @@
 #include <primitives/block.h>
 #include <primitives/transaction.h>
 
+#include <atomic>
 #include <chrono>
 #include <cstring>
 #include <filesystem>
+#include <iomanip>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <system_error>
 #include <thread>
@@ -164,6 +167,24 @@ struct ClusterChainFixture {
     std::vector<std::vector<CTransactionRef>>        per_height_txs;
     std::vector<CBlock>                              per_height_block;
 
+    // PR #38 red-team C6: save/restore g_chainParams. The fixture mutates
+    // a process-wide global; per project convention (see
+    // src/test/timestamp_tests.cpp, src/test/chain_selector_tests.cpp:698)
+    // tests that touch g_chainParams should save the prior pointer and
+    // restore on teardown. Otherwise a later test that depends on a
+    // different g_chainParams gets state pollution from this fixture.
+    Dilithion::ChainParams* m_prev_chain_params = nullptr;
+
+    ~ClusterChainFixture() {
+        // Restore prior g_chainParams. The static cluster_test_params
+        // we set lives binary-long, so restoring just decouples our
+        // fixture from later tests' expected pointer.
+        Dilithion::g_chainParams = m_prev_chain_params;
+        // Belt-and-suspenders: make sure our SetTipForTest doesn't leak
+        // either.
+        g_chainstate.Cleanup();
+    }
+
     void Build(int n_blocks, CBlockchainDB& chain_db) {
         per_height_hash.clear();
         per_height_txs.clear();
@@ -173,6 +194,10 @@ struct ClusterChainFixture {
         per_height_block.reserve(n_blocks);
 
         g_chainstate.Cleanup();
+
+        // PR #38 red-team C6: capture prior g_chainParams BEFORE we
+        // potentially overwrite it.
+        m_prev_chain_params = Dilithion::g_chainParams;
 
         // Ensure chain params are initialized before any subsidy/difficulty
         // computation. CalculateBlockSubsidy reads halvingInterval from
@@ -528,6 +553,119 @@ BOOST_AUTO_TEST_CASE(verifytxoutproof_corrupted_hex_rejected) {
     BOOST_CHECK_THROW(
         CRPCServer::RPC_VerifyTxOutProof("{}"),
         std::runtime_error);
+}
+
+// ---- PR #38 red-team C8: missing test cases the first round didn't cover.
+
+// C8(a): concurrent waiters parked on the cluster CV are ALL woken by a
+// single NotifyBlockTipChanged(). The notify_all() semantics in the code
+// are correct but the prior suite only had one waiter at a time -- a
+// regression that swapped notify_all for notify_one would silently slip
+// past the existing tests.
+BOOST_AUTO_TEST_CASE(waitforblockheight_notify_wakes_multiple_waiters) {
+    TempDbScope scope_chain("multi_waiter_chain");
+    CBlockchainDB chain_db;
+    BOOST_REQUIRE(chain_db.Open(scope_chain.path(), true));
+    ClusterChainFixture fix;
+    fix.Build(2, chain_db);  // tip at height 1
+
+    // Spawn 3 waiters on the same height target.
+    std::atomic<int> woke_count{0};
+    auto waiter = [&]() {
+        std::string result = CRPCServer::RPC_WaitForBlockHeight(
+            "{\"height\":2,\"timeout_ms\":5000}");
+        std::string h_str;
+        if (ExtractScalar(result, "height", h_str) && h_str == "2") {
+            ++woke_count;
+        }
+    };
+    std::thread w1(waiter);
+    std::thread w2(waiter);
+    std::thread w3(waiter);
+
+    // Wait briefly for all 3 to park on the CV.
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
+    // Advance the chain (mirrors what waitforblockheight_wakes_on_notify
+    // does for one waiter, but here we have three).
+    uint256 block_hash = SyntheticBlockHash(0xF2);
+    auto cb  = MakeCoinbaseTx(CBlockValidator::CalculateBlockSubsidy(0), 0xCA);
+    CBlock block = MakeBlock({cb});
+    block.nTime = 1700000999;
+    block.hashPrevBlock = fix.per_height_hash.back();
+    chain_db.WriteBlock(block_hash, block);
+    {
+        CBlockIndex idx_persist;
+        idx_persist.nHeight = 2;
+        idx_persist.phashBlock = block_hash;
+        idx_persist.nTime = block.nTime;
+        idx_persist.nVersion = block.nVersion;
+        idx_persist.header.hashMerkleRoot = block.hashMerkleRoot;
+        idx_persist.header.hashPrevBlock = block.hashPrevBlock;
+        idx_persist.nBits = block.nBits;
+        idx_persist.nNonce = block.nNonce;
+        idx_persist.nStatus = CBlockIndex::BLOCK_VALID_HEADER |
+                              CBlockIndex::BLOCK_HAVE_DATA;
+        chain_db.WriteBlockIndex(block_hash, idx_persist);
+    }
+    auto pidx = std::make_unique<CBlockIndex>();
+    pidx->nHeight = 2;
+    pidx->phashBlock = block_hash;
+    pidx->pprev = g_chainstate.GetTip();
+    pidx->nTime = block.nTime;
+    pidx->nStatus = CBlockIndex::BLOCK_VALID_HEADER |
+                    CBlockIndex::BLOCK_HAVE_DATA;
+    CBlockIndex* raw = pidx.get();
+    g_chainstate.AddBlockIndex(block_hash, std::move(pidx));
+    if (auto* prev = g_chainstate.GetTip()) prev->pnext = raw;
+    g_chainstate.SetTipForTest(raw);
+
+    // Single notify_all() should wake all three waiters. notify_one()
+    // would only wake one and the other two would time out.
+    CRPCServer::NotifyBlockTipChanged();
+
+    w1.join();
+    w2.join();
+    w3.join();
+
+    // All 3 must have woken with the correct height. notify_one would
+    // produce woke_count == 1.
+    BOOST_CHECK_EQUAL(woke_count.load(), 3);
+}
+
+// C8(b): verifytxoutproof must reject nTransactions = 0xFFFFFFFF without
+// hanging the worker thread. Pre-fix: MerkleTreeHeight's `1u << height`
+// is UB at height >= 32; on x86_64 the shift count is masked to 5 bits
+// so `1u << 32` = 1 and the loop never terminates (authenticated DoS).
+// Post-fix: handler caps nTransactions at kVerifyTxOutProofMaxTxs and
+// MerkleTreeHeight has a 32-iteration upper bound as defense in depth.
+BOOST_AUTO_TEST_CASE(verifytxoutproof_oversize_ntxs_rejected) {
+    // Build a 41-byte proof prefix: 32-byte block hash + 4-byte
+    // nTransactions = 0xFFFFFFFF + 1-byte CompactSize nHashes = 0.
+    std::vector<uint8_t> bytes;
+    for (int i = 0; i < 32; ++i) bytes.push_back(0x42);  // block hash
+    bytes.push_back(0xFF); bytes.push_back(0xFF);
+    bytes.push_back(0xFF); bytes.push_back(0xFF);  // nTransactions
+    bytes.push_back(0x00);  // nHashes = 0
+    bytes.push_back(0x00);  // nFlagBytes = 0
+
+    std::ostringstream hex;
+    for (uint8_t b : bytes) {
+        hex << std::hex << std::setw(2) << std::setfill('0')
+            << static_cast<int>(b);
+    }
+    std::string params = "{\"proof\":\"" + hex.str() + "\"}";
+
+    // Must throw quickly (no infinite loop, no OOM crash). The exact
+    // error message is implementation detail; we only assert the
+    // call returns within a reasonable time.
+    auto t0 = std::chrono::steady_clock::now();
+    BOOST_CHECK_THROW(CRPCServer::RPC_VerifyTxOutProof(params),
+                      std::runtime_error);
+    auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - t0).count();
+    // Pre-fix this would never return. Post-fix the cap rejects in <100ms.
+    BOOST_CHECK_LT(elapsed, 5000);
 }
 
 BOOST_AUTO_TEST_SUITE_END()

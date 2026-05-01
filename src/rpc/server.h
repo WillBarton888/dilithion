@@ -670,6 +670,14 @@ public:
     // outer try/catch loop.
     static void NotifyBlockTipChanged();
 
+    // PR #38 red-team C5: called from Stop() to release any worker thread
+    // parked in a wait-* RPC. Sets a shutdown flag and notify_all()s the
+    // cluster CV; the wait predicates check the flag and return the
+    // current tip immediately (timeout-equivalent fast path). Without
+    // this, Ctrl+C would hang the node up to 5 minutes per outstanding
+    // wait-* call.
+    static void NotifyClusterShutdown();
+
     // Default and maximum wait-* timeouts in milliseconds. Exposed for tests.
     static constexpr int kDefaultWaitTimeoutMs = 30000;   // 30 seconds
     static constexpr int kMaxWaitTimeoutMs     = 300000;  // 5 minutes

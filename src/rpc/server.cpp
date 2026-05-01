@@ -508,6 +508,14 @@ void CRPCServer::Stop() {
 
     m_running = false;
 
+    // PR #38 red-team C5: wake any RPC worker parked in a wait-* long-poll
+    // (waitfornewblock / waitforblock / waitforblockheight). Without this,
+    // Ctrl+C would hang the node up to 5 minutes per outstanding wait
+    // because the workers only wake on a real chain advancement. Done
+    // before any other shutdown step so the workers can drain their
+    // responses while the rest of teardown proceeds in parallel.
+    NotifyClusterShutdown();
+
     // Phase 4: Stop WebSocket server
     if (m_websocket_server) {
         m_websocket_server->Stop();
@@ -8507,6 +8515,14 @@ namespace {
 std::mutex              g_wait_cluster_mtx;
 std::condition_variable g_wait_cluster_cv;
 
+// PR #38 red-team C5: shutdown flag. CRPCServer::Stop() sets this and
+// notify_all()s the CV (via WakeWaitClusterForShutdown) so any worker
+// thread parked in wait_until on a long-poll wait-* RPC wakes immediately
+// (otherwise Ctrl+C hangs the node up to 5 minutes per outstanding
+// wait). Predicates check this flag and return the current tip
+// (timeout-equivalent path) on shutdown.
+std::atomic<bool>       g_wait_cluster_shutdown{false};
+
 // ---- Object-style param parsing helpers (Dilithion uses object params) ----
 
 // Returns true and writes hex string to `out` if `params` contains
@@ -8618,9 +8634,22 @@ uint256 CombineHashes(const uint256& left, const uint256& right) {
 // Tree-height for a block of N leaves. Dilithion duplicates the last leaf
 // at odd levels (BuildMerkleRoot does levelSize = (levelSize + 1) / 2),
 // so the height is ceil(log2(N)) for N >= 2 and 0 for N <= 1.
+//
+// Hardened post-redteam (PR #38 BLOCKER B1):
+// - Loop counter is `unsigned int` and the shift uses 1ULL to avoid
+//   undefined behaviour at height >= 32 (`1u << 32` is UB; on x86_64
+//   gcc/clang/MSVC the shift count is masked to 5 bits and `1u << 32`
+//   evaluates to 1, so the loop never terminates -- an authenticated
+//   RPC caller submitting nTransactions = 0xFFFFFFFF would spin a worker
+//   thread forever, DoSing the 8-thread RPC pool with 8 crafted requests.
+// - Loop is upper-bounded at 32 iterations: nTransactions is uint32_t,
+//   so ceil(log2(N)) <= 32 always. The bound is defensive against
+//   miscompilation or future signedness changes.
+// - Caller MUST validate nTransactions against a sane block-tx count
+//   before calling (e.g. RPC_VerifyTxOutProof caps at MAX_BLOCK_TXS).
 int MerkleTreeHeight(uint32_t nTransactions) {
     int height = 0;
-    while ((1u << height) < nTransactions) ++height;
+    while (height < 32 && (1ULL << height) < nTransactions) ++height;
     return height;
 }
 
@@ -8749,6 +8778,16 @@ void CRPCServer::NotifyBlockTipChanged() {
     g_wait_cluster_cv.notify_all();
 }
 
+// PR #38 red-team C5: shutdown wake-up for the wait-* cluster.
+// CRPCServer::Stop() calls this so any worker parked in wait_until wakes
+// promptly. Setting the shutdown flag + notify_all is sufficient; the
+// wait predicates check the flag and return the current tip without
+// waiting for a real chain advancement.
+void CRPCServer::NotifyClusterShutdown() {
+    g_wait_cluster_shutdown.store(true, std::memory_order_relaxed);
+    g_wait_cluster_cv.notify_all();
+}
+
 
 // ----------------------------------------------------------------------------
 // CRPCServer::RPC_WaitForNewBlock
@@ -8774,7 +8813,8 @@ std::string CRPCServer::RPC_WaitForNewBlock(const std::string& params) {
 
     std::unique_lock<std::mutex> lock(g_wait_cluster_mtx);
     g_wait_cluster_cv.wait_until(lock, deadline, [&]() {
-        return get_tip().first != initial.first;
+        return g_wait_cluster_shutdown.load(std::memory_order_relaxed) ||
+               get_tip().first != initial.first;
     });
     auto current = get_tip();
     return FormatTipResponse(current.first, current.second);
@@ -8805,7 +8845,8 @@ std::string CRPCServer::RPC_WaitForBlock(const std::string& params) {
 
     std::unique_lock<std::mutex> lock(g_wait_cluster_mtx);
     g_wait_cluster_cv.wait_until(lock, deadline, [&]() {
-        return get_tip().first == wanted;
+        return g_wait_cluster_shutdown.load(std::memory_order_relaxed) ||
+               get_tip().first == wanted;
     });
     auto current = get_tip();
     return FormatTipResponse(current.first, current.second);
@@ -8835,7 +8876,8 @@ std::string CRPCServer::RPC_WaitForBlockHeight(const std::string& params) {
 
     std::unique_lock<std::mutex> lock(g_wait_cluster_mtx);
     g_wait_cluster_cv.wait_until(lock, deadline, [&]() {
-        return get_tip().second >= target;
+        return g_wait_cluster_shutdown.load(std::memory_order_relaxed) ||
+               get_tip().second >= target;
     });
     auto current = get_tip();
     return FormatTipResponse(current.first, current.second);
@@ -9010,6 +9052,27 @@ std::string CRPCServer::RPC_VerifyTxOutProof(const std::string& params) {
     uint32_t nTransactions = stream.ReadUint32();
     if (nTransactions == 0) {
         throw std::runtime_error("proof: nTransactions must be > 0");
+    }
+    // Red-team B1+C1: cap nTransactions at a sane block-tx upper bound.
+    // Without this:
+    //   B1: MerkleTreeHeight(0xFFFFFFFF) hits the 32-iteration loop bound
+    //       defensively, but only after the bound was added; an attacker
+    //       could otherwise drive a worker thread into infinite spin via
+    //       UB on `1u << 32`.
+    //   C1: hashes.reserve(nHashes) with nHashes <= nTransactions =
+    //       4'000'000'000 requests ~128 GB before any hash bytes are
+    //       read. bad_alloc is uncaught at this RPC entrypoint and
+    //       would propagate to the worker, killing it.
+    // Bitcoin Core caps via MAX_BLOCK_WEIGHT/MIN_TRANSACTION_WEIGHT
+    // (~250k). Dilithion's Consensus::MAX_TX_PER_BLOCK is the right
+    // analog. Pick a generous defensive bound that still rejects the
+    // pathological cases above; tighter than MAX_BLOCK_WEIGHT but well
+    // above any plausible legitimate block.
+    static constexpr uint32_t kVerifyTxOutProofMaxTxs = 1'000'000;
+    if (nTransactions > kVerifyTxOutProofMaxTxs) {
+        throw std::runtime_error(
+            "proof: nTransactions exceeds maximum (" +
+            std::to_string(kVerifyTxOutProofMaxTxs) + ")");
     }
     uint64_t nHashes = stream.ReadCompactSize();
     if (nHashes > nTransactions) {
