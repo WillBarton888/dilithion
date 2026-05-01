@@ -198,10 +198,32 @@ public:
      * Foundational accessor for block-analytics consumers (per-block fee
      * aggregation, coinstatsindex). PR-BA-1 in the block-analytics bundle.
      *
+     * Behaviour notes for downstream consumers (PR-BA-2 / PR-BA-3):
+     *
+     *   - **Reorged-out blocks return false.** UndoBlock deletes the entry
+     *     after applying the rollback. A successful write followed by a
+     *     reorg produces "missing-block" on this reader. Consumers querying
+     *     historical blocks should ensure the block is on the active chain
+     *     before invoking; otherwise a false-negative window exists during
+     *     reorg processing.
+     *   - **Memory bounds.** Allocates O(spentCount) records; with the
+     *     writer's current block-size cap (`maxBlockSize` in chainparams)
+     *     this is bounded by ~maxBlockSize / kMinRecordBytes records and
+     *     ~maxBlockSize bytes of script payload. Consumers should not call
+     *     this in unbounded loops over arbitrary blockhashes; rate-limit at
+     *     the caller (e.g. RPC handler) if invoked from operator input.
+     *   - **No schema version byte.** The on-disk format is the writer's
+     *     existing layout (see node/undo_data.h). Any future writer-side
+     *     schema change must be coordinated with all readers in the same
+     *     commit (currently `UndoBlock` and `ReadUndoBlock`); a content-
+     *     compatible-shape change without a version byte will be silently
+     *     misparsed by stale readers.
+     *
      * @param blockHash The block hash whose undo data to read
      * @param undo_out  Filled with the parsed block undo on success
-     * @return true on success; false if the entry is missing, truncated, or
-     *         the SHA3-256 footer fails to verify.
+     * @return true on success; false if the entry is missing (never
+     *         written or reorged out), truncated, or the SHA3-256 footer
+     *         fails to verify.
      */
     bool ReadUndoBlock(const uint256& blockHash, CBlockUndo& undo_out) const;
 
