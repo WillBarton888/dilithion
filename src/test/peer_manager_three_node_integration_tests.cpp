@@ -363,9 +363,12 @@ void test_multithreaded_three_node_lifecycle_churn()
         }
     };
 
-    std::thread w0(churn, 0,   0);
-    std::thread w1(churn, 1, 100);
-    std::thread w2(churn, 2, 200);
+    // Peer-id ranges chosen disjoint from cross-fixture peer ids
+    // {0, 1, 2} so churn does not disconnect the harness-registered
+    // cross-fixture peers.
+    std::thread w0(churn, 0, 500);
+    std::thread w1(churn, 1, 600);
+    std::thread w2(churn, 2, 700);
     w0.join();
     w1.join();
     w2.join();
