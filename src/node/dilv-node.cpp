@@ -7464,6 +7464,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // PR-EF-2: Save fee estimator state. Runs AFTER mempool dump --
         // mirrors Bitcoin Core init.cpp Shutdown ordering. See
         // dilithion-node.cpp shutdown for full rationale.
+        //
+        // PR-EF-2 fixup F#1: stop the mempool expiration thread BEFORE we
+        // touch the estimator -- otherwise the snapshot-and-call pattern
+        // in CleanupExpiredTransactions can use-after-free as the stack
+        // unwinds (LIFO destruction: estimator dies before the mempool's
+        // destructor joins its expiration thread).
+        mempool.StopExpirationThread();
         if (config.feeestimates && fee_estimator_owner) {
             const auto dump_result = policy::fee_persist::DumpFeeEstimates(
                 *fee_estimator_owner, std::filesystem::path(config.datadir));
@@ -7478,6 +7485,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                           << std::endl;
             }
             g_fee_estimator = nullptr;
+            fee_estimator_owner.reset();  // F#1: force destruction now
         }
 
         // Remove UPnP port mapping on shutdown

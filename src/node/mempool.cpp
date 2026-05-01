@@ -152,7 +152,26 @@ CTxMemPool::CTxMemPool()
 
 CTxMemPool::~CTxMemPool() {
     // MEMPOOL-007 FIX: Stop background expiration thread gracefully
-    stop_expiration_thread = true;
+    // PR-EF-2 fixup F#1: delegate to StopExpirationThread so the destructor
+    // and the explicit shutdown call follow the same code path. Idempotent:
+    // if StopExpirationThread was already invoked from main()'s shutdown
+    // body, this is a cheap no-op.
+    StopExpirationThread();
+}
+
+void CTxMemPool::StopExpirationThread() {
+    // PR-EF-2 fixup F#1: idempotent. stop_expiration_thread is std::atomic;
+    // exchange returns the previous value so we only signal/join once.
+    bool was_running = stop_expiration_thread.exchange(true);
+    if (was_running) {
+        // Already stopped (e.g. dtor running after main() called this).
+        // Still ensure the thread is joined if somehow not yet -- joinable()
+        // is false after a successful join, so this is also a no-op then.
+        if (expiration_thread.joinable()) {
+            expiration_thread.join();
+        }
+        return;
+    }
     expiration_cv.notify_all();
     if (expiration_thread.joinable()) {
         expiration_thread.join();

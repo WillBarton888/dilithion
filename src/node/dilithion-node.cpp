@@ -7850,9 +7850,32 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // estimator's tracked-tx set is a superset of (or equal to) the
         // mempool's at the moment of the dump.
         //
+        // PR-EF-2 fixup F#1: stack destruction order is LIFO of construction.
+        // mempool was constructed BEFORE fee_estimator_owner, so on plain
+        // unwind the estimator destructs FIRST. CTxMemPool's expiration
+        // thread (CleanupExpiredTransactions) snapshots g_fee_estimator
+        // and dereferences it; without the stop-then-free sequence below,
+        // the thread can use-after-free between its g_fee_estimator
+        // snapshot and our null-set. We therefore:
+        //
+        //   (1) Stop the mempool expiration thread (joins it) BEFORE
+        //       touching the estimator. After this returns, no further
+        //       est->removeTx(...) call can originate from the expiration
+        //       thread.
+        //   (2) Dump fee estimates (estimator still alive, expiration
+        //       thread joined: no concurrent mutators).
+        //   (3) Null g_fee_estimator (any other late callsite sees null).
+        //   (4) Explicitly reset() fee_estimator_owner so the destructor
+        //       runs INSIDE this shutdown block, not on stack unwind --
+        //       removes any residual ordering ambiguity.
+        //
         // Best-effort: a dump failure is logged but never blocks shutdown.
         // Worst case the operator restarts with a fresh accumulation
         // window; estimates simply take ~25 blocks to come back.
+        //
+        // P2P + RPC are already stopped above. Stopping the expiration
+        // thread here closes the last live caller into the estimator.
+        mempool.StopExpirationThread();
         if (config.feeestimates && fee_estimator_owner) {
             const auto dump_result = policy::fee_persist::DumpFeeEstimates(
                 *fee_estimator_owner, std::filesystem::path(config.datadir));
@@ -7866,13 +7889,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                           << dump_result.tracked_tx_count << " tracked txs)"
                           << std::endl;
             }
-            // Clear the global handle BEFORE the unique_ptr destructs so
-            // any late mempool callbacks (in flight when shutdown began)
-            // see the null and skip. P2P + RPC are already stopped above
-            // so the only realistic source is the mempool expiration
-            // thread; CTxMemPool's destructor will join it before main
-            // returns. Defensive null-set keeps the contract clean.
             g_fee_estimator = nullptr;
+            fee_estimator_owner.reset();  // F#1: force destruction now
         }
 
         // Remove UPnP port mapping on shutdown

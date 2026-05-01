@@ -199,6 +199,17 @@ public:
      */
     uint64_t GetRebroadcastCount() const { return metric_rebroadcasts.load(); }
 
+    // PR-EF-2 fixup F#1: Explicit, idempotent shutdown of the background
+    // expiration thread. The destructor also stops it, but call sites that
+    // share lifetime with other globals (e.g. g_fee_estimator) MUST stop the
+    // expiration thread BEFORE freeing the estimator, otherwise the snapshot
+    // pattern in CleanupExpiredTransactions can use-after-free.
+    //
+    // Safe to call multiple times (idempotent: second call is a no-op).
+    // After this returns, no further calls into g_fee_estimator originate
+    // from the expiration thread.
+    void StopExpirationThread();
+
 private:
     // Phase 3.3: Rebroadcast tracking
     std::atomic<uint64_t> metric_rebroadcasts{0};
