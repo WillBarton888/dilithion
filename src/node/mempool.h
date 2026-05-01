@@ -104,7 +104,23 @@ private:
 
     // MEMPOOL-007 FIX: Expiration cleanup methods
     void ExpirationThreadFunc();
+public:
+    // PR-EF-2 fixup F#3: public so tests can drive it directly. Called
+    // from the background expiration thread and from tests that want to
+    // verify the estimator-notify path. Internally takes cs, then notifies
+    // g_fee_estimator OUTSIDE the lock (matches AddTx/RemoveTx/Replace
+    // discipline).
     void CleanupExpiredTransactions();
+private:
+
+    // PR-EF-2 fixup F#3: queue of txids evicted during the most recent
+    // EvictTransactions(...) call, populated under cs and drained by the
+    // public AddTx wrapper AFTER the lock is released. Keeps the
+    // estimator-notify call out-of-lock, matching the AddTx / RemoveTx /
+    // ReplaceTransaction discipline. Implementation detail: lives on the
+    // CTxMemPool instance (not a thread-local) because cs serialises
+    // EvictTransactions calls.
+    std::vector<uint256> m_pending_estimator_evictions;
 
     // CID 1675260/1675290/1675250 FIX: Internal unlocked versions to prevent deadlock
     // These MUST only be called while holding cs lock
