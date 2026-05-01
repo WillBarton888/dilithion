@@ -2,11 +2,14 @@
 
 This document describes Dilithion's `CCoinStatsIndex` subsystem: an opt-in,
 separately-stored leveldb index that tracks per-block UTXO-set statistics
-(hash, count, total amount, per-block additions/removals/totals, coinbase
-subsidy + fees). It is a port of Bitcoin Core v28.0's `CoinStatsIndex`
-adapted to Dilithion's storage layout and idioms, with **SHA-3 substituted
-for SHA-256** in the UTXO-set hash to honour the project-wide post-quantum
-hash convention.
+(chain-path commitment, count, total amount, per-block additions/removals/
+totals, coinbase subsidy + fees). It is a port of Bitcoin Core v28.0's
+`CoinStatsIndex` adapted to Dilithion's storage layout and idioms.
+
+> **IMPORTANT:** `hashChainCommitment` (this PR) is **NOT** equivalent to
+> BC v28.0's `hash_serialized`. BC's value is a STATE hash; ours is a
+> CHAIN-PATH commitment. See [`hashChainCommitment` vs `hash_serialized`](#hashchaincommitment-vs-bcs-hash_serialized)
+> below before using the field for any consumer-side check.
 
 The index is **default OFF**. Operators who do not set `-coinstatsindex=1`
 see zero behavioural change versus pre-port; the `gettxoutsetinfo` RPC
@@ -43,8 +46,9 @@ of any other state.
   scan returns blocks in height-ascending order without sorting.
 * Value: 89 bytes laid out as:
   * byte 0: schema version (`0x01`).
-  * bytes 1..32: `hashSerialized` -- raw SHA3-256 fold of the after-block
-    UTXO state.
+  * bytes 1..32: `hashChainCommitment` -- raw SHA3-256 chain-path
+    commitment (fold of `parent_chain_commitment || delta_record`). NOT a
+    UTXO-set state hash; see caveat section below.
   * bytes 33..40: `coinsCount` (`uint64_t` LE).
   * bytes 41..48: `totalAmount` (`uint64_t` LE; sum of UTXO output values).
   * bytes 49..56: `blockAdditions` (`uint64_t` LE).
@@ -69,16 +73,51 @@ of any other state.
 The version byte lets a future migration detect schema rev 2 cheaply
 without rewriting every record on first read.
 
-## SHA-3 substitution -- divergence from BC
+## `hashChainCommitment` vs BC's `hash_serialized`
 
-Bitcoin Core's `hash_serialized` UTXO-set hash is SHA-256-based. Dilithion
-substitutes **SHA-3** (FIPS 202, 256-bit output) per the project-wide
-post-quantum hash convention. The substitution is module-local and
-documented in both `src/kernel/coinstats.h` and `src/index/coinstatsindex.h`.
+This is a load-bearing distinction. The two values look superficially
+similar (both 32-byte hashes that "summarise UTXO-set state at height H")
+but they implement DIFFERENT INVARIANTS and are NOT interchangeable.
 
-**Operators MUST NOT compare hashSerialized values across BC and Dilithion.**
-A future cross-chain audit tool will need to compute the BC variant
-separately or accept that the hashes are not interoperable.
+### What `hashChainCommitment` (this PR) actually is
+
+* A **chain-path commitment**: `running_hash := SHA3-256(running_hash ||
+  delta_record)`, folded one delta at a time across each block.
+* Path-dependent: two chains that converge on the same final UTXO set via
+  different orderings produce DIFFERENT `hashChainCommitment` values.
+* Intra-block-spend-leaky: a UTXO created and spent inside the same block
+  leaves residual contributions in the running hash even though it never
+  appears in the final UTXO set.
+* Useful for: persistent reorg detection at restart; agreement check with
+  another node that took the EXACT SAME chain ordering;
+  `BaseIndex` monotonicity.
+* NOT useful for: cross-validation against `gettxoutsetinfo` from a
+  from-scratch UTXO walk; BC `hash_serialized` cross-check.
+
+### What BC's `hash_serialized` is (NOT IMPLEMENTED HERE)
+
+* A **state hash**: a canonical-traversal SHA-256 over every UTXO
+  currently in the set.
+* State-equivalent: two chains that converge on the same final UTXO set
+  produce the SAME `hash_serialized`, regardless of how they got there.
+* Not implemented in Dilithion. PR-BA-3's `gettxoutsetinfo` fast-path
+  needs this property and will require a separate design (canonical UTXO
+  traversal at query time, or a different multiset accumulator that is
+  PQ-secure -- design decision deferred).
+
+### Operator implications
+
+* DO use `hashChainCommitment` for sanity-checking against another
+  Dilithion node that has indexed the SAME chain ordering.
+* DO NOT compare `hashChainCommitment` against BC's `hash_serialized`,
+  against any independently-computed UTXO traversal hash, or against
+  any value claiming to be a "UTXO-set state" check.
+
+### SHA-3 substitution
+
+The fold uses SHA-3 (FIPS 202, 256-bit output) per the project-wide
+post-quantum hash convention. Module-local; documented in both
+`src/kernel/coinstats.h` and `src/index/coinstatsindex.h`.
 
 Per-block fold layout (caller-private; not exposed on disk; only consumed
 inside SHA3-256):
@@ -183,8 +222,6 @@ Success:
 
 Recoverable failure (operator action recommended):
 
-* `[coinstatsindex] WARN paranoia mismatch ...` (reserved for PR-BA-3
-  gettxoutsetinfo cross-check)
 * `[coinstatsindex] reindex: no main-chain block at height H (mid-reorg, K
   candidates) -- bailing walk; outer loop will revisit when the reorg
   settles` -- temporary; the outer loop will re-walk after the reorg

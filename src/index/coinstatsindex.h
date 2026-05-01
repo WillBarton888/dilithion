@@ -11,9 +11,10 @@
 // Records per-block UTXO-set statistics in a leveldb instance separate from
 // txindex's database. For each indexed height H, we persist:
 //
-//   - `hashSerialized`     SHA3-256 fold of the after-block UTXO state
-//   - `coinsCount`         number of UTXOs after the block
-//   - `totalAmount`        sum of UTXO output values after the block
+//   - `hashChainCommitment`  SHA3-256 chain-path commitment after the block
+//                            (NOT a UTXO-set state hash; see kernel/coinstats.h)
+//   - `coinsCount`           number of UTXOs after the block
+//   - `totalAmount`          sum of UTXO output values after the block
 //   - `blockAdditions`     per-block count of new UTXOs
 //   - `blockRemovals`      per-block count of spent UTXOs
 //   - `blockTotalOut`      block output sum (new outputs)
@@ -54,12 +55,15 @@
 //      Reads `g_chainstate` without holding `m_mutex`; acquires `m_mutex`
 //      only inside `WriteBlock`.
 //
-// --- SHA-3 substitution -------------------------------------------------
+// --- hashChainCommitment vs BC's hash_serialized ------------------------
 //
-// `hashSerialized` is SHA-3 256-bit (NOT SHA-256, the BC v28.0 default).
-// This is the project-wide post-quantum hash convention; consumers MUST NOT
-// compare hashes across BC and Dilithion. Documented also in
-// `kernel/coinstats.h`.
+// `hashChainCommitment` is a CHAIN-PATH commitment (SHA3-256 fold of
+// parent || delta), NOT BC v28.0's `hash_serialized` (which is a canonical-
+// traversal STATE hash). The two have different invariants: two chains
+// reaching the same UTXO set via different orderings produce different
+// chain-path commitments. Useful for reorg detection, NOT for cross-
+// validation against from-scratch UTXO walks. See kernel/coinstats.h for
+// the full caveat list and PR-BA-3-design TODO.
 
 #include <kernel/coinstats.h>
 #include <primitives/block.h>
@@ -152,7 +156,7 @@ private:
 
     // Per-height value layout (versioned):
     //   byte 0:        schema version (0x01)
-    //   bytes 1..32:   hashSerialized       (32 bytes, raw SHA-3 output)
+    //   bytes 1..32:   hashChainCommitment  (32 bytes, raw SHA-3 output)
     //   bytes 33..40:  coinsCount           (uint64_t LE)
     //   bytes 41..48:  totalAmount          (uint64_t LE)
     //   bytes 49..56:  blockAdditions       (uint64_t LE)

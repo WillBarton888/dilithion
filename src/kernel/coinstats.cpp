@@ -108,7 +108,7 @@ bool CoinStatsApplyBlock(CoinStats& stats,
     // skipped). The writer's order is the order of CBlockUndo::vSpent --
     // see node/undo_data.h.
     for (const CSpentInput& sp : undo.vSpent) {
-        CoinStatsFoldRecord(stats.hashSerialized,
+        CoinStatsFoldRecord(stats.hashChainCommitment,
                             sp.outpoint,
                             sp.out,
                             sp.nHeight,
@@ -170,7 +170,7 @@ bool CoinStatsApplyBlock(CoinStats& stats,
             const CTxOut& o = tx->vout[out_idx];
             COutPoint op(key.txid, static_cast<uint32_t>(out_idx));
 
-            CoinStatsFoldRecord(stats.hashSerialized,
+            CoinStatsFoldRecord(stats.hashChainCommitment,
                                 op,
                                 o,
                                 block_height,

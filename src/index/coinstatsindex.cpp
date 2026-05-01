@@ -63,7 +63,7 @@ std::string CCoinStatsIndex::MakeHeightKey(int height) {
 void CCoinStatsIndex::EncodeHeightValue(const CoinStats& s, char out[H_VALUE_SIZE]) {
     std::memset(out, 0, H_VALUE_SIZE);
     out[0] = static_cast<char>(SCHEMA_VERSION);
-    std::memcpy(&out[1], s.hashSerialized.data, 32);
+    std::memcpy(&out[1], s.hashChainCommitment.data, 32);
 
     auto put_u64 = [out](size_t offset, uint64_t v) {
         for (int i = 0; i < 8; ++i) {
@@ -84,7 +84,7 @@ bool CCoinStatsIndex::DecodeHeightValue(const std::string& v, CoinStats& s) {
     if (v.size() != H_VALUE_SIZE) return false;
     if (static_cast<uint8_t>(v[0]) != SCHEMA_VERSION) return false;
 
-    std::memcpy(s.hashSerialized.data, v.data() + 1, 32);
+    std::memcpy(s.hashChainCommitment.data, v.data() + 1, 32);
 
     auto get_u64 = [&v](size_t offset) -> uint64_t {
         uint64_t r = 0;
@@ -465,7 +465,7 @@ bool CCoinStatsIndex::EraseBlock(const CBlock& block, int height, const uint256&
         batch.Delete(leveldb::Slice(key.data(), key.size()));
     }
 
-    // Restore the parent-height record's hashSerialized into m_running on
+    // Restore the parent-height record's hashChainCommitment into m_running on
     // commit. Read it now so we have a consistent snapshot to roll back to.
     CoinStats restored;
     int new_height = (height > 0) ? (height - 1) : -1;

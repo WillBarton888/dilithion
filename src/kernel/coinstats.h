@@ -6,33 +6,64 @@
 
 // PR-BA-2: UTXO-set statistics primitives.
 //
-// Bitcoin Core port: `src/kernel/coinstats.{h,cpp}` (v28.0).
+// Bitcoin Core port: `src/kernel/coinstats.{h,cpp}` (v28.0) -- ADAPTED.
+//
+// === IMPORTANT: hashChainCommitment is NOT BC's hash_serialized ===
+//
+// Bitcoin Core's `hash_serialized` is a STATE hash: it computes a canonical
+// traversal-order hash over EVERY UTXO currently in the set, so two chains
+// converging on the same UTXO set produce the SAME hash. Dilithion's
+// `hashChainCommitment` is a CHAIN-PATH commitment, NOT a state hash:
+// each block's stats are computed by folding `(parent_chain_commitment ||
+// delta_record_for_this_block)` through SHA3-256. This means:
+//
+//   * Path-dependent: two chains that converge on the same final UTXO set
+//     via different orderings produce DIFFERENT hashChainCommitment values.
+//   * Intra-block-spend-leaky: a UTXO created and spent inside the same
+//     block leaves residual contributions in the running hash even though
+//     it never appears in the final UTXO set.
+//   * Reorg-detection / chain-path integrity check ONLY: the value is
+//     useful for confirming "the index is on the same chain history it was
+//     on yesterday", not for "this UTXO set is the canonical one".
+//
+// What this implies:
+//
+//   * DO use hashChainCommitment for: persistent reorg detection at
+//     restart, sanity-check against operator-supplied "expected hash at
+//     height N" values produced by another node that took the SAME chain
+//     ordering, BaseIndex monotonicity guards.
+//   * DO NOT use hashChainCommitment for: cross-validation against
+//     `gettxoutsetinfo` from a from-scratch UTXO walk, agreement with
+//     BC's `hash_serialized`, or any context where a state-hash invariant
+//     is required.
+//
+// TODO(PR-BA-3-design): PR-BA-3's `gettxoutsetinfo` fast-path needs a
+// state-hash mechanism with a different invariant -- candidates are a
+// canonical UTXO-set traversal performed at query time, or a different
+// (PQ-secure) multiset accumulator. That is out of scope here.
+//
+// --- BLOCK-DELTA fold mechanics ----------------------------------------
 //
 // Bitcoin Core offers two algorithms for hashing the UTXO set:
 //   - `hash_serialized` (deterministic order-dependent SHA-256 of all coins
 //     in their canonical traversal order)
 //   - `muhash` (commutative incremental hash; order-invariant)
 //
-// Dilithion ports `hash_serialized` only (KISS), with **SHA-3 substituted
-// for SHA-256** per the project-wide post-quantum hash convention. The hash
-// is computed by the BLOCK-DELTA method: starting from the parent block's
-// hash, we incrementally fold in the per-coin records added or removed by
-// the block. The fold is implemented by feeding (parent_hash || delta_record)
-// into SHA3-256 and taking the result as the new running hash. This is the
-// same pattern as BC's "hash_serialized_3 with block-delta" but specialised
-// to a single algorithm.
+// Dilithion ports NEITHER directly: it uses a SHA3-256 chain-path commitment.
+// The hash is computed by the BLOCK-DELTA method: starting from the parent
+// block's hash, we incrementally fold in the per-coin records added or
+// removed by the block. The fold is implemented by feeding
+// (parent_hash || delta_record) into SHA3-256 and taking the result as the
+// new running hash.
 //
 // The order in which coins are folded matters for the final hash value, but
 // is fully deterministic given the block's transactions and undo data:
 //   - Spent inputs (from `CBlockUndo::vSpent`) are folded first, in the
 //     writer's emit order (vin order across vtx, coinbase skipped).
 //   - New outputs (from `CBlock` after deserialization) are folded second,
-//     in (txid_lex_order, vout_index_ascending) order. This deterministic
-//     order is the SAME canonicalisation BC uses for `hash_serialized` so
-//     two implementations independently computing the hash agree.
+//     in (txid_lex_order, vout_index_ascending) order.
 //
-// The Dilithion divergence (SHA-3 vs SHA-256) is module-local and fully
-// documented; consumers MUST NOT compare hashes across BC and Dilithion.
+// SHA-3 substitution is the project-wide post-quantum hash convention.
 //
 // --- Concurrency --------------------------------------------------------
 //
@@ -54,8 +85,17 @@
  * height by `CCoinStatsIndex`.
  */
 struct CoinStats {
-    /** Hash of the UTXO set after this block was applied. SHA-3 256-bit. */
-    uint256 hashSerialized;
+    /**
+     * Chain-path commitment after this block was applied. SHA3-256 fold of
+     * (parent_chain_commitment || delta_record). NOT a UTXO-set state hash;
+     * see top-of-file docblock and `docs/COINSTATSINDEX.md` for the full
+     * caveats.
+     *
+     * XXX(PR-BA-3-design): the gettxoutsetinfo fast-path needs a different
+     * mechanism (state hash vs chain-path commitment); this field is NOT
+     * suitable for that role.
+     */
+    uint256 hashChainCommitment;
 
     /** Number of coins in the UTXO set after this block was applied. */
     uint64_t coinsCount = 0;
@@ -112,7 +152,7 @@ void CoinStatsFoldRecord(uint256& running_hash,
  *
  * Folds removals first (in writer order from the undo data), then additions
  * (in canonical txid-lex order; outputs within a tx in ascending vout
- * order). Updates coinsCount, totalAmount, hashSerialized.
+ * order). Updates coinsCount, totalAmount, hashChainCommitment.
  *
  * @param stats        Mutated in place. On entry, holds the parent-block
  *                     stats. On return, holds the after-this-block stats.

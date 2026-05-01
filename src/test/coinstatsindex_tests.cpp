@@ -379,7 +379,7 @@ BOOST_AUTO_TEST_CASE(init_rejects_int_max_meta) {
 // ===========================================================================
 // Reindex happy path: walk a 5-block chain to completion, verify per-height
 // records are findable and stats are consistent (counts non-decreasing,
-// hashSerialized stable across two re-init reads).
+// hashChainCommitment stable across two re-init reads).
 // ===========================================================================
 BOOST_AUTO_TEST_CASE(reindex_happy_path) {
     TempDbScope scope_idx("happy_idx");
@@ -418,8 +418,8 @@ BOOST_AUTO_TEST_CASE(reindex_happy_path) {
         BOOST_CHECK_EQUAL(s.blockRemovals, 0u);
         BOOST_CHECK_EQUAL(s.blockTotalOut, 5000ULL + h);
         BOOST_CHECK_EQUAL(s.blockSubsidyFees, 5000ULL + h);
-        // hashSerialized is non-zero (all-zero starting hash gets folded)
-        BOOST_CHECK(!s.hashSerialized.IsNull());
+        // hashChainCommitment is non-zero (all-zero starting hash gets folded)
+        BOOST_CHECK(!s.hashChainCommitment.IsNull());
     }
 
     // Snapshot post-sync stats per height so we can compare against a
@@ -497,7 +497,7 @@ BOOST_AUTO_TEST_CASE(reindex_round_trip_on_reopen) {
         for (int h = 0; h < kN; ++h) {
             CoinStats s;
             BOOST_REQUIRE(idx2.LookupStats(h, s));
-            BOOST_CHECK(snapshot[h].hashSerialized == s.hashSerialized);
+            BOOST_CHECK(snapshot[h].hashChainCommitment == s.hashChainCommitment);
             BOOST_CHECK_EQUAL(snapshot[h].coinsCount, s.coinsCount);
             BOOST_CHECK_EQUAL(snapshot[h].totalAmount, s.totalAmount);
             BOOST_CHECK_EQUAL(snapshot[h].blockAdditions, s.blockAdditions);
@@ -547,7 +547,7 @@ BOOST_AUTO_TEST_CASE(eraseblock_rollback_restores_parent_stats) {
     // The H=2 record is unchanged.
     CoinStats stats_at_2_post;
     BOOST_REQUIRE(idx.LookupStats(2, stats_at_2_post));
-    BOOST_CHECK(stats_at_2_pre.hashSerialized == stats_at_2_post.hashSerialized);
+    BOOST_CHECK(stats_at_2_pre.hashChainCommitment == stats_at_2_post.hashChainCommitment);
     BOOST_CHECK_EQUAL(stats_at_2_pre.coinsCount, stats_at_2_post.coinsCount);
     BOOST_CHECK_EQUAL(stats_at_2_pre.totalAmount, stats_at_2_post.totalAmount);
 
@@ -571,7 +571,7 @@ BOOST_AUTO_TEST_CASE(eraseblock_rollback_restores_parent_stats) {
         CoinStats fresh;
         BOOST_REQUIRE(idx2.LookupStats(3, fresh));
 
-        BOOST_CHECK(fresh.hashSerialized == stats_at_3_replayed.hashSerialized);
+        BOOST_CHECK(fresh.hashChainCommitment == stats_at_3_replayed.hashChainCommitment);
         BOOST_CHECK_EQUAL(fresh.coinsCount, stats_at_3_replayed.coinsCount);
         BOOST_CHECK_EQUAL(fresh.totalAmount, stats_at_3_replayed.totalAmount);
         idx2.Stop();
@@ -614,7 +614,7 @@ BOOST_AUTO_TEST_CASE(write_at_same_height_is_no_op) {
 
     CoinStats after;
     BOOST_REQUIRE(idx.LookupStats(2, after));
-    BOOST_CHECK(before.hashSerialized == after.hashSerialized);
+    BOOST_CHECK(before.hashChainCommitment == after.hashChainCommitment);
     BOOST_CHECK_EQUAL(before.coinsCount, after.coinsCount);
 
     idx.Stop();
