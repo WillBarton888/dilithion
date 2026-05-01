@@ -230,6 +230,24 @@ public:
     int GetTimeoutSeconds() const;
 
     /**
+     * @brief Test-only seam: rewrite the timeout reference point.
+     *
+     * IsTimedOut() compares steady_clock::now() to m_lastBlockTime against
+     * GetTimeoutSeconds(). Production code touches m_lastBlockTime via
+     * TouchLastBlockTime() (called when AddBlock advances state). Tests
+     * exercising the timeout predicate need to backdate m_lastBlockTime
+     * without sleeping — this seam writes it directly.
+     *
+     * Not gated behind a #ifdef because (a) the existing test file already
+     * mutates ForkBlock::status as a public field for the same reason and
+     * (b) calling this on a live ForkCandidate has no consensus impact
+     * (timeout is observability only; cancellation is driver-initiated).
+     *
+     * @param t New value for m_lastBlockTime.
+     */
+    void SetLastBlockTimeForTest(std::chrono::steady_clock::time_point t);
+
+    /**
      * @brief Add a MIK identity registration to the temporary fork cache
      *
      * Called when pre-validating a registration block. Later reference blocks

@@ -204,6 +204,12 @@ void ForkCandidate::UpdateExpectedHash(int32_t height, const uint256& newHash)
     }
 }
 
+void ForkCandidate::SetLastBlockTimeForTest(std::chrono::steady_clock::time_point t)
+{
+    std::lock_guard<std::mutex> lock(m_mutex);
+    m_lastBlockTime = t;
+}
+
 void ForkCandidate::TouchLastBlockTime()
 {
     m_lastBlockTime = std::chrono::steady_clock::now();
