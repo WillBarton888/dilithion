@@ -23,6 +23,8 @@
 // (Phase 7 deletes it) for ibd_coordinator + block_processing callers.
 #include <core/node_context.h>
 #include <core/chainparams.h>
+#include <net/banman.h>   // v4.1: MisbehaviorType for header checkpoint enforcement
+#include <net/peers.h>    // v4.1: CPeerManager::Misbehaving (already pulled by net/net.h but explicit for clarity)
 #include <api/metrics.h>  // Fork detection metrics
 #include <algorithm>
 #include <chrono>
@@ -36,6 +38,49 @@ extern CChainState g_chainstate;
 // BUG #261 FIX: Fork detection only when synced
 // Prevents false fork detection when peers send headers during initial startup.
 // Uses IsSynced() instead of time-based grace period - won't miss genuine forks.
+
+// =============================================================================
+// v4.1 — Header-time checkpoint enforcement helper
+// =============================================================================
+//
+// Direct hash compare against any embedded checkpoint at the EXACT batch
+// height. NO GetAncestor walk in the headers code path (Layer-2 v0.2 HIGH-5
+// fix: GetAncestor walks pskip pointers that are mutated outside cs_main,
+// which is unsafe in headers context where only cs_headers is held).
+//
+// Returns true if the header is acceptable (no checkpoint at this height,
+// or the checkpoint matches). Returns false if the header violates an
+// embedded checkpoint.
+//
+// Called from FIVE ingress sites in this file before each
+// `mapHeaders[...] = headerData` write:
+//   1. ProcessHeaders FAST PATH 1 (below-checkpoint)
+//   2. ProcessHeaders slow path (above-checkpoint, after ValidateHeader)
+//   3. ProcessHeadersWithDoSProtection (DoS-protected redownload)
+//   4. QueueHeadersForValidation STEP 2 (below-checkpoint)
+//   5. QueueHeadersForValidation STEP 2 (above-checkpoint)
+//
+// On rejection, the caller should bump peer misbehavior via
+// CPeerManager::Misbehaving(peer, 20, MisbehaviorType::INVALID_BLOCK_HEADER)
+// and return false to abort the batch.
+static bool CheckpointCheckHeader(int height, const uint256& headerHash) {
+    if (!Dilithion::g_chainParams) return true;
+    for (const auto& cp : Dilithion::g_chainParams->checkpoints) {
+        if (cp.nHeight == height) {
+            if (headerHash != cp.hashBlock) {
+                LogPrintf(NET, WARN,
+                    "[HeadersManager] v4.1 header-time check: checkpoint violation at height %d "
+                    "(got %s, expected %s) -- rejecting batch\n",
+                    height,
+                    headerHash.GetHex().substr(0, 16).c_str(),
+                    cp.hashBlock.GetHex().substr(0, 16).c_str());
+                return false;
+            }
+            return true;
+        }
+    }
+    return true;  // no checkpoint at this height
+}
 
 CHeadersManager::CHeadersManager()
     : nBestHeight(-1)
@@ -287,6 +332,13 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             // cumulative chain-work comparison can pick the canonical chain
             // over a stuck wrong-fork sibling.
             int height = pprev ? (pprev->height + 1) : expectedHeight;
+            // v4.1 site 1/5: header-time checkpoint enforcement (BEFORE store)
+            if (!CheckpointCheckHeader(height, storageHash)) {
+                if (g_node_context.peer_manager) {
+                    g_node_context.peer_manager->Misbehaving(peer, 20, MisbehaviorType::INVALID_BLOCK_HEADER);
+                }
+                return false;
+            }
             uint256 chainWork = CalculateChainWork(header, pprev);
             HeaderWithChainWork headerData(header, height);
             headerData.chainWork = chainWork;
@@ -457,6 +509,14 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
         int height = pprev ? (pprev->height + 1) : 1;
         uint256 chainWork = CalculateChainWork(header, pprev);
 
+        // v4.1 site 2/5: header-time checkpoint enforcement (BEFORE store)
+        if (!CheckpointCheckHeader(height, storageHash)) {
+            if (g_node_context.peer_manager) {
+                g_node_context.peer_manager->Misbehaving(peer, 20, MisbehaviorType::INVALID_BLOCK_HEADER);
+            }
+            return false;
+        }
+
         // Store header
         HeaderWithChainWork headerData(header, height);
         headerData.chainWork = chainWork;
@@ -581,6 +641,17 @@ bool CHeadersManager::ProcessHeadersWithDoSProtection(NodeId peer, const std::ve
 
             // Calculate chain work and store
             uint256 chainWork = CalculateChainWork(header, pprev);
+
+            // v4.1 site 3/5: header-time checkpoint enforcement (BEFORE store)
+            // NOTE: this site uses `hash` (declared at start of loop body),
+            // NOT `storageHash` — Layer-2 v0.3 #2 caught this distinction.
+            if (!CheckpointCheckHeader(height, hash)) {
+                if (g_node_context.peer_manager) {
+                    g_node_context.peer_manager->Misbehaving(peer, 20, MisbehaviorType::INVALID_BLOCK_HEADER);
+                }
+                return false;
+            }
+
             HeaderWithChainWork headerData(header, height);
             headerData.chainWork = chainWork;
 
@@ -2792,6 +2863,13 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                     // Store with cumulative chain work but skip PoW validation
                     // (below checkpoint, trust anchor handles validity).
                     int height = pprev ? (pprev->height + 1) : expectedHeight;
+                    // v4.1 site 4/5: header-time checkpoint enforcement (BEFORE store)
+                    if (!CheckpointCheckHeader(height, storageHash)) {
+                        if (g_node_context.peer_manager) {
+                            g_node_context.peer_manager->Misbehaving(peer, 20, MisbehaviorType::INVALID_BLOCK_HEADER);
+                        }
+                        return false;
+                    }
                     uint256 chainWork = CalculateChainWork(header, pprev);
                     HeaderWithChainWork headerData(header, height);
                     headerData.chainWork = chainWork;
@@ -2853,6 +2931,14 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 // Calculate height and chain work
                 int height = pprev ? (pprev->height + 1) : 1;
                 uint256 chainWork = CalculateChainWork(header, pprev);
+
+                // v4.1 site 5/5: header-time checkpoint enforcement (BEFORE store)
+                if (!CheckpointCheckHeader(height, storageHash)) {
+                    if (g_node_context.peer_manager) {
+                        g_node_context.peer_manager->Misbehaving(peer, 20, MisbehaviorType::INVALID_BLOCK_HEADER);
+                    }
+                    return false;
+                }
 
                 // Store header
                 HeaderWithChainWork headerData(header, height);
