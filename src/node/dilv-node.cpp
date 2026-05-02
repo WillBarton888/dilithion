@@ -4579,7 +4579,21 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
             int assumeValidH = Dilithion::g_chainParams ? Dilithion::g_chainParams->dfmpAssumeValidHeight : 0;
             // Skip revalidation if chain is below assume-valid height (blocks already accepted by network)
-            if (chainHeight > activationHeight && activationHeight < 999999999 && chainHeight > assumeValidH) {
+            //
+            // v4.1.1 hotfix: also skip if activationHeight == 0 ("active from
+            // genesis" — DilV mainnet chainparams sets all three thresholds to 0).
+            // The revalidation block was designed for testnet where VDF activates
+            // at a specific height > 0; it walks back to find blocks "before
+            // activation" so the cooldown tracker has prior context. With
+            // activation=0 there is no "before genesis" to walk to, so the tracker
+            // is Cleared but never repopulated, leaving it empty. v4.1's HIGH-2
+            // startup validator then sees count=0 vs expected=65 and refuses to
+            // run. Discovered when SYD's first stable-binary restart found the
+            // chain had advanced from 44233 to 44234 (some miner produced a
+            // valid post-fork block) — the revalidation triggered for the first
+            // time and hit this latent bug. Fix: skip revalidation entirely when
+            // activationHeight == 0 since it has nothing to revalidate against.
+            if (chainHeight > activationHeight && activationHeight > 0 && activationHeight < 999999999 && chainHeight > assumeValidH) {
                 std::cout << "\n[REVALIDATION] Scanning blocks " << activationHeight
                           << " to " << chainHeight << " for consensus rule compliance..." << std::endl;
 
