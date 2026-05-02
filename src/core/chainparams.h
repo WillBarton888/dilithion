@@ -265,6 +265,18 @@ public:
     // each block was just over the threshold. 999999999 = never retired.
     int timeBasedCooldownExpiryRetiredHeight;
 
+    // v4.1 deterministic snapshot: number of distinct MIK identities that
+    // had mined at least one block by height 44232 on the canonical pre-fork
+    // chain. Embedded for the v4.1 mandatory rollback so every v4.1 node
+    // can verify (in startup_checkpoint_validator) that its populator-
+    // computed lifetime miner count matches the canonical value at the
+    // activation height — closes the non-determinism risk where pre-44233
+    // history could be ingested differently across nodes.
+    //
+    // 0 = disabled (placeholder used during the pass-1 build that captures
+    // the count from a v4.0.x chain; must be > 0 in any tagged release).
+    int lifetimeMinerCountAt44232 = 0;
+
     // VDF cooldown short window (blocks) for dual-window cooldown.
     // After stabilizationForkHeight, effective cooldown = min(longCooldown, shortCooldown).
     // Short window tracks recent participation; long window prevents gaming.
