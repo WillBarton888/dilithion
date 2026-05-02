@@ -26,6 +26,8 @@
 #include <core/chainparams.h>          // g_chainParams + checkpoints + lifetimeMinerCountAt44232
 #include <vdf/cooldown_tracker.h>      // CCooldownTracker::GetLifetimeMinerCount
 
+#include <cstdlib>                     // std::getenv (pass-1 capture bypass)
+#include <cstring>                     // std::strcmp (pass-1 capture bypass)
 #include <iostream>
 
 namespace Dilithion {
@@ -83,7 +85,26 @@ bool ValidateLifetimeMinerSnapshot(const CBlockIndex* pindexTip,
     // pass-2 procedure. This means the CRIT-1 mitigation is dead code on
     // a release that's already running. Refuse to start with a clear
     // error so the operator notices BEFORE the chain forks.
+    //
+    // v4.1 v0.7 amendment (pass-1 capture bypass): the spec §3.6 pass-1
+    // procedure REQUIRES the operator to start a placeholder-binary node,
+    // let it reach 44232, then query the count via RPC. HIGH-3 as
+    // originally written prevented exactly that workflow on a running
+    // node. Solution: env-var DILITHION_PASS_1_CAPTURE=1 logs the
+    // observed count at startup and continues, bypassing fail-fast.
+    // Production binaries (no env-var) retain the original strict check.
     if (g_chainParams->lifetimeMinerCountAt44232 <= 0) {
+        const char* pass1_env = std::getenv("DILITHION_PASS_1_CAPTURE");
+        const bool pass1_capture = (pass1_env != nullptr) && (std::strcmp(pass1_env, "1") == 0);
+        if (pass1_capture) {
+            const int observed_pass1 = tracker->GetLifetimeMinerCountAtHeight(44232);
+            std::cerr << "\n=== PASS-1 CAPTURE: lifetime miner count at h=44232 = "
+                      << observed_pass1 << " ===\n"
+                      << "Embed in chainparams.cpp (search lifetimeMinerCountAt44232)\n"
+                      << "then rebuild WITHOUT this env-var for the production binary.\n"
+                      << "===================================================\n\n";
+            return true;  // bypass fail-fast for pass-1 capture phase
+        }
         std::cerr << "\n=== STARTUP LIFETIME-MINER PLACEHOLDER NOT UPDATED ===\n"
                   << "params.lifetimeMinerCountAt44232 is still the placeholder (0)\n"
                   << "but the chain has reached or surpassed activation height 44232.\n\n"
@@ -92,7 +113,9 @@ bool ValidateLifetimeMinerSnapshot(const CBlockIndex* pindexTip,
                   << "lifetime miner count and embeds it. The CRIT-1 mitigation is\n"
                   << "currently dead code on this binary.\n\n"
                   << "Refusing to start. Build a fresh release with the embedded\n"
-                  << "count, then restart.\n"
+                  << "count, then restart. (Or, if this IS the pass-1 capture build,\n"
+                  << "set env-var DILITHION_PASS_1_CAPTURE=1 to bypass and log the\n"
+                  << "observed count to stderr.)\n"
                   << "=========================================================\n\n";
         return false;
     }
