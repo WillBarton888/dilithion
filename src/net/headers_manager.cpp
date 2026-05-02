@@ -214,13 +214,19 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
 
     std::lock_guard<std::mutex> lock(cs_headers);
 
-    // Phase 6 PR6.1: per-peer rate limit (1000 headers/min/peer). Drop the
-    // batch if the peer is over budget. Misbehavior reporting is best-effort
-    // here; full IPeerScorer integration is PR6.5b territory.
+    // Phase 6 PR6.1: per-peer rate limit. Drop the batch if peer is over budget.
+    // v4.1 audit fix (twin of headers_manager.cpp:2495 fix in commit 3c5e0eb):
+    // promote log to always-on WARN. This is one of two twins of the bug that
+    // hid the rate-limit reject from operators during IBD. Always log so the
+    // diagnostic trail is visible without --verbose.
     if (!headers.empty() && !CheckPeerHeaderRateLimit(peer, headers.size())) {
-        if (g_verbose.load(std::memory_order_relaxed))
-            std::cout << "[HeadersManager] PR6.1 rate-limit: peer=" << peer
-                      << " over budget, dropping batch of " << headers.size() << std::endl;
+        LogPrintf(NET, WARN,
+            "[HeadersManager] Rate-limit reject (Process): peer=%d batch=%zu "
+            "(window limit = %d/%ds)\n",
+            static_cast<int>(peer),
+            headers.size(),
+            Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateLimitPerWindow : 1000,
+            Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateWindowSec : 60);
         return false;
     }
     if (g_verbose.load(std::memory_order_relaxed))
@@ -588,9 +594,18 @@ bool CHeadersManager::ProcessHeadersWithDoSProtection(NodeId peer, const std::ve
 {
     // Phase 6 PR6.1: per-peer rate limit. Same policy as ProcessHeaders.
     // We hold cs_headers for the rate-limit check (same lock).
+    // v4.1 audit fix (twin of headers_manager.cpp:2495 fix in commit 3c5e0eb):
+    // log the reject so operators can see the cause. Was completely silent.
     {
         std::lock_guard<std::mutex> lock(cs_headers);
         if (!headers.empty() && !CheckPeerHeaderRateLimit(peer, headers.size())) {
+            LogPrintf(NET, WARN,
+                "[HeadersManager] Rate-limit reject (DoS): peer=%d batch=%zu "
+                "(window limit = %d/%ds)\n",
+                static_cast<int>(peer),
+                headers.size(),
+                Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateLimitPerWindow : 1000,
+                Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateWindowSec : 60);
             return false;
         }
     }
