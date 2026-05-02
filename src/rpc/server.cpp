@@ -5061,6 +5061,26 @@ std::string CRPCServer::RPC_GetFullMIKDistribution(const std::string& params) {
     }
 
     int currentHeight = static_cast<int>(m_chainstate->GetHeight());
+
+    // v4.1: optional `maxHeight` parameter caps the scan. Used by the
+    // two-pass build procedure to capture the canonical lifetime miner
+    // count at h=44232 for embedding in chainparams. Backward-compatible:
+    // no params (or invalid params) → scan to current tip = legacy behavior.
+    int maxHeight = currentHeight;
+    if (!params.empty()) {
+        try {
+            nlohmann::json p = nlohmann::json::parse(params);
+            if (p.is_object() && p.contains("maxHeight")) {
+                int requested = p.at("maxHeight").get<int>();
+                if (requested > 0 && requested <= currentHeight) {
+                    maxHeight = requested;
+                }
+            }
+        } catch (...) {
+            // Fall back to current tip on any parse error
+        }
+    }
+
     std::map<std::string, int> mikBlockCounts;  // MIK identity hex -> block count
     std::map<std::string, std::set<std::string>> mikAddresses;  // MIK hex -> set of payout addresses
     int blocksWithMIK = 0;
@@ -5068,7 +5088,7 @@ std::string CRPCServer::RPC_GetFullMIKDistribution(const std::string& params) {
 
     CBlockValidator validator;
 
-    for (int height = 1; height <= currentHeight; height++) {
+    for (int height = 1; height <= maxHeight; height++) {
         // Get block hash for this height using chainstate
         std::vector<uint256> hashes = m_chainstate->GetBlocksAtHeight(height);
         if (hashes.empty()) continue;
@@ -5123,6 +5143,11 @@ std::string CRPCServer::RPC_GetFullMIKDistribution(const std::string& params) {
     std::ostringstream oss;
     oss << "{";
     oss << "\"total_blocks\":" << currentHeight << ",";
+    // v4.1: additive field — scan depth used for this query. Equal to
+    // total_blocks when no maxHeight param was provided. Cursor F5 fix:
+    // backward-compatible with existing callers (additive, semantics of
+    // total_blocks unchanged).
+    oss << "\"scanned_through_height\":" << maxHeight << ",";
     oss << "\"blocks_with_mik\":" << blocksWithMIK << ",";
     oss << "\"blocks_without_mik\":" << blocksWithoutMIK << ",";
     oss << "\"unique_miners\":" << mikBlockCounts.size() << ",";
@@ -5132,7 +5157,8 @@ std::string CRPCServer::RPC_GetFullMIKDistribution(const std::string& params) {
     for (const auto& [mikHex, blockCount] : sorted) {
         if (!first) oss << ",";
         first = false;
-        double percentage = (currentHeight > 0) ? (blockCount * 100.0 / currentHeight) : 0;
+        // v4.1: use scanned scope (maxHeight) for percentage when bounded
+        double percentage = (maxHeight > 0) ? (blockCount * 100.0 / maxHeight) : 0;
         oss << "{\"mik\":\"" << mikHex << "\",\"blocks\":" << blockCount
             << ",\"percent\":" << std::fixed << std::setprecision(2) << percentage;
 
