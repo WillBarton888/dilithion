@@ -113,16 +113,23 @@ public:
     int GetLifetimeMinerCount() const;
 
     /** Count of distinct MIK identities that mined at least one block at
-     *  or below the given height. Walks m_heightToWinner up to atHeight
-     *  and returns the unique-count. Used by ValidateLifetimeMinerSnapshot
-     *  to compare the populator's running tally against the canonical
-     *  embedded snapshot at h=44232 — without conflating with new MIKs
-     *  that joined post-rollback at heights > 44232.
+     *  or below the given height. Reads m_mikHeights (lifetime, never
+     *  evicted) — for each MIK with a non-empty multiset of mining
+     *  heights, counts it iff *multiset.begin() <= atHeight. Used by
+     *  ValidateLifetimeMinerSnapshot to compare the populator's running
+     *  tally against the canonical embedded snapshot at h=44232 —
+     *  without conflating with new MIKs that joined post-rollback at
+     *  heights > 44232.
      *
-     *  v4.1 cross-component audit HIGH-2 fix: GetLifetimeMinerCount()
-     *  returns the cumulative-to-tip count, which doesn't match an
-     *  embedded snapshot taken at a fixed height once the chain extends
-     *  past it. This bounded variant gives a stable comparison value. */
+     *  v4.1.2 hotfix (storage-of-record-correctness fix): the v4.1
+     *  HIGH-2 audit fix walked m_heightToWinner, which is a SLIDING
+     *  WINDOW (eviction in OnBlockConnected). Once tip advanced past
+     *  44232 by activeWindow blocks, the queried range no longer
+     *  contained the canonical heights, so the count drifted as the
+     *  window slid. This now reads m_mikHeights, which is lifetime-
+     *  scope and parallel to m_lifetimeBlockCount. The result is
+     *  invariant in tip position for any fixed atHeight on the same
+     *  canonical chain. */
     int GetLifetimeMinerCountAtHeight(int atHeight) const;
 
     /** All MIK addresses that have ever mined (for DNA discovery). */
@@ -189,7 +196,13 @@ private:
     // address → height of most recent win
     std::map<Address, int> m_lastWinHeight;
 
-    // height → winner address (for undo on disconnect)
+    // height → winner address.
+    // SLIDING WINDOW — entries are evicted in OnBlockConnected when
+    // (height < tip - m_activeWindow + 1). This map is for ACTIVE-WINDOW
+    // queries (cooldown calculation, recent-winner undo) only.
+    // DO NOT read for archival/lifetime queries — use m_mikHeights or
+    // m_lifetimeBlockCount instead. The 2026-05-02 v4.1.1 incident was
+    // caused by GetLifetimeMinerCountAtHeight reading this map.
     std::map<int, Address> m_heightToWinner;
 
     // address → timestamp of most recent win (for time-based expiry)
@@ -209,6 +222,19 @@ private:
     // not of node restart history. Reloaded by replaying connect events from
     // genesis on startup (NOT from sliding window).
     std::map<Address, int> m_lifetimeBlockCount;
+
+    // v4.1.2 — per-MIK multiset of mining heights on the active chain.
+    // LIFETIME SCOPE: NOT evicted in OnBlockConnected. Inserts on connect,
+    // erases one matching height on disconnect. When a MIK's multiset
+    // becomes empty, the entry is erased.
+    // Used by GetLifetimeMinerCountAtHeight: a MIK is counted at height h
+    // iff its multiset is non-empty AND *multiset.begin() <= h.
+    // Reorg-complete: the multiset stores ALL active heights for each MIK,
+    // so disconnects always have exact information about the new minimum
+    // even if some heights have been evicted from m_heightToWinner.
+    // Deterministic: same canonical chain → same map state regardless of
+    // tip position or node restart history.
+    std::map<Address, std::multiset<int>> m_mikHeights;
 
     /** Recount active miners up to `height` (long window).  Caller must hold m_mutex. */
     void RecalcActiveMiners(int height) const;

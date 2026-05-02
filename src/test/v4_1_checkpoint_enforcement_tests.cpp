@@ -321,6 +321,188 @@ void test_lifetime_validator_placeholder_with_active_chain_fails()
 }
 
 // =============================================================================
+// v4.1.2 lifetime-validator bug regression tests
+//
+// Background: 2026-05-02 incident. The v4.1 HIGH-2 audit fix wired
+// GetLifetimeMinerCountAtHeight to walk m_heightToWinner — a sliding window
+// of size m_activeWindow. As tip advanced past atHeight by activeWindow
+// blocks, entries with key <= atHeight were evicted, and the count drifted
+// from canonical. Three of four DilV mainnet seeds crash-looped with
+// "observed=64 vs expected=65" because of this. The HIGH-2 audit's
+// existing test (test_lifetime_validator_chain_extended_past_snapshot_passes
+// above) only covered the increment direction (count doesn't go up); the
+// failing direction (count goes down as window slides) was untested.
+//
+// These tests assert the post-fix invariants:
+//   - Invariance: GetLifetimeMinerCountAtHeight(h) is constant as tip
+//     advances on a fixed chain prefix (no matter how far past activeWindow).
+//   - Reorg-symmetry: disconnect+reconnect returns to the same value.
+//   - Cursor scenario: a MIK whose only blocks are evicted from the
+//     sliding window is still correctly removed from the count after
+//     all its blocks disconnect (multiset becomes empty, MIK erased).
+//   - Multiset minimum: after a MIK's earliest block disconnects but
+//     others remain, the new minimum is the next-earliest height.
+// =============================================================================
+
+void test_lifetime_count_at_height_invariant_as_tip_advances()
+{
+    std::cout << "  test_lifetime_count_at_height_invariant_as_tip_advances..." << std::flush;
+    // Use small activeWindow=10 so we can test eviction quickly with
+    // far fewer connect operations than DilV's 200.
+    CCooldownTracker tracker(10);
+
+    // Three distinct MIKs, each mining one block at heights 1, 2, 3.
+    CCooldownTracker::Address mik_a{}; mik_a.fill(0xAA);
+    CCooldownTracker::Address mik_b{}; mik_b.fill(0xBB);
+    CCooldownTracker::Address mik_c{}; mik_c.fill(0xCC);
+    tracker.OnBlockConnected(1, mik_a, 1000);
+    tracker.OnBlockConnected(2, mik_b, 1010);
+    tracker.OnBlockConnected(3, mik_c, 1020);
+
+    // Snapshot: count at h=3 is 3.
+    assert(tracker.GetLifetimeMinerCountAtHeight(3) == 3);
+
+    // Now advance tip with a SINGLE recurring MIK at heights 4..50.
+    // None of them are new MIKs after h=4, so distinct count at h=3
+    // must remain stable.
+    CCooldownTracker::Address mik_recur{}; mik_recur.fill(0xDD);
+    for (int h = 4; h <= 50; ++h) {
+        tracker.OnBlockConnected(h, mik_recur, 1000 + h * 10);
+        // After every block, the count at h=3 must still be 3.
+        // Pre-fix this would have dropped once h > 3 + activeWindow
+        // (h > 13) because the sliding window evicted heights <= 3.
+        int count_at_3 = tracker.GetLifetimeMinerCountAtHeight(3);
+        if (count_at_3 != 3) {
+            std::cerr << "\nINVARIANCE VIOLATION at tip=" << h
+                      << ": count_at_3=" << count_at_3 << " (expected 3)\n";
+            assert(false);
+        }
+    }
+    // mik_recur (first appeared at h=4) is also counted from h=4 onward.
+    assert(tracker.GetLifetimeMinerCountAtHeight(4) == 4);
+    assert(tracker.GetLifetimeMinerCountAtHeight(50) == 4);
+    std::cout << " OK\n";
+}
+
+void test_lifetime_count_reorg_symmetric_disconnect_reconnect()
+{
+    std::cout << "  test_lifetime_count_reorg_symmetric_disconnect_reconnect..." << std::flush;
+    CCooldownTracker tracker(10);
+    CCooldownTracker::Address mik_a{}; mik_a.fill(0xAA);
+    CCooldownTracker::Address mik_b{}; mik_b.fill(0xBB);
+    tracker.OnBlockConnected(5, mik_a, 1000);
+    tracker.OnBlockConnected(6, mik_b, 1010);
+
+    int before = tracker.GetLifetimeMinerCountAtHeight(6);
+    assert(before == 2);
+
+    tracker.OnBlockDisconnected(6);
+    assert(tracker.GetLifetimeMinerCountAtHeight(6) == 1);
+
+    tracker.OnBlockConnected(6, mik_b, 1010);
+    assert(tracker.GetLifetimeMinerCountAtHeight(6) == before);
+    std::cout << " OK\n";
+}
+
+void test_lifetime_count_cursor_scenario_evicted_then_disconnected()
+{
+    std::cout << "  test_lifetime_count_cursor_scenario_evicted_then_disconnected..." << std::flush;
+    // Cursor's specific scenario: a MIK mines exactly two blocks at
+    // H1 < H2; advance tip until H1 is evicted from m_heightToWinner;
+    // disconnect H2; disconnect H1. After both disconnects, the MIK
+    // must be removed from GetLifetimeMinerCountAtHeight(H2).
+    //
+    // Plain m_firstHeightSeen would have failed this scenario because
+    // H1 is no longer in m_heightToWinner to scan-recompute from after
+    // H2 disconnects.
+    CCooldownTracker tracker(10);
+    CCooldownTracker::Address mik_x{}; mik_x.fill(0x77);
+    CCooldownTracker::Address mik_filler{}; mik_filler.fill(0xFF);
+
+    int H1 = 5;
+    int H2 = 7;
+    tracker.OnBlockConnected(H1, mik_x, 1000);
+    tracker.OnBlockConnected(H2, mik_x, 1020);
+
+    assert(tracker.GetLifetimeMinerCountAtHeight(H2) == 1);
+
+    // Advance tip with filler MIK until H1 is evicted from the sliding
+    // window (H1 < tip - activeWindow + 1, i.e., tip >= H1 + activeWindow).
+    int top = H1 + 10 + 5;
+    for (int h = 8; h <= top; ++h) {
+        tracker.OnBlockConnected(h, mik_filler, 1000 + h * 10);
+    }
+    // mik_x's earliest height (H1=5) is now evicted from m_heightToWinner.
+    // mik_filler's first appearance is at h=8, which is > H2=7, so it
+    // is NOT counted at H2 — only mik_x is.
+    assert(tracker.GetLifetimeMinerCountAtHeight(H2) == 1);
+    // Sanity: at any height >= 8, mik_filler IS counted, so total is 2.
+    assert(tracker.GetLifetimeMinerCountAtHeight(top) == 2);
+
+    // Disconnect blocks in reverse order, top to bottom.
+    for (int h = top; h >= H2 + 1; --h) {
+        tracker.OnBlockDisconnected(h);
+    }
+    // After disconnecting all filler-only blocks above H2: mik_x still
+    // has H1 and H2; mik_filler has nothing connected at all (multiset
+    // empty -> MIK erased).
+    assert(tracker.GetLifetimeMinerCountAtHeight(H2) == 1);
+
+    tracker.OnBlockDisconnected(H2);
+    // mik_x's multiset still has H1; count at H2 stays 1.
+    assert(tracker.GetLifetimeMinerCountAtHeight(H2) == 1);
+
+    tracker.OnBlockDisconnected(H1);
+    // mik_x's multiset is now empty -> MIK erased -> count drops to 0.
+    assert(tracker.GetLifetimeMinerCountAtHeight(H2) == 0);
+    std::cout << " OK\n";
+}
+
+void test_lifetime_count_multiset_minimum_updates_after_disconnect()
+{
+    std::cout << "  test_lifetime_count_multiset_minimum_updates_after_disconnect..." << std::flush;
+    // A MIK mines blocks at H1 < H2 < H3. After H1 disconnects, the
+    // earliest remaining height for this MIK is H2 — so queries below
+    // H2 should NOT count the MIK, queries at or above H2 should.
+    CCooldownTracker tracker(20);
+    CCooldownTracker::Address mik_q{}; mik_q.fill(0x42);
+    int H1 = 3, H2 = 5, H3 = 7;
+    tracker.OnBlockConnected(H1, mik_q, 1000);
+    tracker.OnBlockConnected(H2, mik_q, 1020);
+    tracker.OnBlockConnected(H3, mik_q, 1040);
+
+    // Pre-disconnect: counted from H1 onward.
+    assert(tracker.GetLifetimeMinerCountAtHeight(H1 - 1) == 0);
+    assert(tracker.GetLifetimeMinerCountAtHeight(H1) == 1);
+    assert(tracker.GetLifetimeMinerCountAtHeight(H2 - 1) == 1);
+
+    tracker.OnBlockDisconnected(H1);
+
+    // Post-disconnect: not counted below H2, counted from H2 onward.
+    assert(tracker.GetLifetimeMinerCountAtHeight(H1) == 0);
+    assert(tracker.GetLifetimeMinerCountAtHeight(H2 - 1) == 0);
+    assert(tracker.GetLifetimeMinerCountAtHeight(H2) == 1);
+    assert(tracker.GetLifetimeMinerCountAtHeight(H3) == 1);
+    std::cout << " OK\n";
+}
+
+void test_lifetime_count_clear_wipes_state()
+{
+    std::cout << "  test_lifetime_count_clear_wipes_state..." << std::flush;
+    CCooldownTracker tracker(10);
+    CCooldownTracker::Address mik_a{}; mik_a.fill(0xAA);
+    tracker.OnBlockConnected(5, mik_a, 1000);
+    assert(tracker.GetLifetimeMinerCountAtHeight(5) == 1);
+
+    tracker.Clear();
+
+    // After Clear() the lifetime multiset must be empty.
+    assert(tracker.GetLifetimeMinerCountAtHeight(5) == 0);
+    assert(tracker.GetLifetimeMinerCountAtHeight(1000000) == 0);
+    std::cout << " OK\n";
+}
+
+// =============================================================================
 // Main
 // =============================================================================
 
@@ -350,6 +532,13 @@ int main()
         test_lifetime_validator_mismatch_fails();
         test_lifetime_validator_chain_extended_past_snapshot_passes();
         test_lifetime_validator_placeholder_with_active_chain_fails();
+
+        std::cout << "\n--- v4.1.2: lifetime-validator bug regression tests ---" << std::endl;
+        test_lifetime_count_at_height_invariant_as_tip_advances();
+        test_lifetime_count_reorg_symmetric_disconnect_reconnect();
+        test_lifetime_count_cursor_scenario_evicted_then_disconnected();
+        test_lifetime_count_multiset_minimum_updates_after_disconnect();
+        test_lifetime_count_clear_wipes_state();
 
     } catch (const std::exception& e) {
         std::cerr << "\nFAIL: exception: " << e.what() << std::endl;

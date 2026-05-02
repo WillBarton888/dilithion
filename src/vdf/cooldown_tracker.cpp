@@ -255,6 +255,11 @@ void CCooldownTracker::OnBlockConnected(int height, const Address& winner, int64
     // Deterministic: pure function of canonical chain state.
     m_lifetimeBlockCount[winner]++;
 
+    // v4.1.2 — record this height in the per-MIK lifetime multiset for
+    // height-bounded lifetime queries (GetLifetimeMinerCountAtHeight).
+    // NOT evicted by the sliding-window logic below.
+    m_mikHeights[winner].insert(height);
+
     // Store timestamp for time-based expiry
     if (blockTimestamp > 0) {
         m_lastWinTimestamp[winner] = blockTimestamp;
@@ -285,12 +290,44 @@ void CCooldownTracker::OnBlockDisconnected(int height)
 {
     std::lock_guard<std::mutex> lock(m_mutex);
 
-    auto it = m_heightToWinner.find(height);
-    if (it == m_heightToWinner.end())
-        return;
+    // Identify the winner. Fast path: m_heightToWinner (sliding window;
+    // covers normal disconnects within m_activeWindow of tip).
+    // Fallback: scan m_mikHeights for the height — supports deep-reorg
+    // disconnects of evicted heights (rare; reorg-completeness per
+    // v4.1.2 design). O(distinct_MIKs) but only walked on the rare path.
+    Address winner{};
+    bool foundWinner = false;
+    bool foundInSlidingWindow = false;
 
-    Address winner = it->second;
-    m_heightToWinner.erase(it);
+    auto it = m_heightToWinner.find(height);
+    if (it != m_heightToWinner.end()) {
+        winner = it->second;
+        foundWinner = true;
+        foundInSlidingWindow = true;
+    } else {
+        for (const auto& [mik, heights] : m_mikHeights) {
+            if (heights.count(height) > 0) {
+                winner = mik;
+                foundWinner = true;
+                break;
+            }
+        }
+        if (!foundWinner) {
+            // Height was never tracked. No-op (consistent with prior behavior).
+            return;
+        }
+    }
+
+    // Sliding-window-keyed cleanup. m_heightToWinner is sliding-window only,
+    // so it's only erased on the fast path. But m_heightToTimestamp and
+    // m_heightToRegistration are keyed by height and may carry entries from
+    // disconnect paths regardless of whether m_heightToWinner had this height
+    // (Layer 3 registration tracking in particular is consensus-relevant
+    // metadata that must never go stale under reorg). Erase unconditionally
+    // for the disconnected height; erase() of a missing key is a safe no-op.
+    if (foundInSlidingWindow) {
+        m_heightToWinner.erase(it);
+    }
     m_heightToTimestamp.erase(height);
     m_heightToRegistration.erase(height);  // Layer 3: undo registration tracking
 
@@ -304,28 +341,46 @@ void CCooldownTracker::OnBlockDisconnected(int height)
         }
     }
 
-    // Recompute the address's last win height from remaining entries.
-    // Scan backwards from the end of m_heightToWinner.
-    int lastWin = -1;
-    for (auto rit = m_heightToWinner.rbegin(); rit != m_heightToWinner.rend(); ++rit) {
-        if (rit->second == winner) {
-            lastWin = rit->first;
-            break;
+    // v4.1.2 — erase ONE matching height entry from the lifetime multiset.
+    // If the multiset becomes empty, remove the MIK entry entirely so
+    // GetLifetimeMinerCountAtHeight returns the accurate count.
+    auto mhIt = m_mikHeights.find(winner);
+    if (mhIt != m_mikHeights.end()) {
+        auto found = mhIt->second.find(height);
+        if (found != mhIt->second.end()) {
+            mhIt->second.erase(found);  // erase ONE entry, not all matches
+        }
+        if (mhIt->second.empty()) {
+            m_mikHeights.erase(mhIt);
         }
     }
 
-    if (lastWin >= 0) {
-        m_lastWinHeight[winner] = lastWin;
-        // Recover timestamp from height→timestamp map
-        auto tsIt = m_heightToTimestamp.find(lastWin);
-        if (tsIt != m_heightToTimestamp.end()) {
-            m_lastWinTimestamp[winner] = tsIt->second;
+    // Sliding-window-relative bookkeeping (m_lastWinHeight / m_lastWinTimestamp)
+    // is only valid when the disconnected height was in the window. For
+    // evicted-height disconnects, m_lastWinHeight already lost any reference
+    // to this height at eviction time (or has a more-recent entry that the
+    // disconnect doesn't invalidate). No fixup needed in that case.
+    if (foundInSlidingWindow) {
+        int lastWin = -1;
+        for (auto rit = m_heightToWinner.rbegin(); rit != m_heightToWinner.rend(); ++rit) {
+            if (rit->second == winner) {
+                lastWin = rit->first;
+                break;
+            }
+        }
+
+        if (lastWin >= 0) {
+            m_lastWinHeight[winner] = lastWin;
+            auto tsIt = m_heightToTimestamp.find(lastWin);
+            if (tsIt != m_heightToTimestamp.end()) {
+                m_lastWinTimestamp[winner] = tsIt->second;
+            } else {
+                m_lastWinTimestamp.erase(winner);
+            }
         } else {
+            m_lastWinHeight.erase(winner);
             m_lastWinTimestamp.erase(winner);
         }
-    } else {
-        m_lastWinHeight.erase(winner);
-        m_lastWinTimestamp.erase(winner);
     }
 
     // Invalidate caches so next query recalculates.
@@ -342,6 +397,7 @@ void CCooldownTracker::Clear()
     m_heightToTimestamp.clear();
     m_heightToRegistration.clear();
     m_lifetimeBlockCount.clear();  // v4.0.21 — Patch C
+    m_mikHeights.clear();          // v4.1.2 — lifetime multiset per MIK
     m_cachedActiveMinersMut = 0;
     m_cachedAtHeightMut = -1;
     m_cachedShortActiveMinersMut = 0;
@@ -361,17 +417,28 @@ int CCooldownTracker::GetLifetimeMinerCount() const
 
 int CCooldownTracker::GetLifetimeMinerCountAtHeight(int atHeight) const
 {
-    // v4.1 cross-component audit HIGH-2 fix: count distinct miners who
-    // mined at or below atHeight. Walks m_heightToWinner — each entry is
-    // (height, winner). Build a set of distinct winners with key <= atHeight.
+    // v4.1.2 — read m_mikHeights (lifetime, never evicted). For each MIK
+    // with a non-empty multiset, count it iff its earliest-recorded
+    // mining height is <= atHeight (*multiset.begin() <= atHeight).
+    //
+    // Pre-v4.1.2 this walked m_heightToWinner, which is a sliding window
+    // of size m_activeWindow. As tip advanced past atHeight by activeWindow
+    // blocks, entries with key <= atHeight were evicted, and the count
+    // drifted. Three of four DilV mainnet seeds crashed-looped on
+    // 2026-05-02 because of this. The HIGH-2 audit's test only covered
+    // the increment direction (count doesn't go up); the failing
+    // direction (count goes down as window slides) was untested. See
+    // v4_1_lifetime_validator_bug.md for the post-mortem and
+    // feedback_storage_of_record_invariant.md for the project rule
+    // derived from this incident.
     std::lock_guard<std::mutex> lock(m_mutex);
-    std::set<Address> distinctMiners;
-    for (auto it = m_heightToWinner.begin();
-         it != m_heightToWinner.end() && it->first <= atHeight;
-         ++it) {
-        distinctMiners.insert(it->second);
+    int count = 0;
+    for (const auto& [mik, heights] : m_mikHeights) {
+        if (!heights.empty() && *heights.begin() <= atHeight) {
+            ++count;
+        }
     }
-    return static_cast<int>(distinctMiners.size());
+    return count;
 }
 
 void CCooldownTracker::RecalcActiveMiners(int height) const
