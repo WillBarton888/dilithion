@@ -182,7 +182,15 @@ public:
     // unchanged across DIL/Testnet/DilV/Regtest unless a factory
     // overrides.
     int nHeaderRateWindowSec{60};
-    int nHeaderRateLimitPerWindow{1000};
+    // v4.1: bumped 1000 -> 5000. The rate limit is per-peer per-window. Standard
+    // MAX_HEADERS_RESULTS = 2000 per batch (Bitcoin Core idiom), so 1000/60s
+    // would silently reject every legitimate headers batch in QueueHeadersForValidation
+    // (line 2495, no verbose log). Discovered during SYD mainnet IBD test 2026-05-02
+    // where SYD couldn't sync from any v4.0.x peer because every 2000-header batch
+    // hit the limit. 5000 allows 2.5 standard batches per 60s = ~83 headers/sec
+    // sustained, well above legitimate IBD throughput, while still rejecting a peer
+    // that floods more than 5x normal pace.
+    int nHeaderRateLimitPerWindow{5000};
 
     // VDF Fair Mining parameters
     // vdfActivationHeight: Hybrid period starts (accept both RandomX and VDF blocks)

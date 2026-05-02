@@ -2490,9 +2490,19 @@ bool CHeadersManager::FullValidateHeader(const CBlockHeader& header, int height)
 bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<CBlockHeader>& headers)
 {
     // Phase 6 PR6.1: per-peer rate limit. Same policy as ProcessHeaders.
+    // v4.1: added log message — previously silent return false here hid the
+    // cause when the limit was set too low (1000 vs MAX_HEADERS_RESULTS=2000),
+    // making IBD failures untraceable. Always log the rate-limit reject.
     {
         std::lock_guard<std::mutex> lock(cs_headers);
         if (!headers.empty() && !CheckPeerHeaderRateLimit(peer, headers.size())) {
+            LogPrintf(NET, WARN,
+                "[HeadersManager] Rate-limit reject (Queue): peer=%d batch=%zu "
+                "(window limit = %d/%ds)\n",
+                static_cast<int>(peer),
+                headers.size(),
+                Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateLimitPerWindow : 1000,
+                Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateWindowSec : 60);
             return false;
         }
     }
