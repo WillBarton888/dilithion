@@ -7029,7 +7029,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 size_t peer_count = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
                 auto now = std::chrono::steady_clock::now();
 
-                if (peer_count == 0) {
+                // Regtest bypass: the no-peers grace period and the solo-fork
+                // detection are mainnet safety nets — regtest IS solo by design
+                // (single-miner harness), and the localhost full-mesh topology
+                // legitimately has flapping peers due to the "already have
+                // outbound connection" rejection on inbound. Both safety nets
+                // would false-positive in this environment. Gate both behind
+                // the regtest check so production behavior is unchanged.
+                const bool kIsRegtest =
+                    Dilithion::g_chainParams && Dilithion::g_chainParams->IsRegtest();
+
+                if (!kIsRegtest && peer_count == 0) {
                     // No peers - check if we need to start countdown or pause mining
                     if (no_peers_since == std::chrono::steady_clock::time_point{}) {
                         // Just lost peers - start the countdown
@@ -7165,7 +7175,11 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                         float ratio = static_cast<float>(self_count) / static_cast<float>(recent_blocks.size());
                                         size_t peer_cnt = g_node_context.peer_manager ? g_node_context.peer_manager->GetConnectionCount() : 0;
 
-                                        if (ratio >= SOLO_PAUSE_RATIO && peer_cnt > 0
+                                        // Regtest bypass: single-miner harness will always show
+                                        // 100% self-mined ratio. Production safety net only.
+                                        const bool kIsRegtest_ratio =
+                                            Dilithion::g_chainParams && Dilithion::g_chainParams->IsRegtest();
+                                        if (!kIsRegtest_ratio && ratio >= SOLO_PAUSE_RATIO && peer_cnt > 0
                                             && !mining_paused_consensus_fork) {
                                             std::cout << std::endl;
                                             std::cout << "[Mining] WARNING: " << static_cast<int>(ratio * 100)
@@ -7175,7 +7189,7 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             std::cout << std::endl;
                                             if (vdf_miner.IsRunning()) vdf_miner.Stop();
                                             mining_paused_consensus_fork = true;
-                                        } else if (ratio >= SOLO_WARN_RATIO && peer_cnt > 0
+                                        } else if (!kIsRegtest_ratio && ratio >= SOLO_WARN_RATIO && peer_cnt > 0
                                                    && !solo_warning_shown) {
                                             std::cout << "[Mining] WARNING: " << static_cast<int>(ratio * 100)
                                                       << "% of last " << recent_blocks.size()
@@ -7187,7 +7201,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                         // Sequential counter (existing logic)
                                         consecutive_self_mined++;
 
-                                        if (consecutive_self_mined >= SOLO_PAUSE_THRESHOLD
+                                        // Regtest bypass: single-miner harness expected
+                                        // to chain consecutive self-mined blocks. Production
+                                        // safety net only.
+                                        const bool kIsRegtest_seq =
+                                            Dilithion::g_chainParams && Dilithion::g_chainParams->IsRegtest();
+                                        if (!kIsRegtest_seq && consecutive_self_mined >= SOLO_PAUSE_THRESHOLD
                                             && !mining_paused_consensus_fork) {
                                             // CRITICAL: Auto-pause mining
                                             std::cout << std::endl;
