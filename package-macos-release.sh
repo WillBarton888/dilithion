@@ -37,6 +37,17 @@ chmod +x "${RELEASE_DIR}/dilithion-node"
 chmod +x "${RELEASE_DIR}/check-wallet-balance"
 chmod +x "${RELEASE_DIR}/genesis_gen"
 
+# Bundle Homebrew dylibs (libssl, libcrypto, libleveldb, libgmp, libsnappy,
+# libminiupnpc, etc.) into lib/ so the package is self-contained — users
+# don't need Homebrew installed. Walks otool -L recursively, copies all
+# non-system dependencies, and rewrites references to point at the bundled
+# copies. Added v4.1.1 in response to "Library not loaded" reports.
+echo "[2.5/4] Bundling Homebrew dylibs for self-contained package..."
+bash "$(dirname "$0")/scripts/bundle-macos-dylibs.sh" "${RELEASE_DIR}" \
+    "${RELEASE_DIR}/dilithion-node" \
+    "${RELEASE_DIR}/check-wallet-balance" \
+    "${RELEASE_DIR}/genesis_gen"
+
 # Copy launcher scripts
 echo "[3/4] Copying launcher scripts and documentation..."
 cp start-mining.sh "${RELEASE_DIR}/"

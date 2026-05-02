@@ -33,6 +33,16 @@ cp check-wallet-balance "${RELEASE_DIR}/" || { echo "ERROR: check-wallet-balance
 chmod +x "${RELEASE_DIR}/dilv-node"
 chmod +x "${RELEASE_DIR}/check-wallet-balance"
 
+# Bundle Homebrew dylibs into lib/ so the package is self-contained.
+# See scripts/bundle-macos-dylibs.sh for the recursive otool/install_name_tool
+# walk that copies every non-system dependency, rewrites references to
+# @executable_path/lib/<name> (binaries) or @loader_path/<name> (sibling
+# dylibs), and adds @rpath to the top-level binaries.
+echo "[2.5/4] Bundling Homebrew dylibs for self-contained package..."
+bash "$(dirname "$0")/scripts/bundle-macos-dylibs.sh" "${RELEASE_DIR}" \
+    "${RELEASE_DIR}/dilv-node" \
+    "${RELEASE_DIR}/check-wallet-balance"
+
 # Copy launcher scripts and documentation
 echo "[3/4] Copying launcher scripts and documentation..."
 cp start-dilv-mining.sh "${RELEASE_DIR}/" || { echo "ERROR: start-dilv-mining.sh not found."; exit 1; }
