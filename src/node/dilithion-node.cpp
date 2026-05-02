@@ -6704,9 +6704,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // (32-byte hex password), persist them to <datadir>/dilithion.conf
             // mode 0600, and use them. Operator can edit the config later to
             // change them.
-            extern bool GenerateSalt(std::vector<uint8_t>&);
+            // FINDING-1 (red-team rc2 review): GenerateSalt() resizes to
+            // WALLET_CRYPTO_SALT_SIZE=16, only filling 16 bytes (128 bits).
+            // Use GetStrongRandBytes directly for the full 32 bytes (256 bits)
+            // promised in the comments.
+            extern bool GetStrongRandBytes(uint8_t* buf, size_t len);
             std::vector<uint8_t> pw_bytes(32);
-            if (!GenerateSalt(pw_bytes)) {
+            if (!GetStrongRandBytes(pw_bytes.data(), pw_bytes.size())) {
                 std::cerr << "ERROR: --public-api requires RPC authentication, and "
                           << "auto-generation of random credentials failed.\n"
                           << "Add these lines to " << config.datadir << "/dilithion.conf:\n"
