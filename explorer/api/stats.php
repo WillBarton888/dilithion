@@ -16,7 +16,8 @@ require_once __DIR__ . "/metrics_helpers.php";
 // Chain-specific cache files
 $config = getChainConfig();
 $chainSuffix = $config['chain'] === 'dilv' ? '-dilv' : '';
-$cacheFile = __DIR__ . "/../cache/stats{$chainSuffix}.json";
+$cacheDir = _explorerCacheDir();
+$cacheFile = "{$cacheDir}/stats{$chainSuffix}.json";
 if (file_exists($cacheFile)) {
     $cacheAge = time() - filemtime($cacheFile);
     if ($cacheAge < 30) {
@@ -87,7 +88,7 @@ if ($config['chain'] === 'dil' && $difficulty > 0 && $avgBlockTime !== null && $
 
 // Get holder count (cached separately for 60s - expensive UTXO scan)
 $holders = null;
-$holderCacheFile = __DIR__ . "/../cache/holders{$chainSuffix}.json";
+$holderCacheFile = "{$cacheDir}/holders{$chainSuffix}.json";
 $holderCacheValid = false;
 if (file_exists($holderCacheFile)) {
     $holderCacheAge = time() - filemtime($holderCacheFile);
