@@ -7,6 +7,12 @@
  *
  * Each helper has its own cache TTL tuned to how expensive the computation is
  * and how fast the underlying data actually changes.
+ *
+ * Single-flight: each helper takes a non-blocking flock on a sibling .lock
+ * file before the heavy path. If contended, the caller returns whatever cache
+ * exists (even if stale). Without this, every TTL expiry can stampede 100
+ * PHP-FPM workers into the same RPC walk, self-DOS the local node, and turn
+ * a 10s call into a 60s call. (Lesson from the 2026-05-02 explorer outage.)
  */
 
 require_once __DIR__ . "/rpc.php";
@@ -23,177 +29,256 @@ const SEED_NODES = [
     ['134.199.159.83', '134.199.159.83'], // Sydney
 ];
 
+// Cache dir lives at explorer/cache (sibling of api/). PHP-FPM (www-data)
+// must be able to write here. Bootstrap on first call so a fresh deploy
+// doesn't need a manual mkdir.
+function _explorerCacheDir(): string {
+    $dir = __DIR__ . "/../cache";
+    if (!is_dir($dir)) @mkdir($dir, 0775, true);
+    return $dir;
+}
+
+/**
+ * Acquire a non-blocking exclusive lock on $cacheFile.lock. Returns the file
+ * handle on success (caller MUST release via _releaseSingleFlight) or null if
+ * another worker holds it.
+ */
+function _acquireSingleFlight(string $cacheFile) {
+    $fh = @fopen("{$cacheFile}.lock", 'c');
+    if (!$fh) return null;
+    if (!flock($fh, LOCK_EX | LOCK_NB)) {
+        fclose($fh);
+        return null;
+    }
+    return $fh;
+}
+
+function _releaseSingleFlight($fh): void {
+    if ($fh) {
+        flock($fh, LOCK_UN);
+        fclose($fh);
+    }
+}
+
 /**
  * Active miners: distinct MIKs that produced a block in the last N blocks.
- * Cache 2 min — expensive (N getblock calls) but doesn't change materially on
- * that timescale. Label on UI: "Active Miners (last 24h)" etc.
+ * TTL 10 min — value drifts slowly, no point recomputing every minute.
  */
 function getActiveMinerCount(int $tipHeight, string $chain): ?int {
-    $window   = $chain === 'dilv' ? ACTIVE_WINDOW_DILV : ACTIVE_WINDOW_DIL;
-    $cacheKey = "active_miners-{$chain}";
-    $cacheFile = __DIR__ . "/../cache/{$cacheKey}.json";
+    $window    = $chain === 'dilv' ? ACTIVE_WINDOW_DILV : ACTIVE_WINDOW_DIL;
+    $cacheFile = _explorerCacheDir() . "/active_miners-{$chain}.json";
 
-    if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 120) {
+    if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 600) {
         $c = json_decode(@file_get_contents($cacheFile), true);
         if (is_array($c) && isset($c['count'])) return (int)$c['count'];
     }
 
-    $startHeight = max(0, $tipHeight - $window + 1);
-    $miks = [];
-    for ($h = $startHeight; $h <= $tipHeight; $h++) {
-        $hashResp = dilithionRPC('getblockhash', ['height' => $h]);
-        $hash = is_array($hashResp) ? ($hashResp['blockhash'] ?? null) : $hashResp;
-        if (!$hash) continue;
-        $block = dilithionRPC('getblock', ['hash' => $hash, 'verbosity' => 1]);
-        if (!$block) continue;
-        $mik = $block['mik'] ?? null;
-        if ($mik) $miks[$mik] = true;
+    $lock = _acquireSingleFlight($cacheFile);
+    if (!$lock) {
+        // Another worker is computing — serve whatever we have, even if stale.
+        if (file_exists($cacheFile)) {
+            $c = json_decode(@file_get_contents($cacheFile), true);
+            if (is_array($c) && isset($c['count'])) return (int)$c['count'];
+        }
+        return null;
     }
-    $count = count($miks);
 
-    @file_put_contents($cacheFile, json_encode([
-        'count'      => $count,
-        'window'     => $window,
-        'tipHeight'  => $tipHeight,
-        'computedAt' => time(),
-    ]));
-    return $count;
+    try {
+        // Re-check inside the lock; another worker may have just refreshed.
+        if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 600) {
+            $c = json_decode(@file_get_contents($cacheFile), true);
+            if (is_array($c) && isset($c['count'])) return (int)$c['count'];
+        }
+
+        $startHeight = max(0, $tipHeight - $window + 1);
+        $miks = [];
+        for ($h = $startHeight; $h <= $tipHeight; $h++) {
+            $hashResp = dilithionRPC('getblockhash', ['height' => $h]);
+            $hash = is_array($hashResp) ? ($hashResp['blockhash'] ?? null) : $hashResp;
+            if (!$hash) continue;
+            $block = dilithionRPC('getblock', ['hash' => $hash, 'verbosity' => 1]);
+            if (!$block) continue;
+            $mik = $block['mik'] ?? null;
+            if ($mik) $miks[$mik] = true;
+        }
+        $count = count($miks);
+
+        @file_put_contents($cacheFile, json_encode([
+            'count'      => $count,
+            'window'     => $window,
+            'tipHeight'  => $tipHeight,
+            'computedAt' => time(),
+        ]));
+        return $count;
+    } finally {
+        _releaseSingleFlight($lock);
+    }
 }
 
 /**
  * Unique nodes visible to at least one seed.
  * Queries getpeerinfo on each of the 4 seeds in parallel, dedupes by addr.
- * Cache 30 s. Misses nodes that never touch a seed (minority) — phase 2 would
- * add a dedicated P2P crawler.
+ * TTL 5 min — slow remote seeds can make one call take 10s, and refreshing
+ * every 30s under load self-DOSes everything.
  */
 function getNodesOnline(int $rpcPort, string $chain): ?array {
-    $cacheKey = "nodes_online-{$chain}";
-    $cacheFile = __DIR__ . "/../cache/{$cacheKey}.json";
+    $cacheFile = _explorerCacheDir() . "/nodes_online-{$chain}.json";
 
-    if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 30) {
+    if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 300) {
         $c = json_decode(@file_get_contents($cacheFile), true);
         if (is_array($c) && isset($c['nodesOnline'])) return $c;
     }
 
-    $multi = curl_multi_init();
-    $handles = [];
-    foreach (SEED_NODES as $i => [, $host]) {
-        $ch = curl_init();
-        curl_setopt_array($ch, [
-            CURLOPT_URL            => "http://{$host}:{$rpcPort}/",
-            CURLOPT_RETURNTRANSFER => true,
-            CURLOPT_POST           => true,
-            CURLOPT_POSTFIELDS     => json_encode([
-                'jsonrpc' => '2.0', 'id' => 1,
-                'method'  => 'getpeerinfo', 'params' => [],
-            ]),
-            CURLOPT_TIMEOUT        => 10,
-            CURLOPT_CONNECTTIMEOUT => 3,
-            CURLOPT_HTTPHEADER     => [
-                'Content-Type: application/json',
-                'X-Dilithion-RPC: 1',
-                'Authorization: Basic ' . base64_encode('rpc:rpc'),
-            ],
-        ]);
-        curl_multi_add_handle($multi, $ch);
-        $handles[$i] = $ch;
-    }
-    $running = null;
-    do {
-        curl_multi_exec($multi, $running);
-        curl_multi_select($multi, 0.1);
-    } while ($running > 0);
-
-    $peerSet          = [];
-    $seedsResponding  = 0;
-    foreach ($handles as $ch) {
-        $resp = curl_multi_getcontent($ch);
-        $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_multi_remove_handle($multi, $ch);
-        curl_close($ch);
-        if ($code !== 200 || !$resp) continue;
-        // The node sometimes emits malformed JSON in getpeerinfo when a peer's
-        // subversion string contains unescaped quotes (e.g. "/Dilithion:"v3.8.3"/").
-        // So we skip full JSON parsing and just regex-extract the addr fields —
-        // that's all we need, and it's robust to the malformed subver case.
-        // TODO: fix at the node level so getpeerinfo emits valid JSON.
-        if (!preg_match_all('/"addr"\s*:\s*"([^"\s]+?)(?:[:\s].*?)?"/', $resp, $m)) continue;
-        $seedsResponding++;
-        foreach ($m[1] as $ipPort) {
-            // Strip port and any parenthetical suffix so the same node seen by
-            // multiple seeds on different outbound ports only counts once.
-            $ipOnly = preg_replace('/:\d+$/', '', $ipPort);
-            if ($ipOnly !== '') $peerSet[$ipOnly] = true;
+    $lock = _acquireSingleFlight($cacheFile);
+    if (!$lock) {
+        if (file_exists($cacheFile)) {
+            $c = json_decode(@file_get_contents($cacheFile), true);
+            if (is_array($c) && isset($c['nodesOnline'])) return $c;
         }
-    }
-    curl_multi_close($multi);
-
-    // Include the seeds themselves (they're nodes too, don't see themselves as peers)
-    foreach (SEED_NODES as [$pubIp,]) {
-        $peerSet[$pubIp] = true;
+        return null;
     }
 
-    $result = [
-        'nodesOnline'     => count($peerSet),
-        'seedsResponding' => $seedsResponding,
-        'seedsTotal'      => count(SEED_NODES),
-        'computedAt'      => time(),
-    ];
-    @file_put_contents($cacheFile, json_encode($result));
-    return $result;
+    try {
+        if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 300) {
+            $c = json_decode(@file_get_contents($cacheFile), true);
+            if (is_array($c) && isset($c['nodesOnline'])) return $c;
+        }
+
+        $multi = curl_multi_init();
+        $handles = [];
+        foreach (SEED_NODES as $i => [, $host]) {
+            $ch = curl_init();
+            curl_setopt_array($ch, [
+                CURLOPT_URL            => "http://{$host}:{$rpcPort}/",
+                CURLOPT_RETURNTRANSFER => true,
+                CURLOPT_POST           => true,
+                CURLOPT_POSTFIELDS     => json_encode([
+                    'jsonrpc' => '2.0', 'id' => 1,
+                    'method'  => 'getpeerinfo', 'params' => [],
+                ]),
+                CURLOPT_TIMEOUT        => 10,
+                CURLOPT_CONNECTTIMEOUT => 3,
+                CURLOPT_HTTPHEADER     => [
+                    'Content-Type: application/json',
+                    'X-Dilithion-RPC: 1',
+                    'Authorization: Basic ' . base64_encode('rpc:rpc'),
+                ],
+            ]);
+            curl_multi_add_handle($multi, $ch);
+            $handles[$i] = $ch;
+        }
+        $running = null;
+        do {
+            curl_multi_exec($multi, $running);
+            curl_multi_select($multi, 0.1);
+        } while ($running > 0);
+
+        $peerSet         = [];
+        $seedsResponding = 0;
+        foreach ($handles as $ch) {
+            $resp = curl_multi_getcontent($ch);
+            $code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+            curl_multi_remove_handle($multi, $ch);
+            curl_close($ch);
+            if ($code !== 200 || !$resp) continue;
+            // The node sometimes emits malformed JSON in getpeerinfo when a peer's
+            // subversion string contains unescaped quotes (e.g. "/Dilithion:"v3.8.3"/").
+            // So we skip full JSON parsing and just regex-extract the addr fields —
+            // that's all we need, and it's robust to the malformed subver case.
+            // TODO: fix at the node level so getpeerinfo emits valid JSON.
+            if (!preg_match_all('/"addr"\s*:\s*"([^"\s]+?)(?:[:\s].*?)?"/', $resp, $m)) continue;
+            $seedsResponding++;
+            foreach ($m[1] as $ipPort) {
+                $ipOnly = preg_replace('/:\d+$/', '', $ipPort);
+                if ($ipOnly !== '') $peerSet[$ipOnly] = true;
+            }
+        }
+        curl_multi_close($multi);
+
+        foreach (SEED_NODES as [$pubIp,]) {
+            $peerSet[$pubIp] = true;
+        }
+
+        $result = [
+            'nodesOnline'     => count($peerSet),
+            'seedsResponding' => $seedsResponding,
+            'seedsTotal'      => count(SEED_NODES),
+            'computedAt'      => time(),
+        ];
+        @file_put_contents($cacheFile, json_encode($result));
+        return $result;
+    } finally {
+        _releaseSingleFlight($lock);
+    }
 }
 
 /**
  * Cumulative transaction count (sum of tx_count across all blocks on this chain).
  *
- * Incremental: cache stores {last_height, total_txs}. On each call, walks
- * from last_height+1 to current tip. First-ever call is slow (scans all
- * history); after that it's only a handful of new blocks per refresh.
+ * Incremental: cache stores {lastHeight, totalTxs}. Each call extends the walk
+ * by up to TOTAL_TX_BATCH blocks. First-ever call(s) are slow until the chain
+ * is fully walked; after warmedUp=true, subsequent calls only see new tip blocks.
  *
- * Cache TTL: 60 s (not because it's expensive once warmed, but so we don't
- * RPC-spam the node on every request).
+ * TTL 10 min, single-flight: no thundering herd, no redundant walks.
  */
+const TOTAL_TX_BATCH = 5000;
+
 function getTotalTransactions(int $tipHeight, string $chain): ?int {
-    $cacheFile = __DIR__ . "/../cache/total_tx-{$chain}.json";
-    $state = ['lastHeight' => -1, 'totalTxs' => 0];
-    if (file_exists($cacheFile)) {
-        // Return fresh cache fast — don't re-walk the chain if we just did.
-        if ((time() - filemtime($cacheFile)) < 60) {
+    $cacheFile = _explorerCacheDir() . "/total_tx-{$chain}.json";
+
+    if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 600) {
+        $c = json_decode(@file_get_contents($cacheFile), true);
+        if (is_array($c) && isset($c['totalTxs'])) return (int)$c['totalTxs'];
+    }
+
+    $lock = _acquireSingleFlight($cacheFile);
+    if (!$lock) {
+        if (file_exists($cacheFile)) {
             $c = json_decode(@file_get_contents($cacheFile), true);
             if (is_array($c) && isset($c['totalTxs'])) return (int)$c['totalTxs'];
         }
-        $loaded = json_decode(@file_get_contents($cacheFile), true);
-        if (is_array($loaded) && isset($loaded['lastHeight'], $loaded['totalTxs'])) {
-            $state = $loaded;
+        return null;
+    }
+
+    try {
+        if (file_exists($cacheFile) && (time() - filemtime($cacheFile)) < 600) {
+            $c = json_decode(@file_get_contents($cacheFile), true);
+            if (is_array($c) && isset($c['totalTxs'])) return (int)$c['totalTxs'];
         }
+
+        // Load existing incremental state (preserve progress across restarts).
+        $state = ['lastHeight' => -1, 'totalTxs' => 0];
+        if (file_exists($cacheFile)) {
+            $loaded = json_decode(@file_get_contents($cacheFile), true);
+            if (is_array($loaded) && isset($loaded['lastHeight'], $loaded['totalTxs'])) {
+                $state = $loaded;
+            }
+        }
+
+        $startHeight = (int)$state['lastHeight'] + 1;
+        $total       = (int)$state['totalTxs'];
+        $endHeight   = min($tipHeight, $startHeight + TOTAL_TX_BATCH - 1);
+
+        for ($h = $startHeight; $h <= $endHeight; $h++) {
+            $hashResp = dilithionRPC('getblockhash', ['height' => $h]);
+            $hash = is_array($hashResp) ? ($hashResp['blockhash'] ?? null) : $hashResp;
+            if (!$hash) continue;
+            $block = dilithionRPC('getblock', ['hash' => $hash, 'verbosity' => 0]);
+            if (!$block) continue;
+            $total += (int)($block['tx_count'] ?? 0);
+        }
+
+        @file_put_contents($cacheFile, json_encode([
+            'lastHeight' => $endHeight,
+            'totalTxs'   => $total,
+            'tipHeight'  => $tipHeight,
+            'warmedUp'   => ($endHeight >= $tipHeight),
+            'updatedAt'  => time(),
+        ]));
+        return $total;
+    } finally {
+        _releaseSingleFlight($lock);
     }
-
-    $startHeight = (int)$state['lastHeight'] + 1;
-    $total       = (int)$state['totalTxs'];
-
-    // Safety: cap how many blocks we scan in a single request so a cold cache
-    // doesn't block the whole stats endpoint for minutes. 2000 blocks ≈ a few
-    // seconds over loopback. Subsequent calls will close the gap.
-    $endHeight = min($tipHeight, $startHeight + 2000 - 1);
-
-    for ($h = $startHeight; $h <= $endHeight; $h++) {
-        $hashResp = dilithionRPC('getblockhash', ['height' => $h]);
-        $hash = is_array($hashResp) ? ($hashResp['blockhash'] ?? null) : $hashResp;
-        if (!$hash) continue;
-        $block = dilithionRPC('getblock', ['hash' => $hash, 'verbosity' => 0]);
-        if (!$block) continue;
-        $total += (int)($block['tx_count'] ?? 0);
-    }
-
-    $state = [
-        'lastHeight' => $endHeight,
-        'totalTxs'   => $total,
-        'tipHeight'  => $tipHeight,
-        'warmedUp'   => ($endHeight >= $tipHeight),
-        'updatedAt'  => time(),
-    ];
-    @file_put_contents($cacheFile, json_encode($state));
-    return $total;
 }
 
 /**
