@@ -156,7 +156,37 @@ Run mempool admission validation against one or more raw transactions WITHOUT br
 }
 ```
 
-`maxfeerate` is intentionally a no-op in Dilithion -- the node uses one fee policy via `Consensus::CheckFee` and has no separate accept-with-different-fee-cap path. We accept the parameter so clients targeting Bitcoin Core's RPC schema work unmodified.
+`maxfeerate` is intentionally a no-op in Dilithion -- the node uses one fee policy via `Consensus::CheckFee` and has no separate accept-with-different-fee-cap path. We accept the parameter so clients targeting Bitcoin Core's RPC schema work unmodified. Negative `maxfeerate` is rejected with `"maxfeerate must be non-negative"` (BC v28.0 also rejects negative fee rates).
+
+### Divergences from sendrawtransaction
+
+`testmempoolaccept` shares the per-tx validation gauntlet (signature, fee, size,
+double-spend) with `sendrawtransaction`, but the following intentional divergences
+exist. Callers MUST treat `allowed=true` as a strong-but-not-absolute signal:
+
+1. **Capacity-full mempool, no eviction.** When the mempool is at its count cap
+   or size cap, `testmempoolaccept` returns `allowed=false` immediately. The same
+   tx submitted via `sendrawtransaction` may still succeed if `AddTxUnlocked`
+   evicts a lower-fee tx to make room. Eviction mutates state, so it is not
+   attempted in `testmempoolaccept`. (This matches BC v28.0's divergence on a
+   different axis — BC's `MemPoolAccept::AcceptToMemoryPool(test_accept=true)`
+   also doesn't perform package-aware acceptance.)
+
+2. **Within-batch duplicates treated independently.** Submitting the same tx twice
+   in a single `rawtxs` array yields `allowed=true` for BOTH rows (each row is
+   validated against the live mempool, not against earlier rows in the same
+   batch). `sendrawtransaction` would accept the first call and reject the second
+   with `"Failed to add to mempool: Already in mempool"`.
+
+3. **Within-batch conflicts treated independently.** Two transactions in a single
+   batch that spend the same outpoint (mutual double-spend) both yield
+   `allowed=true`. `sendrawtransaction` would accept whichever was submitted first
+   and reject the second with `"Failed to add to mempool: Transaction spends
+   output already spent by transaction in mempool (double-spend attempt)"`.
+
+For batch use cases that require true atomicity (e.g. package relay), use
+sequential `sendrawtransaction` calls. `testmempoolaccept` is a per-tx preview
+against the live mempool, not a package-acceptance API.
 
 ### Response
 
@@ -181,29 +211,38 @@ Run mempool admission validation against one or more raw transactions WITHOUT br
 
 ### Reject-reason wording
 
-Reject-reasons are byte-for-byte equivalent to `sendrawtransaction`'s error wording for the same input. A caller running `testmempoolaccept` then `sendrawtransaction` against the same hex must see the same string in both places. Documented reject reasons (T1.B-2 contract):
+Reject-reasons are byte-for-byte equivalent to `sendrawtransaction`'s error wording
+for the same input on the per-tx validation gauntlet. A caller running
+`testmempoolaccept` then `sendrawtransaction` against the same hex sees the same
+string in both places EXCEPT for the divergences enumerated above
+(capacity-full / within-batch dup / within-batch conflict). For mempool-validation
+rejects, the field carries the full `"Failed to add to mempool: <bare>"` wording so
+string-equality comparisons against `sendrawtransaction`'s thrown error work
+without massaging. Documented reject reasons (T1.B-2 contract):
 
 | Reason | Trigger |
 |--------|---------|
-| `Coinbase transaction not allowed in mempool` | Coinbase tx (consensus violation) |
-| `Already in mempool` | Tx with same txid is already in the mempool |
-| `Transaction spends output already spent by transaction in mempool (double-spend attempt)` | Conflicts with an existing mempool tx |
-| `Negative fee not allowed` | Fee is negative |
-| `Transaction time must be positive` | `time <= 0` |
-| `Transaction time too far in future` | `time > now + 2h` |
-| `Transaction height cannot be zero` | `height == 0` |
-| `Transaction exceeds maximum size` | tx > 1 MB |
-| `Mempool full (transaction count limit)` | Mempool at count cap (no eviction attempted in TestAccept) |
-| `Mempool full (size limit)` | Mempool at size cap |
-| `Transaction validation failed: ...` | Failed `CTransactionValidator::CheckTransaction` (UTXO, signatures, etc.) |
+| `Failed to add to mempool: Coinbase transaction not allowed in mempool` | Coinbase tx (consensus violation) |
+| `Failed to add to mempool: Already in mempool` | Tx with same txid is already in the mempool |
+| `Failed to add to mempool: Transaction spends output already spent by transaction in mempool (double-spend attempt)` | Conflicts with an existing mempool tx |
+| `Failed to add to mempool: Negative fee not allowed` | Fee is negative |
+| `Failed to add to mempool: Transaction time must be positive` | `time <= 0` |
+| `Failed to add to mempool: Transaction time too far in future` | `time > now + 2h` |
+| `Failed to add to mempool: Transaction height cannot be zero` | `height == 0` |
+| `Failed to add to mempool: Transaction exceeds maximum size` | tx > 1 MB |
+| `Failed to add to mempool: Mempool full (transaction count limit)` | Mempool at count cap (no eviction attempted in `testmempoolaccept`; `sendrawtransaction` may still succeed via eviction — see Divergences) |
+| `Failed to add to mempool: Mempool full (size limit)` | Mempool at size cap (no eviction attempted in `testmempoolaccept`; `sendrawtransaction` may still succeed via eviction — see Divergences) |
+| `Transaction validation failed: ...` | Failed `CTransactionValidator::CheckTransaction` (UTXO, signatures, etc.) — no `"Failed to add to mempool:"` prefix here because `sendrawtransaction` also doesn't prefix this branch (validation runs before `AddTx`) |
 
 ### State integrity guarantee
 
-`testmempoolaccept` is read-only on mempool state. After any number of calls (including 100 simultaneous calls from different clients), the following invariants hold:
+`testmempoolaccept` is read-only on mempool state. After any number of calls (including 100 simultaneous calls from different clients), the following invariants hold and are pinned by `testaccept_concurrent_no_state_leak` in `src/test/testmempoolaccept_tests.cpp`:
 
 - `mempool.Size()` is unchanged.
-- `mapTx`, `setEntries`, `mapSpentOutpoints`, `mapDescendants` are all unchanged.
-- Counter atomics (`metric_adds`, `metric_add_failures`, etc.) are unchanged.
+- The set of txids in the mempool (`GetTxIdsForStateIntegrityTests()`) is unchanged.
+- The set of spent outpoints (`GetSpentOutpointsForStateIntegrityTests()`) is unchanged.
+- The descendant-tracking state (`GetDescendantsForStateIntegrityTests()`) is unchanged.
+- Counter atomics (`metric_adds`, `metric_add_failures`, `metric_evictions`, etc.) are unchanged.
 
 A defence-in-depth check inside the handler logs a `STATE LEAK` warning to stderr if `mempool.Size()` changes across the call -- alarm-grade signal that should never fire.
 
@@ -226,7 +265,11 @@ curl -s --user rpc:rpc -H 'X-Dilithion-RPC: 1' -H 'content-type:application/json
 |-----|---------------------|
 | `testmempoolaccept` | `src/rpc/mempool.cpp` v28.0 |
 
-Test-accept semantics adapted from BC's `MemPoolAccept::AcceptToMemoryPool` with `test_accept=true`. Dilithion implements this via `CTxMemPool::TestAccept` -- a const method that delegates to a `ValidateLocked` private helper shared with `AddTxUnlocked`'s validation phase. The shared helper guarantees that `testmempoolaccept` and `sendrawtransaction` accept/reject under identical conditions.
+Test-accept semantics adapted from BC's `MemPoolAccept::AcceptToMemoryPool` with `test_accept=true`. Dilithion implements this via `CTxMemPool::TestAccept` -- a const method that delegates to a `ValidateLocked` private helper shared with `AddTxUnlocked`'s validation phase. The shared `ValidateLocked` helper covers the per-tx validation gauntlet (signature, fee, size, double-spend); divergences exist for capacity-full mempool, within-batch duplicates, and within-batch conflicts -- see the **Divergences from sendrawtransaction** subsection above.
+
+### TOCTOU caveats
+
+`allowed=true` reflects the mempool/UTXO state at the moment of the call; a subsequent `sendrawtransaction` may still fail if a block is connected, the parent is double-spent, or the mempool fills (and eviction does not free room) in between. Wallets/exchanges should treat the result as a strong-but-not-absolute signal and surface failures from the eventual `sendrawtransaction` call to the user.
 
 ---
 

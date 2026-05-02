@@ -1129,6 +1129,30 @@ size_t CTxMemPool::Size() const {
     return mapTx.size();
 }
 
+// T1.B-2 H3: Test-only read-only state-integrity accessors. See header
+// docstring -- these are intentionally test-only. Each takes `cs` and returns
+// an O(N) copy of the underlying structure for use in
+// `testaccept_concurrent_no_state_leak`'s before/after byte-identical check.
+std::set<uint256> CTxMemPool::GetTxIdsForStateIntegrityTests() const {
+    std::lock_guard<std::mutex> lock(cs);
+    std::set<uint256> ids;
+    for (const auto& kv : mapTx) {
+        ids.insert(kv.first);
+    }
+    return ids;
+}
+
+std::set<COutPoint> CTxMemPool::GetSpentOutpointsForStateIntegrityTests() const {
+    std::lock_guard<std::mutex> lock(cs);
+    return mapSpentOutpoints;  // copy
+}
+
+std::map<uint256, std::set<uint256>>
+CTxMemPool::GetDescendantsForStateIntegrityTests() const {
+    std::lock_guard<std::mutex> lock(cs);
+    return mapDescendants;  // copy
+}
+
 size_t CTxMemPool::GetMempoolSize() const {
     std::lock_guard<std::mutex> lock(cs);
     return mempool_size;
