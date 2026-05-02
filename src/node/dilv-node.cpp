@@ -6853,9 +6853,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         static uint256 last_checked_tip_hash;
         static int consecutive_self_mined = 0;
         static bool mining_paused_consensus_fork = false;
-        static bool solo_warning_shown = false;
-        static constexpr int SOLO_WARNING_THRESHOLD = 5;   // Warn after 5 consecutive self-mined blocks
-        static constexpr int SOLO_PAUSE_THRESHOLD = 10;    // Pause after 10 consecutive self-mined blocks
+        // v4.1: tightened from 10 to 2. With cooldown rule active
+        // (MIN_COOLDOWN=2 in cooldown_tracker.h), a single MIK CANNOT
+        // legitimately win 2 consecutive blocks on a healthy chain.
+        // 2-in-a-row indicates either consensus rule bypass or an
+        // isolated solo fork — pause and alert operator immediately.
+        // SOLO_WARNING_THRESHOLD removed entirely (warning at 1 would
+        // fire on every self-mined block; meaningless).
+        static constexpr int SOLO_PAUSE_THRESHOLD = 2;
 
         // Tip divergence detection state - compares our tip hash vs peers' tips
         // Catches the case where we have peers but are on a different chain
@@ -7232,8 +7237,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             std::cout << std::endl;
                                             if (vdf_miner.IsRunning()) vdf_miner.Stop();
                                             mining_paused_consensus_fork = true;
-                                        } else if (!kIsRegtest_ratio && ratio >= SOLO_WARN_RATIO && peer_cnt > 0
-                                                   && !solo_warning_shown) {
+                                        } else if (!kIsRegtest_ratio && ratio >= SOLO_WARN_RATIO && peer_cnt > 0) {
+                                            // v4.1: removed `&& !solo_warning_shown` flag-suppression clause;
+                                            // solo_warning_shown removed entirely. Layer-2 v0.4 NEW-DEFECT-1.
                                             std::cout << "[Mining] WARNING: " << static_cast<int>(ratio * 100)
                                                       << "% of last " << recent_blocks.size()
                                                       << " blocks are self-mined" << std::endl;
@@ -7266,24 +7272,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             std::cout << std::endl;
                                             if (vdf_miner.IsRunning()) vdf_miner.Stop();
                                             mining_paused_consensus_fork = true;
-                                        } else if (consecutive_self_mined >= SOLO_WARNING_THRESHOLD
-                                                   && !solo_warning_shown) {
-                                            // Warning: unusual solo mining pattern
-                                            std::cout << std::endl;
-                                            std::cout << "[Mining] WARNING: You have mined " << consecutive_self_mined
-                                                      << " consecutive blocks with no blocks from other miners" << std::endl;
-                                            std::cout << "[Mining] This is unusual and may indicate a consensus fork" << std::endl;
-                                            std::cout << "[Mining] Ensure you are running the latest version from dilithion.org" << std::endl;
-                                            std::cout << std::endl;
-                                            solo_warning_shown = true;
                                         }
+                                        // v4.1: SOLO_WARNING_THRESHOLD-based warning branch removed
+                                        // entirely. PAUSE at 2 leaves no room for an intermediate
+                                        // warning. Layer-2 v0.4 NEW-DEFECT-1.
                                     } else {
-                                        // Another miner's block - healthy network activity
-                                        if (consecutive_self_mined >= SOLO_WARNING_THRESHOLD) {
+                                        // Another miner's block - healthy network activity.
+                                        // v4.1 NEW-DEFECT-1 fix: replaced
+                                        // `>= SOLO_WARNING_THRESHOLD` with `>= 1` so the
+                                        // counter-reset acknowledgment log fires whenever
+                                        // a non-zero streak just got broken (was: only
+                                        // when streak reached 5+, which after lowering
+                                        // SOLO_PAUSE to 2 was unreachable).
+                                        if (consecutive_self_mined >= 1) {
                                             std::cout << "[Mining] Block from another miner received - solo mining counter reset" << std::endl;
                                         }
                                         consecutive_self_mined = 0;
-                                        solo_warning_shown = false;
 
                                         // Resume mining if paused due to consensus fork
                                         if (mining_paused_consensus_fork) {
