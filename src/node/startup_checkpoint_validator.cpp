@@ -77,11 +77,33 @@ bool ValidateLifetimeMinerSnapshot(const CBlockIndex* pindexTip,
     // an in-progress partial value.
     if (pindexTip->nHeight < 44232) return true;
 
-    // Pass-1 placeholder build: lifetimeMinerCountAt44232 = 0 disables
-    // the assertion. Pass-2 release build embeds the actual canonical N.
-    if (g_chainParams->lifetimeMinerCountAt44232 <= 0) return true;
+    // v4.1 cross-component audit HIGH-3 fail-fast: if tip is past the
+    // activation point but the embedded snapshot is still the placeholder
+    // (0), the build was never updated with the canonical count via the
+    // pass-2 procedure. This means the CRIT-1 mitigation is dead code on
+    // a release that's already running. Refuse to start with a clear
+    // error so the operator notices BEFORE the chain forks.
+    if (g_chainParams->lifetimeMinerCountAt44232 <= 0) {
+        std::cerr << "\n=== STARTUP LIFETIME-MINER PLACEHOLDER NOT UPDATED ===\n"
+                  << "params.lifetimeMinerCountAt44232 is still the placeholder (0)\n"
+                  << "but the chain has reached or surpassed activation height 44232.\n\n"
+                  << "This means the v4.1 release was tagged WITHOUT running the\n"
+                  << "pass-2 build procedure (spec §3.6) that captures the canonical\n"
+                  << "lifetime miner count and embeds it. The CRIT-1 mitigation is\n"
+                  << "currently dead code on this binary.\n\n"
+                  << "Refusing to start. Build a fresh release with the embedded\n"
+                  << "count, then restart.\n"
+                  << "=========================================================\n\n";
+        return false;
+    }
 
-    const int observed = tracker->GetLifetimeMinerCount();
+    // v4.1 cross-component audit HIGH-2 fix: use the height-bounded accessor
+    // (count distinct miners AT OR BELOW h=44232) so the comparison stays
+    // stable as the chain extends past 44232 with new miners joining.
+    // GetLifetimeMinerCount() returns the cumulative-to-tip count, which
+    // would mismatch the embedded snapshot the moment ANY new MIK wins
+    // a block at 44234+, bricking restart on every v4.1 node.
+    const int observed = tracker->GetLifetimeMinerCountAtHeight(44232);
     const int expected = g_chainParams->lifetimeMinerCountAt44232;
     if (observed != expected) {
         std::cerr << "\n=== STARTUP LIFETIME-MINER SNAPSHOT MISMATCH ===\n"

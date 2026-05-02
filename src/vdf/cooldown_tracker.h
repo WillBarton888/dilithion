@@ -112,6 +112,19 @@ public:
      *  Reloaded by replaying connect events from genesis on startup. */
     int GetLifetimeMinerCount() const;
 
+    /** Count of distinct MIK identities that mined at least one block at
+     *  or below the given height. Walks m_heightToWinner up to atHeight
+     *  and returns the unique-count. Used by ValidateLifetimeMinerSnapshot
+     *  to compare the populator's running tally against the canonical
+     *  embedded snapshot at h=44232 — without conflating with new MIKs
+     *  that joined post-rollback at heights > 44232.
+     *
+     *  v4.1 cross-component audit HIGH-2 fix: GetLifetimeMinerCount()
+     *  returns the cumulative-to-tip count, which doesn't match an
+     *  embedded snapshot taken at a fixed height once the chain extends
+     *  past it. This bounded variant gives a stable comparison value. */
+    int GetLifetimeMinerCountAtHeight(int atHeight) const;
+
     /** All MIK addresses that have ever mined (for DNA discovery). */
     std::vector<Address> GetKnownAddresses() const;
 

@@ -180,7 +180,7 @@ bool CHeadersManager::CheckPeerHeaderRateLimit(NodeId peer, size_t batchSize)
         std::chrono::system_clock::now().time_since_epoch()).count();
 
     int window_sec = 60;
-    int limit      = 1000;
+    int limit      = 5000;  // v4.1: bumped 1000->5000 to match chainparams default + standard MAX_HEADERS_RESULTS=2000 batch
     if (Dilithion::g_chainParams) {
         if (Dilithion::g_chainParams->nHeaderRateWindowSec > 0) {
             window_sec = Dilithion::g_chainParams->nHeaderRateWindowSec;
@@ -225,7 +225,7 @@ bool CHeadersManager::ProcessHeaders(NodeId peer, const std::vector<CBlockHeader
             "(window limit = %d/%ds)\n",
             static_cast<int>(peer),
             headers.size(),
-            Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateLimitPerWindow : 1000,
+            Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateLimitPerWindow : 5000,
             Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateWindowSec : 60);
         return false;
     }
@@ -604,7 +604,7 @@ bool CHeadersManager::ProcessHeadersWithDoSProtection(NodeId peer, const std::ve
                 "(window limit = %d/%ds)\n",
                 static_cast<int>(peer),
                 headers.size(),
-                Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateLimitPerWindow : 1000,
+                Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateLimitPerWindow : 5000,
                 Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateWindowSec : 60);
             return false;
         }
@@ -2516,7 +2516,7 @@ bool CHeadersManager::QueueHeadersForValidation(NodeId peer, const std::vector<C
                 "(window limit = %d/%ds)\n",
                 static_cast<int>(peer),
                 headers.size(),
-                Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateLimitPerWindow : 1000,
+                Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateLimitPerWindow : 5000,
                 Dilithion::g_chainParams ? Dilithion::g_chainParams->nHeaderRateWindowSec : 60);
             return false;
         }

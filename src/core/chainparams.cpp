@@ -447,7 +447,7 @@ ChainParams ChainParams::DilV() {
     // Genesis block itself is exempt (code at chain.cpp:889-890 skips height 0)
     // MIK required from block 1 onward
     params.dfmpActivationHeight = 0;
-    params.dfmpAssumeValidHeight = 44469;  // v4.0.22: 2026-04-25 incident -- skip strict consensus checks (cooldown, MIK, DNA, attestation) for historical chain through the convergence checkpoint at 44469. Above 44469, Patches A/C activate (44470) and strict deterministic rules apply. Bypass exactly matches checkpoint height -- no vulnerability window.
+    params.dfmpAssumeValidHeight = 44233;  // v4.1 (was 44469): aligned with the new mandatory rollback checkpoint at 44233. Skips strict consensus checks (cooldown, MIK, DNA, attestation) only for blocks AT OR BELOW the canonical 44233 anchor. Above 44233, Patches A/C/E activate AND consensus checks are enforced — no bypass window. (v4.0.22 had this at 44469 with Patches at 44470, leaving 44234-44469 unprotected; that re-creates the v4.0.22 stop-gap failure mode. See cross-component audit finding HIGH-1.)
 
     // All DFMP versions active from genesis — use modern rules from day one
     params.dfmpV3ActivationHeight = 0;

@@ -216,15 +216,18 @@ void test_lifetime_validator_tip_below_threshold_passes()
     std::cout << " OK\n";
 }
 
-void test_lifetime_validator_placeholder_zero_passes()
+void test_lifetime_validator_placeholder_zero_below_threshold_passes()
 {
-    std::cout << "  test_lifetime_validator_placeholder_zero_passes..." << std::flush;
+    std::cout << "  test_lifetime_validator_placeholder_zero_below_threshold_passes..." << std::flush;
     Dilithion::ChainParams stub;
     stub.lifetimeMinerCountAt44232 = 0;  // placeholder = disabled
     ChainParamsScope scope(&stub);
     CCooldownTracker tracker;
-    auto pindex = MakeIndex(0xAA, 50000);
-    // Even with tip past activation height, placeholder mode skips.
+    // v4.1 HIGH-3 update: placeholder mode (=0) is OK ONLY when tip is below
+    // the activation height (e.g., during pass-1 IBD build before reaching
+    // 44232). Above that height + placeholder = fail-fast. See companion
+    // test test_lifetime_validator_placeholder_with_active_chain_fails.
+    auto pindex = MakeIndex(0xAA, 1000);
     assert(Dilithion::ValidateLifetimeMinerSnapshot(pindex.get(), &tracker) == true);
     std::cout << " OK\n";
 }
@@ -264,6 +267,59 @@ void test_lifetime_validator_mismatch_fails()
     std::cout << " OK\n";
 }
 
+// v4.1 cross-component audit HIGH-2 regression test: ensures the
+// validator stays correct after the chain extends past 44232 with new
+// MIKs joining. The previous bug: GetLifetimeMinerCount() returned the
+// cumulative-to-tip count, which would mismatch the embedded snapshot
+// the moment ANY new MIK won a block at 44233+, bricking restart.
+// The fix uses GetLifetimeMinerCountAtHeight(44232) which is stable.
+void test_lifetime_validator_chain_extended_past_snapshot_passes()
+{
+    std::cout << "  test_lifetime_validator_chain_extended_past_snapshot_passes..." << std::flush;
+    Dilithion::ChainParams stub;
+    stub.lifetimeMinerCountAt44232 = 3;  // canonical: 3 distinct miners through h=44232
+    ChainParamsScope scope(&stub);
+    CCooldownTracker tracker;
+
+    // Populate 3 distinct miners at heights <= 44232 (the canonical snapshot)
+    CCooldownTracker::Address mik_a{}; mik_a.fill(0xAA);
+    CCooldownTracker::Address mik_b{}; mik_b.fill(0xBB);
+    CCooldownTracker::Address mik_c{}; mik_c.fill(0xCC);
+    tracker.OnBlockConnected(44230, mik_a, 1000);
+    tracker.OnBlockConnected(44231, mik_b, 1010);
+    tracker.OnBlockConnected(44232, mik_c, 1020);
+
+    // Now extend the chain past the snapshot with NEW miners (post-rollback
+    // arrivals). Pre-fix this would push GetLifetimeMinerCount() to 5 and
+    // make the validator fail-fast on every restart. Post-fix the bounded
+    // accessor returns 3 (count at h=44232) regardless of post-44232 entries.
+    CCooldownTracker::Address mik_new1{}; mik_new1.fill(0xDD);
+    CCooldownTracker::Address mik_new2{}; mik_new2.fill(0xEE);
+    tracker.OnBlockConnected(44233, mik_new1, 1030);
+    tracker.OnBlockConnected(44234, mik_new2, 1040);
+
+    auto pindex = MakeIndex(0xFF, 50000);  // tip well past 44232
+    // Cumulative count would be 5; bounded count at 44232 is 3 = expected.
+    assert(Dilithion::ValidateLifetimeMinerSnapshot(pindex.get(), &tracker) == true);
+    std::cout << " OK\n";
+}
+
+// Cross-component HIGH-3: fail-fast when tip > 44232 but placeholder
+// is still 0 (indicating pass-1 build that was never updated).
+void test_lifetime_validator_placeholder_with_active_chain_fails()
+{
+    std::cout << "  test_lifetime_validator_placeholder_with_active_chain_fails..." << std::flush;
+    Dilithion::ChainParams stub;
+    stub.lifetimeMinerCountAt44232 = 0;  // placeholder
+    ChainParamsScope scope(&stub);
+    CCooldownTracker tracker;
+    auto pindex = MakeIndex(0xAA, 50000);  // tip past activation
+    // Chain past activation + placeholder still 0 = fail-fast (CRIT-1
+    // mitigation would otherwise be dead code on this binary).
+    assert(Dilithion::ValidateLifetimeMinerSnapshot(pindex.get(), &tracker) == false);
+    std::cout << " OK\n";
+}
+
 // =============================================================================
 // Main
 // =============================================================================
@@ -289,9 +345,11 @@ int main()
         test_lifetime_validator_null_tracker_passes();
         test_lifetime_validator_null_tip_passes();
         test_lifetime_validator_tip_below_threshold_passes();
-        test_lifetime_validator_placeholder_zero_passes();
+        test_lifetime_validator_placeholder_zero_below_threshold_passes();
         test_lifetime_validator_match_passes();
         test_lifetime_validator_mismatch_fails();
+        test_lifetime_validator_chain_extended_past_snapshot_passes();
+        test_lifetime_validator_placeholder_with_active_chain_fails();
 
     } catch (const std::exception& e) {
         std::cerr << "\nFAIL: exception: " << e.what() << std::endl;

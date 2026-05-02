@@ -1,6 +1,7 @@
 #include "cooldown_tracker.h"
 #include <algorithm>
 #include <iostream>
+#include <set>
 
 int CCooldownTracker::CalculateCooldown(int activeMiners)
 {
@@ -356,6 +357,21 @@ int CCooldownTracker::GetLifetimeMinerCount() const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
     return static_cast<int>(m_lifetimeBlockCount.size());
+}
+
+int CCooldownTracker::GetLifetimeMinerCountAtHeight(int atHeight) const
+{
+    // v4.1 cross-component audit HIGH-2 fix: count distinct miners who
+    // mined at or below atHeight. Walks m_heightToWinner — each entry is
+    // (height, winner). Build a set of distinct winners with key <= atHeight.
+    std::lock_guard<std::mutex> lock(m_mutex);
+    std::set<Address> distinctMiners;
+    for (auto it = m_heightToWinner.begin();
+         it != m_heightToWinner.end() && it->first <= atHeight;
+         ++it) {
+        distinctMiners.insert(it->second);
+    }
+    return static_cast<int>(distinctMiners.size());
 }
 
 void CCooldownTracker::RecalcActiveMiners(int height) const
