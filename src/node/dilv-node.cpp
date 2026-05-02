@@ -19,6 +19,13 @@
 #include <malloc.h>  // malloc_trim()
 #endif
 
+// v4.1-rc2 ISSUE-2 fix: isatty() check for non-interactive stdin detection
+#ifdef _WIN32
+#include <io.h>      // _isatty / _fileno
+#else
+#include <unistd.h>  // isatty / fileno
+#endif
+
 #include <node/blockchain_storage.h>
 #include <node/block_processing.h>
 #include <node/mempool.h>
@@ -53,6 +60,7 @@
 #include <vdf/cooldown_tracker.h>
 #include <node/peer_mik_tracker.h>
 #include <node/registration_manager.h>  // v4.0.18: first-time registration state machine
+#include <node/startup_checkpoint_validator.h>  // v4.1: mandatory upgrade Phase 1 + Phase 2
 #include <consensus/vdf_validation.h>
 #include <wallet/wallet.h>
 #include <wallet/passphrase_validator.h>
@@ -2506,6 +2514,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 g_chainstate.SetTip(pgenesisIndexPtr);
                 std::cout << " ✓" << std::endl;
                 std::cout << "  [OK] Loaded chain state: 1 block (height 0)" << std::endl;
+
+                // v4.1 Phase 1 startup checkpoint validation — Site A
+                // (genesis-only path). Essentially a no-op for fresh
+                // genesis (no checkpoints at heights ≤ 0) but runs for
+                // consistency with Site B. Cursor v0.3 F2 fix.
+                if (!Dilithion::ValidateChainAgainstCheckpoints(g_chainstate.GetTip())) {
+                    delete Dilithion::g_chainParams;
+                    return 1;
+                }
             } else if (!(hashBestBlock.IsNull())) {
                 std::cout << "  Best block hash: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
 
@@ -2682,6 +2699,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cout << "  [FIX] Set BLOCK_VALID_CHAIN on " << fixed_count
                                   << " blocks in active chain (bootstrap fix)" << std::endl;
                     }
+                }
+
+                // v4.1 Phase 1 startup checkpoint validation — Site B
+                // (full-chain-load path). Runs AFTER the BLOCK_VALID_CHAIN
+                // repair walk completes (post-2685) and BEFORE the undo
+                // integrity probe (~2698). This ordering ensures:
+                //  - Repair walk completes first (cleaner post-repair state)
+                //  - Checkpoint mismatch error wins over generic undo error
+                //  - P2P init hasn't happened yet — no peer can observe a
+                //    known-bad tip
+                // Cursor v0.3 F3 placement.
+                if (!Dilithion::ValidateChainAgainstCheckpoints(g_chainstate.GetTip())) {
+                    delete Dilithion::g_chainParams;
+                    return 1;
                 }
 
                 // v4.0.19 Fix B: Startup undo-presence integrity check.
@@ -4711,6 +4742,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             }
         }
 
+        // v4.1 Phase 2 startup validation — lifetime-miner snapshot assertion.
+        // Runs AFTER the optional revalidation block above (which may
+        // Clear() and replay the cooldown tracker). Asserts the tracker's
+        // computed distinct-miner count at h=44232 matches the canonical
+        // embedded snapshot. Closes Layer-2 v0.1 CRIT-1 (non-deterministic
+        // pre-44233 history ingestion). Wiring point per Cursor v0.3 F3 +
+        // Layer-2 v0.2 NEW-1 (v0.4 wired here at ~4737, post-revalidation;
+        // v0.3 had wired at ~4531 BEFORE the tracker was even constructed
+        // — that was dead code on every startup).
+        //
+        // Skipped on placeholder builds (lifetimeMinerCountAt44232 = 0)
+        // and below activation height. Exit code 3 distinguishes from
+        // Phase 1 checkpoint mismatch (exit 1) and undo integrity (exit 2).
+        if (!Dilithion::ValidateLifetimeMinerSnapshot(g_chainstate.GetTip(),
+                                                       g_node_context.cooldown_tracker)) {
+            delete Dilithion::g_chainParams;
+            return 3;
+        }
+
         // Phase 4: Initialize wallet (before mining callback setup)
         // BUG #56 FIX: Full wallet persistence with Bitcoin Core pattern
         CWallet wallet;
@@ -4840,6 +4890,32 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Clear any buffered input before prompting
             std::cin.clear();
 
+            // v4.1-rc2 ISSUE-2 fix: detect non-interactive stdin and exit cleanly
+            // instead of looping forever printing "Invalid choice" on empty reads.
+            // Common cause: nohup, systemd, or other non-TTY launches without
+            // --relay-only. Without this guard, a user's log can grow to GB-scale
+            // within minutes (we observed 2.2 GB in ~10 min during v4.1-rc1 testing).
+#ifdef _WIN32
+            const bool stdin_is_tty = (_isatty(_fileno(stdin)) != 0);
+#else
+            const bool stdin_is_tty = (isatty(fileno(stdin)) != 0);
+#endif
+            if (!stdin_is_tty) {
+                std::cerr << std::endl
+                          << "ERROR: Wallet setup requires an interactive terminal." << std::endl
+                          << "stdin is not a TTY — cannot prompt for wallet creation." << std::endl
+                          << std::endl
+                          << "Options:" << std::endl
+                          << "  1. For seed/relay-only operation:" << std::endl
+                          << "       Add --relay-only to skip wallet creation entirely." << std::endl
+                          << "  2. For mining:" << std::endl
+                          << "       Run interactively (in a terminal) once to create" << std::endl
+                          << "       the wallet, then move to non-interactive operation" << std::endl
+                          << "       (nohup, systemd, etc.)." << std::endl
+                          << std::endl;
+                return 1;
+            }
+
             std::cout << std::endl;
             std::cout << "+==============================================================================+" << std::endl;
             std::cout << "|                        WALLET SETUP                                         |" << std::endl;
@@ -4856,6 +4932,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "Enter choice (1 or 2): ";
                 std::cout.flush();
                 std::getline(std::cin, wallet_choice);
+
+                // v4.1-rc2 ISSUE-2 defense-in-depth: if stdin closes mid-prompt
+                // (TTY check passed but EOF/fail now), exit instead of looping.
+                if (std::cin.eof() || std::cin.fail()) {
+                    std::cerr << std::endl
+                              << "ERROR: stdin closed during wallet setup. Aborting." << std::endl;
+                    return 1;
+                }
 
                 // Trim whitespace
                 size_t start = wallet_choice.find_first_not_of(" \t\r\n");
@@ -6553,10 +6637,66 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "  [AUTH] RPC authentication enabled" << std::endl;
             }
         } else if (config.public_api) {
-            // Public API mode binds to all interfaces — REFUSE to run without auth
-            std::cerr << "ERROR: --public-api requires RPC authentication. "
-                      << "Set rpcuser and rpcpassword in your config file." << std::endl;
-            return 1;
+            // v4.1-rc2 ISSUE-1 fix: auto-generate secure random RPC credentials
+            // for --public-api when none configured, instead of refusing to start.
+            // The auto-generated dilithion.conf created by the binary on first
+            // startup is empty, so a fresh seed/server with --public-api would
+            // crash with "ERROR: --public-api requires RPC authentication" and
+            // call terminate() — terrible UX. Now we generate random creds
+            // (32-byte hex password), persist them to <datadir>/dilithion.conf
+            // mode 0600, and use them. Operator can edit the config later to
+            // change them.
+            // FINDING-1 (red-team rc2 review): GenerateSalt() resizes to
+            // WALLET_CRYPTO_SALT_SIZE=16, only filling 16 bytes (128 bits).
+            // Use GetStrongRandBytes directly for the full 32 bytes (256 bits)
+            // promised in the comments.
+            extern bool GetStrongRandBytes(uint8_t* buf, size_t len);
+            std::vector<uint8_t> pw_bytes(32);
+            if (!GetStrongRandBytes(pw_bytes.data(), pw_bytes.size())) {
+                std::cerr << "ERROR: --public-api requires RPC authentication, and "
+                          << "auto-generation of random credentials failed.\n"
+                          << "Add these lines to " << config.datadir << "/dilithion.conf:\n"
+                          << "  rpcuser=<choose any username>\n"
+                          << "  rpcpassword=<choose a strong password>\n"
+                          << "Then restart." << std::endl;
+                return 1;
+            }
+            std::string pw_hex;
+            pw_hex.reserve(64);
+            for (auto b : pw_bytes) {
+                char hex[3];
+                snprintf(hex, sizeof(hex), "%02x", b);
+                pw_hex += hex;
+            }
+            rpcuser = "dilithion";
+            rpcpassword = pw_hex;
+
+            // Append to dilithion.conf for persistence across restarts.
+            std::string conf_path = config.datadir + "/dilithion.conf";
+            std::ofstream conf_file(conf_path, std::ios::app);
+            if (conf_file.is_open()) {
+                conf_file << "\n# v4.1-rc2: auto-generated for --public-api\n";
+                conf_file << "rpcuser=" << rpcuser << "\n";
+                conf_file << "rpcpassword=" << rpcpassword << "\n";
+                conf_file.close();
+#ifndef _WIN32
+                chmod(conf_path.c_str(), 0600);
+#endif
+                std::cout << "  [AUTH] --public-api: auto-generated RPC credentials "
+                          << "written to " << conf_path << " (mode 0600)" << std::endl;
+                std::cout << "  [AUTH] rpcuser=" << rpcuser
+                          << " (rpcpassword in conf file)" << std::endl;
+            } else {
+                std::cerr << "WARNING: --public-api auto-credentials generated but failed to "
+                          << "persist to " << conf_path << ". They will work this session only "
+                          << "and won't survive restart." << std::endl;
+            }
+
+            if (!rpc_server.InitializePermissions(rpc_permissions_file, rpcuser, rpcpassword)) {
+                std::cerr << "ERROR: Failed to initialize RPC permissions with auto-generated credentials" << std::endl;
+                return 1;
+            }
+            std::cout << "  [AUTH] RPC authentication enabled (auto-generated)" << std::endl;
         } else {
             // No credentials configured — generate a cookie file for local auth.
             std::string cookie_path = config.datadir + "/.cookie";
@@ -6810,9 +6950,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         static uint256 last_checked_tip_hash;
         static int consecutive_self_mined = 0;
         static bool mining_paused_consensus_fork = false;
-        static bool solo_warning_shown = false;
-        static constexpr int SOLO_WARNING_THRESHOLD = 5;   // Warn after 5 consecutive self-mined blocks
-        static constexpr int SOLO_PAUSE_THRESHOLD = 10;    // Pause after 10 consecutive self-mined blocks
+        // v4.1: tightened from 10 to 2. With cooldown rule active
+        // (MIN_COOLDOWN=2 in cooldown_tracker.h), a single MIK CANNOT
+        // legitimately win 2 consecutive blocks on a healthy chain.
+        // 2-in-a-row indicates either consensus rule bypass or an
+        // isolated solo fork — pause and alert operator immediately.
+        // SOLO_WARNING_THRESHOLD removed entirely (warning at 1 would
+        // fire on every self-mined block; meaningless).
+        static constexpr int SOLO_PAUSE_THRESHOLD = 2;
 
         // Tip divergence detection state - compares our tip hash vs peers' tips
         // Catches the case where we have peers but are on a different chain
@@ -7189,8 +7334,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             std::cout << std::endl;
                                             if (vdf_miner.IsRunning()) vdf_miner.Stop();
                                             mining_paused_consensus_fork = true;
-                                        } else if (!kIsRegtest_ratio && ratio >= SOLO_WARN_RATIO && peer_cnt > 0
-                                                   && !solo_warning_shown) {
+                                        } else if (!kIsRegtest_ratio && ratio >= SOLO_WARN_RATIO && peer_cnt > 0) {
+                                            // v4.1: removed `&& !solo_warning_shown` flag-suppression clause;
+                                            // solo_warning_shown removed entirely. Layer-2 v0.4 NEW-DEFECT-1.
                                             std::cout << "[Mining] WARNING: " << static_cast<int>(ratio * 100)
                                                       << "% of last " << recent_blocks.size()
                                                       << " blocks are self-mined" << std::endl;
@@ -7223,24 +7369,22 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                                             std::cout << std::endl;
                                             if (vdf_miner.IsRunning()) vdf_miner.Stop();
                                             mining_paused_consensus_fork = true;
-                                        } else if (consecutive_self_mined >= SOLO_WARNING_THRESHOLD
-                                                   && !solo_warning_shown) {
-                                            // Warning: unusual solo mining pattern
-                                            std::cout << std::endl;
-                                            std::cout << "[Mining] WARNING: You have mined " << consecutive_self_mined
-                                                      << " consecutive blocks with no blocks from other miners" << std::endl;
-                                            std::cout << "[Mining] This is unusual and may indicate a consensus fork" << std::endl;
-                                            std::cout << "[Mining] Ensure you are running the latest version from dilithion.org" << std::endl;
-                                            std::cout << std::endl;
-                                            solo_warning_shown = true;
                                         }
+                                        // v4.1: SOLO_WARNING_THRESHOLD-based warning branch removed
+                                        // entirely. PAUSE at 2 leaves no room for an intermediate
+                                        // warning. Layer-2 v0.4 NEW-DEFECT-1.
                                     } else {
-                                        // Another miner's block - healthy network activity
-                                        if (consecutive_self_mined >= SOLO_WARNING_THRESHOLD) {
+                                        // Another miner's block - healthy network activity.
+                                        // v4.1 NEW-DEFECT-1 fix: replaced
+                                        // `>= SOLO_WARNING_THRESHOLD` with `>= 1` so the
+                                        // counter-reset acknowledgment log fires whenever
+                                        // a non-zero streak just got broken (was: only
+                                        // when streak reached 5+, which after lowering
+                                        // SOLO_PAUSE to 2 was unreachable).
+                                        if (consecutive_self_mined >= 1) {
                                             std::cout << "[Mining] Block from another miner received - solo mining counter reset" << std::endl;
                                         }
                                         consecutive_self_mined = 0;
-                                        solo_warning_shown = false;
 
                                         // Resume mining if paused due to consensus fork
                                         if (mining_paused_consensus_fork) {

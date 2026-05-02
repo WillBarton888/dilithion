@@ -287,16 +287,93 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
         return false;
     }
 
-    // MAINNET SECURITY: Validate block against checkpoint if one exists at this height
-    // This ensures we never accept a block with a hash that doesn't match a checkpoint.
-    // Testnet has no checkpoints, so this check will always pass on testnet.
+    // ============================================================
+    // v4.1 — Three-tier checkpoint enforcement on legacy ABC path
+    // ============================================================
+    // Mirrors the new chain selector path's ancestry walk (chain.cpp:~390)
+    // for the legacy path, with a graduated cost structure:
+    //
+    //   Tier 1 (always, O(1)): single-block check at activation height
+    //   Tier 2 (always, O(log n)): re-verify highest checkpoint ancestor
+    //          when pindexNew's tip is past the highest embedded checkpoint
+    //   Tier 3 (reorg-only, O(checkpoints * log n)): full ancestry walk on
+    //          multi-block activation (pindexNew->pprev != pindexTip)
+    //
+    // Tier 1 + Tier 2 always run, ~O(log n) per block under cs_main.
+    // Tier 3 fires only on actual reorgs / IBD catchup / startup. Closes
+    // the v0.2 IBD Case 2 sparse-checkpoint gap (Cursor F1) without
+    // sacrificing the Case 2 single-extend hot path (Layer-2 CRIT-3).
+    //
+    // Defense-in-depth note: this works in concert with §3.3 header-time
+    // CheckpointCheckHeader and §3.4 startup_checkpoint_validator;
+    // architecturally either path alone suffices, but the redundancy
+    // catches single-layer bugs.
     if (Dilithion::g_chainParams) {
+        // Tier 1: single-block check at activation height.
         if (!Dilithion::g_chainParams->CheckpointCheck(pindexNew->nHeight, pindexNew->GetBlockHash())) {
-            std::cerr << "[Chain] ERROR: Block hash does not match checkpoint!" << std::endl;
-            std::cerr << "  Height: " << pindexNew->nHeight << std::endl;
-            std::cerr << "  Block hash: " << pindexNew->GetBlockHash().GetHex() << std::endl;
-            std::cerr << "  This may indicate an attack or corrupted block data." << std::endl;
+            std::cerr << "[Chain] ERROR: Block at activation height does not match checkpoint!\n"
+                      << "  Height: " << pindexNew->nHeight << "\n"
+                      << "  Hash:   " << pindexNew->GetBlockHash().GetHex() << "\n"
+                      << "  This may indicate an attack, corrupted block data, or a chain on the wrong fork.\n"
+                      << "  Run: dilv-node --reset-chain --yes && dilv-node --rescan" << std::endl;
             return false;
+        }
+
+        // Tier 2: re-verify the highest checkpoint ancestor on every
+        // activation past it. Catches sparse-checkpoint IBD Case 2 where
+        // a wrong-fork chain's 44233 ancestor would not be re-verified
+        // when activating subsequent blocks (44234, 44235, ...) that
+        // themselves have no per-height checkpoint.
+        int highestCheckpointHeight = -1;
+        const Dilithion::CCheckpoint* highest = nullptr;
+        for (const auto& cp : Dilithion::g_chainParams->checkpoints) {
+            if (cp.nHeight > highestCheckpointHeight) {
+                highestCheckpointHeight = cp.nHeight;
+                highest = &cp;
+            }
+        }
+        if (highest && pindexNew->nHeight > highestCheckpointHeight) {
+            const CBlockIndex* anc = pindexNew->GetAncestor(highestCheckpointHeight);
+            if (!anc || anc->GetBlockHash() != highest->hashBlock) {
+                std::cerr << "[Chain] ERROR: Activation tip's ancestor at highest checkpoint violates expected hash\n"
+                          << "  Checkpoint height:  " << highestCheckpointHeight << "\n"
+                          << "  Expected hash:      " << highest->hashBlock.GetHex() << "\n"
+                          << "  Got hash:           " << (anc ? anc->GetBlockHash().GetHex() : std::string("(null)")) << "\n"
+                          << "  Tip being activated: height " << pindexNew->nHeight
+                          << " hash " << pindexNew->GetBlockHash().GetHex() << "\n"
+                          << "  Run: dilv-node --reset-chain --yes && dilv-node --rescan" << std::endl;
+                return false;
+            }
+        }
+
+        // Tier 3: full ancestry walk on multi-block activation only.
+        // Skipped on Case 2 single-extend hot path. Catches deep reorgs
+        // landing on a tip whose ancestry violates ANY checkpoint.
+        const bool isMultiBlockActivation =
+            (pindexTip == nullptr) || (pindexNew->pprev != pindexTip);
+        if (isMultiBlockActivation) {
+            for (const auto& cp : Dilithion::g_chainParams->checkpoints) {
+                if (cp.nHeight > pindexNew->nHeight) continue;
+                if (cp.nHeight == pindexNew->nHeight) continue;  // covered by Tier 1
+                if (highest && cp.nHeight == highest->nHeight) continue;  // covered by Tier 2
+                const CBlockIndex* ancestor = pindexNew->GetAncestor(cp.nHeight);
+                if (!ancestor) {
+                    std::cerr << "[Chain] ERROR: Cannot resolve ancestor at checkpoint height "
+                              << cp.nHeight << " (chain truncated/corrupted)\n"
+                              << "  Run: dilv-node --reset-chain --yes && dilv-node --rescan" << std::endl;
+                    return false;
+                }
+                if (ancestor->GetBlockHash() != cp.hashBlock) {
+                    std::cerr << "[Chain] ERROR: Checkpoint violation in candidate ancestry\n"
+                              << "  Checkpoint height:  " << cp.nHeight << "\n"
+                              << "  Expected hash:      " << cp.hashBlock.GetHex() << "\n"
+                              << "  Got hash:           " << ancestor->GetBlockHash().GetHex() << "\n"
+                              << "  Tip being activated: height " << pindexNew->nHeight
+                              << " hash " << pindexNew->GetBlockHash().GetHex() << "\n"
+                              << "  Run: dilv-node --reset-chain --yes && dilv-node --rescan" << std::endl;
+                    return false;
+                }
+            }
         }
     }
 

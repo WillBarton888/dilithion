@@ -267,7 +267,8 @@ NODE_SOURCES := src/node/block_index.cpp \
                 src/node/validation_watchdog.cpp \
                 src/node/resource_monitor.cpp \
                 src/node/peer_mik_tracker.cpp \
-                src/node/registration_manager.cpp
+                src/node/registration_manager.cpp \
+                src/node/startup_checkpoint_validator.cpp
 
 PRIMITIVES_SOURCES := src/primitives/block.cpp \
                       src/primitives/transaction.cpp
@@ -449,7 +450,7 @@ dilv-genesis-vdf: $(CORE_OBJECTS) $(OBJ_DIR)/tools/dilv_genesis_vdf.o $(DILITHIU
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests peer_scorer_tests peer_scorer_banman_integration_tests header_proof_checker_tests chain_selector_tests getchaintips_equivalence_tests chain_case_2_5_equivalence_tests chain_work_smoke_tests reorg_wal_crash_injection_tests competing_sibling_below_checkpoint_tests headers_manager_to_chain_selector_wiring_tests fast_path_2_boundary_tests
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests peer_scorer_tests peer_scorer_banman_integration_tests header_proof_checker_tests chain_selector_tests getchaintips_equivalence_tests chain_case_2_5_equivalence_tests chain_work_smoke_tests reorg_wal_crash_injection_tests competing_sibling_below_checkpoint_tests headers_manager_to_chain_selector_wiring_tests fast_path_2_boundary_tests v4_1_checkpoint_enforcement_tests v4_1_chain_selector_suppression_tests
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
@@ -579,6 +580,22 @@ chain_selector_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/chain_selector_tests.o $(D
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ chain_selector_tests built successfully$(COLOR_RESET)"
+
+# v4.1 mandatory upgrade — checkpoint enforcement tests (Phase 1 + Phase 2
+# startup validator + lifetime-miner snapshot assertion semantics).
+v4_1_checkpoint_enforcement_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/v4_1_checkpoint_enforcement_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ v4_1_checkpoint_enforcement_tests built successfully$(COLOR_RESET)"
+
+# v4.1 IBD silent-drop fix — chain selector suppression tests. Verifies that
+# ChainSelectorAdapter construction is gated on DILITHION_USE_NEW_CHAIN_SELECTOR
+# env-var (default OFF), preventing the header pre-population that caused the
+# SYD mainnet IBD stall on 2026-05-02.
+v4_1_chain_selector_suppression_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/v4_1_chain_selector_suppression_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ v4_1_chain_selector_suppression_tests built successfully$(COLOR_RESET)"
 
 # Phase 7 PR7.2: fork-staging legacy-path regression tests (state-machine
 # level; PreValidateBlock + TriggerChainSwitch + ProcessNewBlock end-to-end

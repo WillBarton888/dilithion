@@ -63,9 +63,49 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
     // Phase 5: instantiate chain selector adapter over the chainstate.
     // The adapter is a thin wrapper; lifetime is tied to NodeContext
     // and MUST be reset before chainstate is freed (handled in Shutdown/Reset).
+    //
+    // v4.1 IBD silent-drop fix: gate construction on env-var
+    // DILITHION_USE_NEW_CHAIN_SELECTOR. Default = OFF.
+    //
+    // Why: ChainSelectorAdapter::ProcessNewHeader pre-populates
+    // mapBlockIndex with BLOCK_VALID_HEADER entries during headers
+    // sync. Legacy ActivateBestChain (the production path since PR5.4
+    // reverted the chain-selector default) is the consumer of block
+    // data, but it relies on AddBlockIndex to attach BLOCK_HAVE_DATA.
+    // AddBlockIndex's silent return-false-on-duplicate semantics
+    // (chain.cpp:96-98) drop the new flag, leaving every entry stuck
+    // at BLOCK_VALID_HEADER. block_processing.cpp:891 then never sees
+    // HaveData() == true, blocks are never activated, chain stays at
+    // genesis. Reproduced on SYD mainnet 2026-05-02 with fresh datadir.
+    //
+    // Suppressing the adapter is a true revert to pre-Phase-6-PR6.1
+    // behavior — legacy ActivateBestChain receives pindex by parameter
+    // from the block-data path and never looks up by hash for
+    // activation input, so removing the prepop side effect is safe.
+    // The 6 ProcessNewHeader call sites in headers_manager.cpp and
+    // the 2 use_port_pm gates in dilithion-node.cpp / dilv-node.cpp
+    // already null-check chain_selector — they double as the suppression
+    // gate. Zero changes needed at the call sites.
+    //
+    // Re-enable after v4.2 lands the proper AddBlockIndex flag-merge
+    // semantics + caller audit. Setting env-var=1 in production is
+    // known-broken; the WARN log at construction time signals operators.
     try {
-        chain_selector = std::make_unique<::dilithion::consensus::port::ChainSelectorAdapter>(*chainstate);
-        LogPrintf(ALL, INFO, "Phase 5: chain selector adapter wired");
+        const char* selector_env = std::getenv("DILITHION_USE_NEW_CHAIN_SELECTOR");
+        const bool use_new_selector = (selector_env != nullptr) && (std::strcmp(selector_env, "1") == 0);
+        if (use_new_selector) {
+            chain_selector = std::make_unique<::dilithion::consensus::port::ChainSelectorAdapter>(*chainstate);
+            LogPrintf(ALL, INFO, "Phase 5: chain selector adapter wired (env-var=1, opt-in)");
+            LogPrintf(ALL, WARN,
+                "DILITHION_USE_NEW_CHAIN_SELECTOR=1 enables an opt-in path with a "
+                "known IBD silent-drop bug (header pre-pop loses BLOCK_HAVE_DATA on "
+                "block-data arrival). Do not use in production until v4.2.");
+        } else {
+            chain_selector = nullptr;
+            LogPrintf(ALL, INFO,
+                "Phase 5: chain selector adapter SUPPRESSED (default; env-var=1 "
+                "known to have IBD silent-drop until v4.2)");
+        }
     } catch (const std::exception& e) {
         LogPrintf(ALL, ERROR, "Failed to instantiate chain selector adapter: %s", e.what());
         return false;

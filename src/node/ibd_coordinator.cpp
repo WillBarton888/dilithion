@@ -2437,8 +2437,15 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
 
         if (!localChainWork.IsNull() && !headerChainWork.IsNull()) {
             if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
-                if (g_verbose.load(std::memory_order_relaxed))
-                    std::cout << "[FORK-RECOVERY] Header chain has LESS work - NOT disconnecting" << std::endl;
+                // v4.1 audit fix HIGH-3: was verbose-gated. Promoted to always-on
+                // WARN. This is the exact failure mode from the 2026-04-25 SGP
+                // fork-recovery incident — operator needs to see this without
+                // --verbose otherwise IBD silently stalls on a stale fork.
+                LogPrintf(IBD, WARN,
+                    "[FORK-RECOVERY] Header chain has LESS work than local - NOT disconnecting "
+                    "(local_work=%s header_work=%s)\n",
+                    localChainWork.GetHex().substr(0, 16).c_str(),
+                    headerChainWork.GetHex().substr(0, 16).c_str());
                 m_fork_stall_cycles.store(0);
                 return false;
             }
@@ -2531,11 +2538,16 @@ bool CIbdCoordinator::AttemptForkRecovery(int chain_height, int header_height, F
         if (!ChainWorkGreaterThan(headerChainWork, localChainWork)) {
             std::string localHex = localChainWork.GetHex();
             std::string headerHex = headerChainWork.GetHex();
-            if (g_verbose.load(std::memory_order_relaxed)) {
-                std::cout << "[FORK-DETECT] Incoming fork has LESS work than our chain - NOT switching" << std::endl;
-                std::cout << "[FORK-DETECT] Local work=..." << localHex.substr(localHex.length() > 16 ? localHex.length() - 16 : 0)
-                          << " Header work=..." << headerHex.substr(headerHex.length() > 16 ? headerHex.length() - 16 : 0) << std::endl;
-            }
+            // v4.1 audit fix HIGH-4: was verbose-gated. Promoted to always-on
+            // WARN. Same operational class as HIGH-3 — fork-recovery refusal.
+            // Operators previously had no log entry indicating "I declined to
+            // switch chains because incoming has less work" → IBD silently
+            // stuck. Always log so the cause is visible.
+            LogPrintf(IBD, WARN,
+                "[FORK-DETECT] Incoming fork has LESS work than our chain - NOT switching "
+                "(local=...%s header=...%s)\n",
+                localHex.substr(localHex.length() > 16 ? localHex.length() - 16 : 0).c_str(),
+                headerHex.substr(headerHex.length() > 16 ? headerHex.length() - 16 : 0).c_str());
             m_fork_stall_cycles.store(0);
             return false;
         }

@@ -447,7 +447,7 @@ ChainParams ChainParams::DilV() {
     // Genesis block itself is exempt (code at chain.cpp:889-890 skips height 0)
     // MIK required from block 1 onward
     params.dfmpActivationHeight = 0;
-    params.dfmpAssumeValidHeight = 44469;  // v4.0.22: 2026-04-25 incident -- skip strict consensus checks (cooldown, MIK, DNA, attestation) for historical chain through the convergence checkpoint at 44469. Above 44469, Patches A/C activate (44470) and strict deterministic rules apply. Bypass exactly matches checkpoint height -- no vulnerability window.
+    params.dfmpAssumeValidHeight = 44233;  // v4.1 (was 44469): aligned with the new mandatory rollback checkpoint at 44233. Skips strict consensus checks (cooldown, MIK, DNA, attestation) only for blocks AT OR BELOW the canonical 44233 anchor. Above 44233, Patches A/C/E activate AND consensus checks are enforced — no bypass window. (v4.0.22 had this at 44469 with Patches at 44470, leaving 44234-44469 unprotected; that re-creates the v4.0.22 stop-gap failure mode. See cross-component audit finding HIGH-1.)
 
     // All DFMP versions active from genesis — use modern rules from day one
     params.dfmpV3ActivationHeight = 0;
@@ -495,23 +495,22 @@ ChainParams ChainParams::DilV() {
     params.dfmpCooldownConsensusHeight = 0;    // Consensus-enforced cooldown from genesis
     params.stallExemptionV2Height = 0;         // Tightened stall exemption from genesis
     params.consecutiveMinerCheckHeight = 0;    // Reject >3 consecutive blocks from same miner from genesis
-    // v4.0.22 -- Patches A/C/E pushed to height 50000 (was 44470) on
-    // 2026-04-25 after the 44470 activation produced an unrecoverable
-    // consensus split: v4.0.16 miners continued producing blocks under
-    // the OLD cooldown rules (no stall-exemption retirement, no solo
-    // gate, time-based expiry still active), and v4.0.22 seeds with the
-    // new rules at 44470 rejected those blocks. The miner network kept
-    // extending the v4.0.16 chain past 44760+, while the seed canonical
-    // chain (NYC/SYD) stalled at ~44494. Pushing all three activations
-    // to 50000 lets seeds accept the v4.0.16 chain through the existing
-    // miner population, gives time to coordinate a miner upgrade before
-    // the new rules engage, and avoids forcing the choice between
-    // "minority canonical chain" and "longer rule-violating chain"
-    // tonight. The cooldown rule changes are still planned -- just
-    // moved to a coordinated upgrade window above the live tip.
-    params.consecutiveMinerStallExemptionRetiredHeight = 50000;
-    params.soloExemptionLifetimeGateHeight = 50000;
-    params.timeBasedCooldownExpiryRetiredHeight = 50000;
+    // v4.1 (2026-05-02) — Mandatory upgrade. Chain rollback to height 44233
+    // (last common ancestor across NYC/LDN/SGP/SYD per 2026-05-02 multi-seed
+    // hash agreement). Replaces the v4.0.22 50000 stop-gap that never resolved
+    // because the chain split made coordinated miner upgrade impossible.
+    //
+    // Activation height = checkpoint height = rollback target = 44233.
+    // Strict activation: miner pre-upgrade is REQUIRED before seed cutover
+    // (operator coordinates via Telegram quorum gate per v4_1 spec §5.3).
+    //
+    // CRITICAL: this is paired with the checkpoint at 44233 below — without
+    // the checkpoint, v4.1 nodes could silently extend any of the four
+    // incident-era forks. With both, v4.1 nodes only follow the chain whose
+    // block-44233 hash matches the canonical anchor.
+    params.consecutiveMinerStallExemptionRetiredHeight = 44233;
+    params.soloExemptionLifetimeGateHeight = 44233;
+    params.timeBasedCooldownExpiryRetiredHeight = 44233;
     params.vdfCooldownShortWindow = 0;         // Disabled at genesis — avoids short-window MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window cooldown + time-based expiry from genesis
 
@@ -586,21 +585,43 @@ ChainParams ChainParams::DilV() {
     params.checkpoints.emplace_back(15000, uint256S("45f5877adcc1ec2dab453412d6a5cb3fd9383fc97a184aa4ec855db55212f5d6"));
     params.checkpoints.emplace_back(18700, uint256S("1fbcf55c40c735596b68772af0072b98342a098bd5c1ff0b3bb26423720e9295"));
     params.checkpoints.emplace_back(36500, uint256S("3a6c72ee0ac27508fe82b76ed561dc93bc52ee5a26825cbf3f693bbc7070fd63"));
-    // v4.0.22 (2026-04-25): the 44469 convergence checkpoint was REMOVED.
-    // Originally added to anchor the seed-chosen canonical chain after the
-    // 2026-04-25 incident, but in combination with the Patches A/C/E
-    // cooldown rule changes activating at 44470 it created an unrecoverable
-    // consensus split: v4.0.16 miners kept extending their pre-checkpoint
-    // chain (rejected by the 44469 checkpoint at chainstate level) while
-    // the seed canonical chain was rejected from accumulating blocks (any
-    // miner-produced block past 44470 hit cooldown violation). With both
-    // the cooldown rules pushed to 50000 AND this checkpoint removed,
-    // chain-work-based selection (with Patch H storing competing siblings)
-    // can pick whichever chain the network actually extends -- restoring
-    // automatic convergence with the live miner population. The next solid
-    // checkpoint at 44000 remains as the last pre-incident anchor; any
-    // future post-incident anchor must be added only after rule changes
-    // are coordinated with miners.
+    // v4.1 (2026-05-02): MANDATORY ROLLBACK ANCHOR.
+    //
+    // Verified hash: 927a1e79a410e73c1778dd3eaebae1c07ce5271431abffa9b62a6f6b3177e373
+    //
+    // Confirmed independently 2026-05-02 from all four DilV mainnet seeds
+    // (NYC tip 44740, LDN tip 44491, SGP tip 44542, SYD tip 44700) — each
+    // currently on a DIFFERENT post-incident chain. The agreement at 44233
+    // across four nodes that disagree at every height above 44233 is the
+    // canonical pre-fork ancestor.
+    //
+    // History: the v4.0.22 50000-stop-gap (Patches A/C/E pushed to height
+    // 50000) failed to resolve because the chain was already split four
+    // ways and no rule-based mechanism could converge them. v4.1 reverts
+    // to the original v4.0.21 plan: hard rollback at the last common
+    // ancestor with three-tier ABC enforcement (chain.cpp), header-time
+    // enforcement (headers_manager.cpp), and a startup validator
+    // (startup_checkpoint_validator.cpp) ensuring every v4.1 node refuses
+    // any chain whose block-44233 hash differs from the embedded value.
+    //
+    // The Patches A/C/E activation heights (above) are now also 44233,
+    // matching this checkpoint. Together they constitute the v4.1
+    // mandatory upgrade.
+    params.checkpoints.emplace_back(44233, uint256S("927a1e79a410e73c1778dd3eaebae1c07ce5271431abffa9b62a6f6b3177e373"));
+
+    // v4.1 lifetime-miner deterministic snapshot (closes CRIT-1 from
+    // v0.1 spec review — non-deterministic Patch C lifetime gate at
+    // activation height if pre-44233 history is ingested differently
+    // across nodes). Placeholder = 0 disables the assertion (gated on
+    // > 0 in startup_checkpoint_validator.cpp::ValidateLifetimeMinerSnapshot).
+    // Pass-1 build runs on a clean datadir, IBDs to >= 44232, queries
+    // getfullmikdistribution {"maxHeight": 44232}, and the unique_miners
+    // count is embedded here for the pass-2 release build.
+    //
+    // PRE-RELEASE GATE: grep this file for lifetimeMinerCountAt44232; the
+    // value MUST be > 0 before tagging v4.1 (the release SOP includes
+    // this check).
+    params.lifetimeMinerCountAt44232 = 65;  // PASS-2: captured 2026-05-02 08:36 UTC from SYD canary (DILITHION_PASS_1_CAPTURE)
 
     // No assume-valid yet
     params.defaultAssumeValid = "";

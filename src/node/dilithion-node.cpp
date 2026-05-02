@@ -23,6 +23,13 @@
 #include <malloc.h>  // malloc_trim()
 #endif
 
+// v4.1-rc2 ISSUE-2 fix: isatty() check for non-interactive stdin detection
+#ifdef _WIN32
+#include <io.h>      // _isatty / _fileno
+#else
+#include <unistd.h>  // isatty / fileno
+#endif
+
 #include <node/blockchain_storage.h>
 #include <node/block_processing.h>
 #include <node/mempool.h>
@@ -4732,6 +4739,32 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Clear any buffered input before prompting
             std::cin.clear();
 
+            // v4.1-rc2 ISSUE-2 fix: detect non-interactive stdin and exit cleanly
+            // instead of looping forever printing "Invalid choice" on empty reads.
+            // Common cause: nohup, systemd, or other non-TTY launches without
+            // --relay-only. Without this guard, a user's log can grow to GB-scale
+            // within minutes (we observed 2.2 GB in ~10 min during v4.1-rc1 testing).
+#ifdef _WIN32
+            const bool stdin_is_tty = (_isatty(_fileno(stdin)) != 0);
+#else
+            const bool stdin_is_tty = (isatty(fileno(stdin)) != 0);
+#endif
+            if (!stdin_is_tty) {
+                std::cerr << std::endl
+                          << "ERROR: Wallet setup requires an interactive terminal." << std::endl
+                          << "stdin is not a TTY — cannot prompt for wallet creation." << std::endl
+                          << std::endl
+                          << "Options:" << std::endl
+                          << "  1. For seed/relay-only operation:" << std::endl
+                          << "       Add --relay-only to skip wallet creation entirely." << std::endl
+                          << "  2. For mining:" << std::endl
+                          << "       Run interactively (in a terminal) once to create" << std::endl
+                          << "       the wallet, then move to non-interactive operation" << std::endl
+                          << "       (nohup, systemd, etc.)." << std::endl
+                          << std::endl;
+                return 1;
+            }
+
             std::cout << std::endl;
             std::cout << "+==============================================================================+" << std::endl;
             std::cout << "|                        WALLET SETUP                                         |" << std::endl;
@@ -4748,6 +4781,14 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "Enter choice (1 or 2): ";
                 std::cout.flush();
                 std::getline(std::cin, wallet_choice);
+
+                // v4.1-rc2 ISSUE-2 defense-in-depth: if stdin closes mid-prompt
+                // (TTY check passed but EOF/fail now), exit instead of looping.
+                if (std::cin.eof() || std::cin.fail()) {
+                    std::cerr << std::endl
+                              << "ERROR: stdin closed during wallet setup. Aborting." << std::endl;
+                    return 1;
+                }
 
                 // Trim whitespace
                 size_t start = wallet_choice.find_first_not_of(" \t\r\n");
@@ -6654,10 +6695,66 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 std::cout << "  [AUTH] RPC authentication enabled" << std::endl;
             }
         } else if (config.public_api) {
-            // Public API mode binds to all interfaces — REFUSE to run without auth
-            std::cerr << "ERROR: --public-api requires RPC authentication. "
-                      << "Set rpcuser and rpcpassword in your config file." << std::endl;
-            return 1;
+            // v4.1-rc2 ISSUE-1 fix: auto-generate secure random RPC credentials
+            // for --public-api when none configured, instead of refusing to start.
+            // The auto-generated dilithion.conf created by the binary on first
+            // startup is empty, so a fresh seed/server with --public-api would
+            // crash with "ERROR: --public-api requires RPC authentication" and
+            // call terminate() — terrible UX. Now we generate random creds
+            // (32-byte hex password), persist them to <datadir>/dilithion.conf
+            // mode 0600, and use them. Operator can edit the config later to
+            // change them.
+            // FINDING-1 (red-team rc2 review): GenerateSalt() resizes to
+            // WALLET_CRYPTO_SALT_SIZE=16, only filling 16 bytes (128 bits).
+            // Use GetStrongRandBytes directly for the full 32 bytes (256 bits)
+            // promised in the comments.
+            extern bool GetStrongRandBytes(uint8_t* buf, size_t len);
+            std::vector<uint8_t> pw_bytes(32);
+            if (!GetStrongRandBytes(pw_bytes.data(), pw_bytes.size())) {
+                std::cerr << "ERROR: --public-api requires RPC authentication, and "
+                          << "auto-generation of random credentials failed.\n"
+                          << "Add these lines to " << config.datadir << "/dilithion.conf:\n"
+                          << "  rpcuser=<choose any username>\n"
+                          << "  rpcpassword=<choose a strong password>\n"
+                          << "Then restart." << std::endl;
+                return 1;
+            }
+            std::string pw_hex;
+            pw_hex.reserve(64);
+            for (auto b : pw_bytes) {
+                char hex[3];
+                snprintf(hex, sizeof(hex), "%02x", b);
+                pw_hex += hex;
+            }
+            rpcuser = "dilithion";
+            rpcpassword = pw_hex;
+
+            // Append to dilithion.conf for persistence across restarts.
+            std::string conf_path = config.datadir + "/dilithion.conf";
+            std::ofstream conf_file(conf_path, std::ios::app);
+            if (conf_file.is_open()) {
+                conf_file << "\n# v4.1-rc2: auto-generated for --public-api\n";
+                conf_file << "rpcuser=" << rpcuser << "\n";
+                conf_file << "rpcpassword=" << rpcpassword << "\n";
+                conf_file.close();
+#ifndef _WIN32
+                chmod(conf_path.c_str(), 0600);
+#endif
+                std::cout << "  [AUTH] --public-api: auto-generated RPC credentials "
+                          << "written to " << conf_path << " (mode 0600)" << std::endl;
+                std::cout << "  [AUTH] rpcuser=" << rpcuser
+                          << " (rpcpassword in conf file)" << std::endl;
+            } else {
+                std::cerr << "WARNING: --public-api auto-credentials generated but failed to "
+                          << "persist to " << conf_path << ". They will work this session only "
+                          << "and won't survive restart." << std::endl;
+            }
+
+            if (!rpc_server.InitializePermissions(rpc_permissions_file, rpcuser, rpcpassword)) {
+                std::cerr << "ERROR: Failed to initialize RPC permissions with auto-generated credentials" << std::endl;
+                return 1;
+            }
+            std::cout << "  [AUTH] RPC authentication enabled (auto-generated)" << std::endl;
         } else {
             // No credentials configured — generate a cookie file for local auth.
             // This mirrors Bitcoin Core's .cookie mechanism: a random credential
