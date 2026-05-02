@@ -621,7 +621,7 @@ ChainParams ChainParams::DilV() {
     // PRE-RELEASE GATE: grep this file for lifetimeMinerCountAt44232; the
     // value MUST be > 0 before tagging v4.1 (the release SOP includes
     // this check).
-    params.lifetimeMinerCountAt44232 = 0;  // PASS-1 PLACEHOLDER — replace before tag
+    params.lifetimeMinerCountAt44232 = 65;  // PASS-2: captured 2026-05-02 08:36 UTC from SYD canary (DILITHION_PASS_1_CAPTURE)
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
