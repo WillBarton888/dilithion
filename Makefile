@@ -267,7 +267,8 @@ NODE_SOURCES := src/node/block_index.cpp \
                 src/node/validation_watchdog.cpp \
                 src/node/resource_monitor.cpp \
                 src/node/peer_mik_tracker.cpp \
-                src/node/registration_manager.cpp
+                src/node/registration_manager.cpp \
+                src/node/startup_checkpoint_validator.cpp
 
 PRIMITIVES_SOURCES := src/primitives/block.cpp \
                       src/primitives/transaction.cpp

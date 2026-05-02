@@ -53,6 +53,7 @@
 #include <vdf/cooldown_tracker.h>
 #include <node/peer_mik_tracker.h>
 #include <node/registration_manager.h>  // v4.0.18: first-time registration state machine
+#include <node/startup_checkpoint_validator.h>  // v4.1: mandatory upgrade Phase 1 + Phase 2
 #include <consensus/vdf_validation.h>
 #include <wallet/wallet.h>
 #include <wallet/passphrase_validator.h>
@@ -2506,6 +2507,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 g_chainstate.SetTip(pgenesisIndexPtr);
                 std::cout << " ✓" << std::endl;
                 std::cout << "  [OK] Loaded chain state: 1 block (height 0)" << std::endl;
+
+                // v4.1 Phase 1 startup checkpoint validation — Site A
+                // (genesis-only path). Essentially a no-op for fresh
+                // genesis (no checkpoints at heights ≤ 0) but runs for
+                // consistency with Site B. Cursor v0.3 F2 fix.
+                if (!Dilithion::ValidateChainAgainstCheckpoints(g_chainstate.GetTip())) {
+                    delete Dilithion::g_chainParams;
+                    return 1;
+                }
             } else if (!(hashBestBlock.IsNull())) {
                 std::cout << "  Best block hash: " << hashBestBlock.GetHex().substr(0, 16) << "..." << std::endl;
 
@@ -2682,6 +2692,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                         std::cout << "  [FIX] Set BLOCK_VALID_CHAIN on " << fixed_count
                                   << " blocks in active chain (bootstrap fix)" << std::endl;
                     }
+                }
+
+                // v4.1 Phase 1 startup checkpoint validation — Site B
+                // (full-chain-load path). Runs AFTER the BLOCK_VALID_CHAIN
+                // repair walk completes (post-2685) and BEFORE the undo
+                // integrity probe (~2698). This ordering ensures:
+                //  - Repair walk completes first (cleaner post-repair state)
+                //  - Checkpoint mismatch error wins over generic undo error
+                //  - P2P init hasn't happened yet — no peer can observe a
+                //    known-bad tip
+                // Cursor v0.3 F3 placement.
+                if (!Dilithion::ValidateChainAgainstCheckpoints(g_chainstate.GetTip())) {
+                    delete Dilithion::g_chainParams;
+                    return 1;
                 }
 
                 // v4.0.19 Fix B: Startup undo-presence integrity check.
@@ -4709,6 +4733,25 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                               << " blocks pass consensus rules" << std::endl;
                 }
             }
+        }
+
+        // v4.1 Phase 2 startup validation — lifetime-miner snapshot assertion.
+        // Runs AFTER the optional revalidation block above (which may
+        // Clear() and replay the cooldown tracker). Asserts the tracker's
+        // computed distinct-miner count at h=44232 matches the canonical
+        // embedded snapshot. Closes Layer-2 v0.1 CRIT-1 (non-deterministic
+        // pre-44233 history ingestion). Wiring point per Cursor v0.3 F3 +
+        // Layer-2 v0.2 NEW-1 (v0.4 wired here at ~4737, post-revalidation;
+        // v0.3 had wired at ~4531 BEFORE the tracker was even constructed
+        // — that was dead code on every startup).
+        //
+        // Skipped on placeholder builds (lifetimeMinerCountAt44232 = 0)
+        // and below activation height. Exit code 3 distinguishes from
+        // Phase 1 checkpoint mismatch (exit 1) and undo integrity (exit 2).
+        if (!Dilithion::ValidateLifetimeMinerSnapshot(g_chainstate.GetTip(),
+                                                       g_node_context.cooldown_tracker)) {
+            delete Dilithion::g_chainParams;
+            return 3;
         }
 
         // Phase 4: Initialize wallet (before mining callback setup)
