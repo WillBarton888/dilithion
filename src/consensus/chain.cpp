@@ -1309,6 +1309,20 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
     // 3. Template building seeing stale transactions with unavailable inputs
     if (pMemPool != nullptr) {
         // Deserialize block transactions (block.vtx is raw bytes)
+        //
+        // PR-EF-2 fixup F#7 TODO: each ConnectTip currently deserializes
+        // block.vtx THREE times in the typical configuration:
+        //   1. here, for RemoveConfirmedTxs (this site)
+        //   2. CTxIndex::WriteBlock (src/index/tx_index.cpp:357)
+        //   3. fee estimator block-connect callback
+        //      (src/node/dilithion-node.cpp / dilv-node.cpp lambda)
+        //
+        // Future hoist: deserialize once in ConnectTip and pass the
+        // deserialized vector via a signature change to the BlockConnect
+        // callback (and to RemoveConfirmedTxs). Out of scope for the
+        // PR-EF-2 fixup batch -- requires touching the public callback
+        // signature and every registered callback. Tracked here so the
+        // duplication isn't lost.
         CBlockValidator validator;
         std::vector<CTransactionRef> block_txs;
         std::string error;

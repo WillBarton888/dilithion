@@ -32,6 +32,7 @@
 #include <digital_dna/verification_manager.h>
 #include <digital_dna/dna_verification.h>
 #include <consensus/vdf_validation.h>
+#include <policy/fees.h>
 
 // --- Destructor stubs for non-virtual types held via unique_ptr in NodeContext ---
 // These have explicit destructors in heavy .cpp files. None have virtual methods,
@@ -100,3 +101,21 @@ bool CheckVDFProof(
     std::string&) {
     return true;
 }
+
+// --- Fee-estimator stubs (PR-EF-2) ---
+//
+// mempool.cpp's hooks reference g_fee_estimator and call removeTx/processTx.
+// Fuzz harnesses don't link policy/fees.cpp (would cascade into persistence,
+// chainstate, etc.). Stub the global as nullptr — the hooks all guard with
+// `if (auto* est = g_fee_estimator)` so nullptr is a safe inert state.
+//
+// removeTx and processTx still need definitions because the linker resolves
+// the call-site even though it's behind a runtime null check.
+
+policy::fee_estimator::CBlockPolicyEstimator* g_fee_estimator = nullptr;
+
+void policy::fee_estimator::CBlockPolicyEstimator::removeTx(
+    const uint256&, bool) {}
+
+void policy::fee_estimator::CBlockPolicyEstimator::processTx(
+    const uint256&, unsigned int, long, unsigned long, bool) {}

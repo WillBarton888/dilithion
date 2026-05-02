@@ -7,6 +7,7 @@
 #include <chrono>
 #include <iostream>  // For std::cout, std::endl (BUG #109 debug)
 #include <util/logging.h>  // For g_verbose flag
+#include <policy/fees.h>  // PR-EF-2: g_fee_estimator processTx hook
 
 static const size_t DEFAULT_MAX_MEMPOOL_SIZE = 300 * 1024 * 1024;
 
@@ -151,7 +152,26 @@ CTxMemPool::CTxMemPool()
 
 CTxMemPool::~CTxMemPool() {
     // MEMPOOL-007 FIX: Stop background expiration thread gracefully
-    stop_expiration_thread = true;
+    // PR-EF-2 fixup F#1: delegate to StopExpirationThread so the destructor
+    // and the explicit shutdown call follow the same code path. Idempotent:
+    // if StopExpirationThread was already invoked from main()'s shutdown
+    // body, this is a cheap no-op.
+    StopExpirationThread();
+}
+
+void CTxMemPool::StopExpirationThread() {
+    // PR-EF-2 fixup F#1: idempotent. stop_expiration_thread is std::atomic;
+    // exchange returns the previous value so we only signal/join once.
+    bool was_running = stop_expiration_thread.exchange(true);
+    if (was_running) {
+        // Already stopped (e.g. dtor running after main() called this).
+        // Still ensure the thread is joined if somehow not yet -- joinable()
+        // is false after a successful join, so this is also a no-op then.
+        if (expiration_thread.joinable()) {
+            expiration_thread.join();
+        }
+        return;
+    }
     expiration_cv.notify_all();
     if (expiration_thread.joinable()) {
         expiration_thread.join();
@@ -277,11 +297,24 @@ bool CTxMemPool::EvictTransactions(size_t bytes_needed, std::string* error) {
 
     // Evict selected transactions
     // Note: RemoveTx() is exception-safe (no partial eviction on failure)
+    //
+    // PR-EF-2 fixup F#3: do the pure-mempool eviction work under cs,
+    // queue successfully-removed txids into m_pending_estimator_evictions,
+    // and let the public caller notify the estimator AFTER releasing cs.
+    // This matches the AddTx / RemoveTx / ReplaceTransaction discipline
+    // ("never hold both estimator mutex and mempool cs") and keeps the
+    // FEE-ESTIMATION.md runbook claim true. EvictTransactions is private
+    // and only called from AddTxUnlocked (which itself runs under cs from
+    // AddTx's public wrapper); the wrapper drains the queue and notifies
+    // outside the lock. CID 1675290 / 1675260 / 1675250 still hold:
+    // RemoveTxUnlocked must be called with cs held.
     for (const auto& txid : to_evict) {
         // CID 1675290 FIX: Use unlocked version - caller (AddTx) already holds cs lock
         if (RemoveTxUnlocked(txid)) {
             // MEMPOOL-018 FIX: Track successful eviction
             metric_evictions.fetch_add(1, std::memory_order_relaxed);
+            // F#3: queue for post-lock estimator notification.
+            m_pending_estimator_evictions.push_back(txid);
         }
     }
 
@@ -315,32 +348,52 @@ bool CTxMemPool::EvictTransactions(size_t bytes_needed, std::string* error) {
 //
 
 void CTxMemPool::CleanupExpiredTransactions() {
-    std::lock_guard<std::mutex> lock(cs);
+    // PR-EF-2 fixup F#3: out-of-lock estimator notification.
+    // Pre-fix this method called est->removeTx() while holding cs, which
+    // contradicted the AddTx / RemoveTx / Replace discipline and made
+    // the FEE-ESTIMATION.md runbook claim false ("we never hold both"
+    // -- false). Estimator never calls back into the mempool today, so
+    // there was no live deadlock, but the inconsistency was a footgun
+    // for future estimator features. Now: do the pure-mempool work
+    // under cs, collect expired txids into a local vector, drop the
+    // lock, then notify the estimator outside.
+    std::vector<uint256> expired_txids;
+    {
+        std::lock_guard<std::mutex> lock(cs);
 
-    int64_t current_time = std::time(nullptr);
-    std::vector<uint256> to_remove;
+        int64_t current_time = std::time(nullptr);
+        std::vector<uint256> to_remove;
 
-    // Find all expired transactions
-    for (const auto& entry_pair : mapTx) {
-        const CTxMemPoolEntry& entry = entry_pair.second;
-        int64_t age = current_time - entry.GetTime();
+        // Find all expired transactions
+        for (const auto& entry_pair : mapTx) {
+            const CTxMemPoolEntry& entry = entry_pair.second;
+            int64_t age = current_time - entry.GetTime();
 
-        // Check if transaction has expired (older than 14 days)
-        if (age > MEMPOOL_EXPIRY_SECONDS) {
-            // Only expire if no descendants (don't orphan children)
-            // Children will be removed recursively once their parents expire
-            if (!HasDescendants(entry.GetTxHash())) {
-                to_remove.push_back(entry.GetTxHash());
+            // Check if transaction has expired (older than 14 days)
+            if (age > MEMPOOL_EXPIRY_SECONDS) {
+                // Only expire if no descendants (don't orphan children)
+                // Children will be removed recursively once their parents expire
+                if (!HasDescendants(entry.GetTxHash())) {
+                    to_remove.push_back(entry.GetTxHash());
+                }
+            }
+        }
+
+        // Remove expired transactions
+        // CID 1675260 FIX: Use unlocked version - we already hold cs lock above
+        for (const auto& txid : to_remove) {
+            if (RemoveTxUnlocked(txid)) {
+                // MEMPOOL-018 FIX: Track successful expiration
+                metric_expirations.fetch_add(1, std::memory_order_relaxed);
+                expired_txids.push_back(txid);
             }
         }
     }
-
-    // Remove expired transactions
-    // CID 1675260 FIX: Use unlocked version - we already hold cs lock above
-    for (const auto& txid : to_remove) {
-        if (RemoveTxUnlocked(txid)) {
-            // MEMPOOL-018 FIX: Track successful expiration
-            metric_expirations.fetch_add(1, std::memory_order_relaxed);
+    // Lock released. Now notify the estimator outside cs -- matches the
+    // AddTx / RemoveTx / Replace pattern. Estimator has its own mutex.
+    if (auto* est = g_fee_estimator) {
+        for (const auto& txid : expired_txids) {
+            est->removeTx(txid, /*in_block=*/false);
         }
     }
 }
@@ -595,8 +648,55 @@ bool CTxMemPool::AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t t
 
 // Public wrapper that acquires lock
 bool CTxMemPool::AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) {
-    std::lock_guard<std::mutex> lock(cs);
-    return AddTxUnlocked(tx, fee, time, height, error, bypass_fee_check);
+    bool ok = false;
+    size_t tx_vsize = 0;
+    uint256 txhash;
+    // PR-EF-2 fixup F#3: drain queued eviction txids that AddTxUnlocked
+    // populated via EvictTransactions while we held cs. Local copy taken
+    // under the lock; estimator notified after release.
+    std::vector<uint256> evicted_txids;
+    {
+        std::lock_guard<std::mutex> lock(cs);
+        // F#3: clear before AddTxUnlocked so any prior caller's leftover
+        // entries (none expected; cs serialises) cannot leak.
+        m_pending_estimator_evictions.clear();
+        ok = AddTxUnlocked(tx, fee, time, height, error, bypass_fee_check);
+        if (ok && tx) {
+            // Cache values for the post-lock fee-estimator hook. Doing this
+            // under the mempool lock keeps the snapshot consistent (the tx
+            // was just admitted; metadata is stable).
+            tx_vsize = tx->GetSerializedSize();
+            txhash   = tx->GetHash();
+        }
+        // F#3: take the eviction list now (still under lock) so we can
+        // notify the estimator after release. swap is O(1) and leaves the
+        // member empty, ready for the next AddTx.
+        evicted_txids.swap(m_pending_estimator_evictions);
+    }
+    // PR-EF-2: hand the admit event to the fee estimator OUTSIDE the
+    // mempool lock. The estimator has its own internal mutex; holding both
+    // would invite a lock-order inversion if any other estimator caller
+    // ever acquires the mempool lock under it (none today, but the
+    // discipline is cheap to enforce now). Null-safe: when -feeestimates=0
+    // or before init, g_fee_estimator stays null.
+    //
+    // bypass_fee_check==true is used by mempool reload (PR-MP-2) and
+    // wallet-broadcast paths that should NOT influence the estimator;
+    // mirrors BC's `validFeeEstimate` flag (see fees.h processTx).
+    if (auto* est = g_fee_estimator) {
+        // F#3: notify evictions before the new admit. Order is purely
+        // cosmetic to the estimator's data structures (the tracked-set
+        // is keyed on txid; a subsequent processTx on a different txid
+        // is independent of removeTx on the evicted ones), but matches
+        // the chronological event order.
+        for (const auto& evicted_txid : evicted_txids) {
+            est->removeTx(evicted_txid, /*in_block=*/false);
+        }
+        if (ok && tx) {
+            est->processTx(txhash, height, fee, tx_vsize, !bypass_fee_check);
+        }
+    }
+    return ok;
 }
 
 // T1.B-2 (testmempoolaccept port from Bitcoin Core v28.0):
@@ -647,9 +747,54 @@ bool CTxMemPool::TestAccept(const CTransactionRef& tx, CAmount fee, int64_t time
 // - Atomic replacement (all or nothing)
 //
 
-bool CTxMemPool::ReplaceTransaction(const CTransactionRef& replacement_tx, CAmount replacement_fee, int64_t time, unsigned int height, std::string* error) {
-    std::lock_guard<std::mutex> lock(cs);
+bool CTxMemPool::ReplaceTransaction(const CTransactionRef& replacement_tx, CAmount replacement_fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check) {
+    bool ok = false;
+    size_t tx_vsize = 0;
+    uint256 txhash;
+    std::vector<uint256> evicted_conflicts;
+    // PR-EF-2 fixup F#3: also drain m_pending_estimator_evictions in case
+    // ReplaceTransactionLocked->AddTxUnlocked->EvictTransactions populated
+    // it (rare: RBF replacement triggers mempool-full eviction). These are
+    // separate from `evicted_conflicts`, which holds RBF-replaced txids.
+    std::vector<uint256> mempool_evictions;
+    {
+        std::lock_guard<std::mutex> lock(cs);
+        m_pending_estimator_evictions.clear();
+        ok = ReplaceTransactionLocked(replacement_tx, replacement_fee, time, height, error, evicted_conflicts);
+        if (ok && replacement_tx) {
+            tx_vsize = replacement_tx->GetSerializedSize();
+            txhash   = replacement_tx->GetHash();
+        }
+        mempool_evictions.swap(m_pending_estimator_evictions);
+    }
+    // PR-EF-2: feed the fee estimator outside the mempool lock. The
+    // evicted conflicts must be removed from the estimator's tracked-tx
+    // set without crediting them as confirmations (they were replaced,
+    // not confirmed); the new tx is recorded as a fresh admit. This
+    // mirrors Bitcoin Core's validation/mempool.cpp RBF path.
+    if (auto* est = g_fee_estimator) {
+        for (const auto& evicted : evicted_conflicts) {
+            est->removeTx(evicted, /*in_block=*/false);
+        }
+        for (const auto& evicted_txid : mempool_evictions) {
+            est->removeTx(evicted_txid, /*in_block=*/false);
+        }
+        if (ok && replacement_tx) {
+            // PR-EF-2 fixup F#8: map bypass_fee_check to
+            // !valid_fee_estimate, mirroring AddTx semantics.
+            est->processTx(txhash, height, replacement_fee, tx_vsize,
+                           /*valid_fee_estimate=*/!bypass_fee_check);
+        }
+    }
+    return ok;
+}
 
+bool CTxMemPool::ReplaceTransactionLocked(const CTransactionRef& replacement_tx,
+                                          CAmount replacement_fee,
+                                          int64_t time,
+                                          unsigned int height,
+                                          std::string* error,
+                                          std::vector<uint256>& evicted_conflicts) {
     if (!replacement_tx) {
         if (error) *error = "Null replacement transaction";
         return false;
@@ -760,12 +905,17 @@ bool CTxMemPool::ReplaceTransaction(const CTransactionRef& replacement_tx, CAmou
 
     // Step 1: Remove all conflicting transactions
     // CID 1675250 FIX: Use unlocked version - we already hold cs lock
+    // PR-EF-2: collect evicted txids so the caller can inform the fee
+    // estimator (after lock release). We populate even on failure of a
+    // single RemoveTxUnlocked so the estimator state stays in sync with
+    // any partial removals.
     for (const auto& conflict_txid : conflicts) {
         if (!RemoveTxUnlocked(conflict_txid)) {
             // This should not happen since we verified existence above
             if (error) *error = "Failed to remove conflicting transaction";
             return false;
         }
+        evicted_conflicts.push_back(conflict_txid);
     }
 
     // Step 2: Add replacement transaction
@@ -830,8 +980,21 @@ bool CTxMemPool::RemoveTxUnlocked(const uint256& txid) {
 
 // Public wrapper that acquires lock
 bool CTxMemPool::RemoveTx(const uint256& txid) {
-    std::lock_guard<std::mutex> lock(cs);
-    return RemoveTxUnlocked(txid);
+    bool removed = false;
+    {
+        std::lock_guard<std::mutex> lock(cs);
+        removed = RemoveTxUnlocked(txid);
+    }
+    // PR-EF-2: caller may be a non-block removal path (manual /
+    // administrative). Treat as eviction (in_block=false). Estimator hook
+    // is null-safe and called outside the mempool lock to keep the public
+    // API clean.
+    if (removed) {
+        if (auto* est = g_fee_estimator) {
+            est->removeTx(txid, /*in_block=*/false);
+        }
+    }
+    return removed;
 }
 
 bool CTxMemPool::Exists(const uint256& txid) const {
@@ -1026,6 +1189,12 @@ CTxMemPool::MempoolMetrics CTxMemPool::GetMetrics() const {
     metrics.total_rbf_failures = metric_rbf_failures.load();
     metrics.total_rebroadcasts = metric_rebroadcasts.load();  // Phase 3.3
     return metrics;
+}
+
+// PR-EF-2 fixup F#4: test seam.
+void CTxMemPool::SetMaxMempoolCountForTesting(size_t count) {
+    std::lock_guard<std::mutex> lock(cs);
+    max_mempool_count = (count == 0) ? 1 : count;
 }
 
 void CTxMemPool::RemoveConfirmedTxs(const std::vector<CTransactionRef>& block_txs) {

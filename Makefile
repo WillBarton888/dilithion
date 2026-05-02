@@ -666,6 +666,7 @@ BOOST_TEST_OBJECTS := $(OBJ_DIR)/test/test_dilithion.o \
 	$(OBJ_DIR)/test/undo_data_tests.o \
 	$(OBJ_DIR)/test/fee_estimator_tests.o \
 	$(OBJ_DIR)/test/fee_persist_tests.o \
+	$(OBJ_DIR)/test/fee_wiring_tests.o \
 	$(OBJ_DIR)/test/zmq_tests.o \
 	$(CRYPTO_PROPERTY_OBJECTS)
 
@@ -1307,7 +1308,7 @@ fuzz_serialize: $(FUZZ_SERIALIZE_OBJ) $(OBJ_DIR)/net/serialize.o $(OBJ_DIR)/cryp
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"
 
 # fuzz_mempool: Mempool operations (needs full common + fees + mempool + logging for g_verbose)
-fuzz_mempool: $(FUZZ_MEMPOOL_OBJ) $(FUZZ_COMMON_OBJECTS) $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/util/logging.o $(DILITHIUM_OBJECTS)
+fuzz_mempool: $(FUZZ_MEMPOOL_OBJ) $(FUZZ_COMMON_OBJECTS) $(OBJ_DIR)/node/mempool.o $(OBJ_DIR)/consensus/fees.o $(OBJ_DIR)/util/logging.o $(FUZZ_STUBS_OBJ) $(DILITHIUM_OBJECTS)
 	@echo "$(COLOR_BLUE)[FUZZ-LINK]$(COLOR_RESET) $@"
 	@$(FUZZ_CXX) $(FUZZ_CXXFLAGS) -o $@ $^ -L $(RANDOMX_BUILD_DIR) -lrandomx -lpthread
 	@echo "$(COLOR_GREEN)✓ $@ built$(COLOR_RESET)"

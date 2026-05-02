@@ -7,6 +7,11 @@
 #include <cmath>
 #include <stdexcept>
 
+// Process-wide fee estimator handle. Defined in fees.cpp so the symbol
+// exists even when no node binary is linked (e.g. test_dilithion). PR-EF-2
+// wiring sets/clears this from dilithion-node.cpp / dilv-node.cpp main().
+policy::fee_estimator::CBlockPolicyEstimator* g_fee_estimator = nullptr;
+
 namespace policy {
 namespace fee_estimator {
 
@@ -260,12 +265,57 @@ void CBlockPolicyEstimator::processBlock(
     // Now true: one acquire, one release, full atomicity.
     std::lock_guard<std::mutex> lk(m_mutex);
 
+    // PR-EF-2 fixup F#5: idempotent re-entry on rollback / replay.
+    //
+    // Background: when CChainState::ActivateBestChain rolls back a failed
+    // reorg connect, the rollback re-disconnects then re-connects the
+    // same block range (consensus/chain.cpp:720-756, 802-829). This fires
+    // the BlockConnect callback twice for the same height. Pre-fix that
+    // meant two passes of decayStats + agingUnconfirmed for the same
+    // block range -- a small but real bias.
+    //
+    // The per-tx confirm loop is already idempotent (processBlockTxLocked
+    // erases m_tracked on success and returns false on miss). The
+    // dangerous pieces are decay + aging, which are unconditional and
+    // cumulative. We guard them with: if block_height has already been
+    // observed (height <= m_historical_best) AND no new confirmations
+    // landed (m_tracked unchanged across the per-tx loop), skip decay/age.
+    //
+    // Edge cases:
+    //  - First block ever: m_historical_best == 0, m_historical_first == 0.
+    //    block_height >= 1 (genesis is height 0 in mainnet rules but we
+    //    only ever call processBlock for connected non-genesis blocks).
+    //    First call sets m_historical_first = block_height; this branch
+    //    falls through to decay/age normally.
+    //  - Forward connect (normal advance): block_height > m_historical_best
+    //    -> falls through, decay/age runs.
+    //  - Replay of same height with same txs: counted_confirms == 0,
+    //    block_height <= m_historical_best -> skip decay/age. Safe: the
+    //    earlier call already aged.
+    //  - Replay where some new tx now matches m_tracked (e.g. mempool
+    //    re-admitted between the first connect and the rollback retry):
+    //    counted_confirms > 0 -> we DO run decay/age. This biases very
+    //    slightly toward more decay, but the alternative (skipping
+    //    decay when new confirms landed) loses information and is
+    //    worse. Consciously accepted.
+    const bool height_already_observed =
+        (m_historical_first != 0) && (block_height <= m_historical_best);
+
     if (m_historical_first == 0) m_historical_first = block_height;
     if (block_height > m_best_seen_height) m_best_seen_height = block_height;
     m_historical_best = block_height;
 
+    size_t counted_confirms = 0;
     for (const auto& h : confirmed_txhashes) {
-        processBlockTxLocked(block_height, h);
+        if (processBlockTxLocked(block_height, h)) {
+            ++counted_confirms;
+        }
+    }
+
+    // F#5: skip decay/age if this height was already observed and no new
+    // tracked-tx confirmations landed (idempotent rollback path).
+    if (height_already_observed && counted_confirms == 0) {
+        return;
     }
 
     decayStats(m_short);

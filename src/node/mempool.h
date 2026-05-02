@@ -104,12 +104,40 @@ private:
 
     // MEMPOOL-007 FIX: Expiration cleanup methods
     void ExpirationThreadFunc();
+public:
+    // PR-EF-2 fixup F#3: public so tests can drive it directly. Called
+    // from the background expiration thread and from tests that want to
+    // verify the estimator-notify path. Internally takes cs, then notifies
+    // g_fee_estimator OUTSIDE the lock (matches AddTx/RemoveTx/Replace
+    // discipline).
     void CleanupExpiredTransactions();
+private:
+
+    // PR-EF-2 fixup F#3: queue of txids evicted during the most recent
+    // EvictTransactions(...) call, populated under cs and drained by the
+    // public AddTx wrapper AFTER the lock is released. Keeps the
+    // estimator-notify call out-of-lock, matching the AddTx / RemoveTx /
+    // ReplaceTransaction discipline. Implementation detail: lives on the
+    // CTxMemPool instance (not a thread-local) because cs serialises
+    // EvictTransactions calls.
+    std::vector<uint256> m_pending_estimator_evictions;
 
     // CID 1675260/1675290/1675250 FIX: Internal unlocked versions to prevent deadlock
     // These MUST only be called while holding cs lock
     bool RemoveTxUnlocked(const uint256& txid);
     bool AddTxUnlocked(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error, bool bypass_fee_check = false);
+    // PR-EF-2: ReplaceTransaction body. Caller MUST hold cs. Returns the
+    // list of evicted txids so the public ReplaceTransaction wrapper can
+    // notify the fee estimator outside the mempool lock. (Mempool's `cs`
+    // and the estimator's internal mutex are independent; we serialize
+    // the pure-mempool work first to keep the lock release / estimator
+    // notify ordering uniform with AddTx.)
+    bool ReplaceTransactionLocked(const CTransactionRef& replacement_tx,
+                                  CAmount replacement_fee,
+                                  int64_t time,
+                                  unsigned int height,
+                                  std::string* error,
+                                  std::vector<uint256>& evicted_conflicts);
 
     // T1.B-2 (testmempoolaccept): Pure validation, NO mutation. Caller MUST hold cs lock.
     // Returns true iff the tx WOULD be accepted by AddTxUnlocked under the same arguments.
@@ -126,7 +154,6 @@ public:
     ~CTxMemPool();  // MEMPOOL-007 FIX: Destructor to stop expiration thread
     bool AddTx(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error = nullptr, bool bypass_fee_check = false);
     bool RemoveTx(const uint256& txid);
-
     // T1.B-2 (testmempoolaccept port from Bitcoin Core v28.0): Run AddTx's full validation
     // pipeline against `tx` and return whether it WOULD be accepted, WITHOUT mutating any
     // mempool state (mapTx, setEntries, mapSpentOutpoints, mapDescendants, counters,
@@ -136,7 +163,17 @@ public:
     // Safe to call concurrently from multiple threads; const-method, read-only on the
     // shared mempool state guarded by cs.
     bool TestAccept(const CTransactionRef& tx, CAmount fee, int64_t time, unsigned int height, std::string* error = nullptr, bool bypass_fee_check = false) const;
-    bool ReplaceTransaction(const CTransactionRef& replacement_tx, CAmount replacement_fee, int64_t time, unsigned int height, std::string* error = nullptr);  // MEMPOOL-008 FIX: RBF support
+
+    // MEMPOOL-008 FIX: RBF support.
+    //
+    // PR-EF-2 fixup F#8: bypass_fee_check defaults to false for live RBF.
+    // Set true on mempool replay paths so the estimator records the
+    // replacement with valid_fee_estimate=false, mirroring AddTx and
+    // Bitcoin Core's validFeeEstimate flag. No production callers pass
+    // true today; the parameter exists for symmetry with AddTx and to
+    // give future replay/restore paths a clean way to opt out of
+    // estimator pollution.
+    bool ReplaceTransaction(const CTransactionRef& replacement_tx, CAmount replacement_fee, int64_t time, unsigned int height, std::string* error = nullptr, bool bypass_fee_check = false);
     bool Exists(const uint256& txid) const;
     bool GetTx(const uint256& txid, CTxMemPoolEntry& entry) const;
     std::optional<CTxMemPoolEntry> GetTxIfExists(const uint256& txid) const;  // MEMPOOL-010 FIX: TOCTOU-safe API
@@ -167,6 +204,13 @@ public:
     void GetStats(size_t& size, size_t& bytes, double& min_fee_rate, double& max_fee_rate) const;
     void SetHeight(unsigned int height);
     void RemoveConfirmedTxs(const std::vector<CTransactionRef>& block_txs);
+
+    // PR-EF-2 fixup F#4: test seam. Tests want to force eviction without
+    // having to fill 300MB / 100k entries. Production callers do not set
+    // this. New value is clamped to max(1, requested) to keep the eviction
+    // loop well-defined; setting it below current count does NOT
+    // retroactively evict (next AddTx will).
+    void SetMaxMempoolCountForTesting(size_t count);
 
     // MEMPOOL-018 FIX: Get metrics for monitoring
     struct MempoolMetrics {
@@ -206,6 +250,17 @@ public:
      * Phase 3.3: Get rebroadcast count
      */
     uint64_t GetRebroadcastCount() const { return metric_rebroadcasts.load(); }
+
+    // PR-EF-2 fixup F#1: Explicit, idempotent shutdown of the background
+    // expiration thread. The destructor also stops it, but call sites that
+    // share lifetime with other globals (e.g. g_fee_estimator) MUST stop the
+    // expiration thread BEFORE freeing the estimator, otherwise the snapshot
+    // pattern in CleanupExpiredTransactions can use-after-free.
+    //
+    // Safe to call multiple times (idempotent: second call is a no-op).
+    // After this returns, no further calls into g_fee_estimator originate
+    // from the expiration thread.
+    void StopExpirationThread();
 
     /**
      * T1.B-2 H3: Read-only state-integrity accessors used by

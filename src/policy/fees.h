@@ -364,4 +364,16 @@ using EstimatorPtr = std::shared_ptr<CBlockPolicyEstimator>;
 }  // namespace fee_estimator
 }  // namespace policy
 
+// Process-wide fee estimator handle. Mirrors `g_tx_index` ownership pattern.
+// Set by node startup (PR-EF-2) when -feeestimates=1 (default), cleared on
+// shutdown. Mempool admit hook (CTxMemPool::AddTxUnlocked) and chainstate
+// connect callback both load() this pointer; if null, the estimator is
+// disabled (operator passed -feeestimates=0). Null-safe to read at any time.
+//
+// Owned externally (typically by main()'s NodeContext). Not thread-safe to
+// reassign during operation; intended set-once-at-startup semantics. Reads
+// are plain pointer loads -- shutdown ordering guarantees no concurrent
+// reader after the owner has nulled this pointer.
+extern policy::fee_estimator::CBlockPolicyEstimator* g_fee_estimator;
+
 #endif  // DILITHION_POLICY_FEES_H

@@ -77,6 +77,9 @@
 #include <index/tx_index.h>            // PR-3: optional transaction index
 #include <index/coinstatsindex.h>      // PR-BA-2: optional UTXO-set stats index
 #include <node/mempool_persist.h>      // PR-MP-2: mempool persistence (DumpMempool / LoadMempool)
+#include <policy/fees.h>               // PR-EF-2: CBlockPolicyEstimator + g_fee_estimator
+#include <policy/fee_persist.h>        // PR-EF-2: fee_estimates.dat (DumpFeeEstimates / LoadFeeEstimates)
+#include <consensus/validation.h>      // PR-EF-2: DeserializeBlockTransactions for the connect callback
 // DilV: No RandomX -- VDF-only chain
 // #include <crypto/randomx_hash.h>
 #include <util/logging.h>  // Bitcoin Core-style logging
@@ -528,6 +531,7 @@ struct NodeConfig {
     bool txindex_enabled = false;   // --txindex / -txindex: enable transaction index (PR-3)
     bool coinstatsindex_enabled = false;   // --coinstatsindex / -coinstatsindex: enable UTXO-set stats index (PR-BA-2)
     bool persistmempool = true;     // --persistmempool=<0|1>: save/restore mempool across restarts (PR-MP-2; default ON)
+    bool feeestimates  = true;      // --feeestimates=<0|1>: enable adaptive fee estimator + persistence (PR-EF-2; default ON)
     bool yes_flag = false;          // --yes: bypass --reset-chain confirmation prompt
     bool verbose = false;           // Show debug output (hidden by default)
     bool quiet = false;             // Quiet mode: only block lifecycle, errors, and warnings
@@ -677,6 +681,19 @@ struct NodeConfig {
                      arg == "--persistmempool=true" || arg == "-persistmempool=true") {
                 persistmempool = true;
             }
+            // PR-EF-2: -feeestimates flag. Bare form / =1 enable; =0 disables
+            // both the live estimator and fee_estimates.dat persistence.
+            else if (arg == "--feeestimates" || arg == "-feeestimates") {
+                feeestimates = true;
+            }
+            else if (arg == "--feeestimates=0" || arg == "-feeestimates=0" ||
+                     arg == "--feeestimates=false" || arg == "-feeestimates=false") {
+                feeestimates = false;
+            }
+            else if (arg == "--feeestimates=1" || arg == "-feeestimates=1" ||
+                     arg == "--feeestimates=true" || arg == "-feeestimates=true") {
+                feeestimates = true;
+            }
             else if (arg == "--reset-chain") {
                 // Wipe chain-derived state, preserve wallet.dat and mik_registration.dat.
                 reset_chain = true;
@@ -800,6 +817,7 @@ struct NodeConfig {
         std::cout << "  --txindex             Build full transaction index (requires --reindex on warm chain)" << std::endl;
         std::cout << "  --coinstatsindex      Build UTXO-set statistics index (requires --reindex on warm chain)" << std::endl;
         std::cout << "  --persistmempool=<0|1> Save/restore mempool across restarts (default: 1)" << std::endl;
+        std::cout << "  --feeestimates=<0|1>  Adaptive fee estimator + fee_estimates.dat (default: 1)" << std::endl;
         std::cout << "  --reset-chain         Wipe chain state for a clean resync." << std::endl;
         std::cout << "                          Preserves wallet.dat and mik_registration.dat" << std::endl;
         std::cout << "                          so miners do NOT re-solve the registration PoW." << std::endl;
@@ -2865,6 +2883,64 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 });
             g_tx_index->StartBackgroundSync();
             std::cout << "  [OK] Transaction index initialized" << std::endl;
+        }
+
+        // PR-EF-2: Fee estimator init. Default ON. See dilithion-node.cpp
+        // for the full ordering rationale (BC parity init.cpp). Mirror of
+        // the same lifecycle here for the DilV binary.
+        std::unique_ptr<policy::fee_estimator::CBlockPolicyEstimator> fee_estimator_owner;
+        if (config.feeestimates) {
+            fee_estimator_owner = std::make_unique<policy::fee_estimator::CBlockPolicyEstimator>();
+            g_fee_estimator = fee_estimator_owner.get();
+
+            const auto load_result = policy::fee_persist::LoadFeeEstimates(
+                *fee_estimator_owner, std::filesystem::path(config.datadir));
+            if (!load_result.success) {
+                std::cerr << "[fee_estimator] LoadFeeEstimates hard error: "
+                          << load_result.error_message
+                          << " -- continuing with fresh estimator" << std::endl;
+            } else if (load_result.cold_start) {
+                std::cout << "[fee_estimator] LoadFeeEstimates: "
+                          << load_result.cold_start_reason
+                          << " -- starting fresh" << std::endl;
+            } else {
+                std::cout << "[fee_estimator] LoadFeeEstimates: restored "
+                          << load_result.tracked_tx_count
+                          << " tracked txs" << std::endl;
+            }
+
+            // PR-EF-2 fixup F#2: IBD gate -- see dilithion-node.cpp callback
+            // for full rationale. Without this gate, IBD blocks decay the
+            // estimator's histograms and the accumulation window releases
+            // on a degenerate state.
+            g_chainstate.RegisterBlockConnectCallback(
+                [](const CBlock& b, int h, const uint256& /*hh*/) {
+                    if (!g_fee_estimator || h < 0) return;
+                    if (!g_node_context.ibd_coordinator ||
+                        !g_node_context.ibd_coordinator->IsSynced()) {
+                        return;
+                    }
+                    CBlockValidator validator;
+                    std::vector<CTransactionRef> txs;
+                    std::string err;
+                    if (!validator.DeserializeBlockTransactions(b, txs, err)) {
+                        std::cerr << "[fee_estimator] block-connect: "
+                                  << "DeserializeBlockTransactions failed at "
+                                  << "height " << h << ": " << err
+                                  << " -- estimator skips this block" << std::endl;
+                        return;
+                    }
+                    std::vector<uint256> confirmed;
+                    confirmed.reserve(txs.size());
+                    for (const auto& tx : txs) {
+                        if (!tx) continue;
+                        if (tx->IsCoinBase()) continue;
+                        confirmed.push_back(tx->GetHash());
+                    }
+                    g_fee_estimator->processBlock(static_cast<unsigned int>(h),
+                                                  confirmed);
+                });
+            std::cout << "  [OK] Fee estimator initialized" << std::endl;
         }
 
         // PR-BA-2: Optional UTXO-set statistics index. Default OFF;
@@ -7454,6 +7530,33 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                           << dump_result.error_message
                           << " -- prior mempool.dat retained" << std::endl;
             }
+        }
+
+        // PR-EF-2: Save fee estimator state. Runs AFTER mempool dump --
+        // mirrors Bitcoin Core init.cpp Shutdown ordering. See
+        // dilithion-node.cpp shutdown for full rationale.
+        //
+        // PR-EF-2 fixup F#1: stop the mempool expiration thread BEFORE we
+        // touch the estimator -- otherwise the snapshot-and-call pattern
+        // in CleanupExpiredTransactions can use-after-free as the stack
+        // unwinds (LIFO destruction: estimator dies before the mempool's
+        // destructor joins its expiration thread).
+        mempool.StopExpirationThread();
+        if (config.feeestimates && fee_estimator_owner) {
+            const auto dump_result = policy::fee_persist::DumpFeeEstimates(
+                *fee_estimator_owner, std::filesystem::path(config.datadir));
+            if (!dump_result.success) {
+                std::cerr << "[fee_estimator] DumpFeeEstimates failed: "
+                          << dump_result.error_message
+                          << " -- prior fee_estimates.dat retained" << std::endl;
+            } else {
+                std::cout << "[fee_estimator] DumpFeeEstimates: wrote "
+                          << dump_result.bytes_written << " bytes ("
+                          << dump_result.tracked_tx_count << " tracked txs)"
+                          << std::endl;
+            }
+            g_fee_estimator = nullptr;
+            fee_estimator_owner.reset();  // F#1: force destruction now
         }
 
         // Remove UPnP port mapping on shutdown
