@@ -525,7 +525,7 @@ ChainParams ChainParams::DilV() {
     // (no in-flight blocks need re-validation) → zero consensus-fork risk.
     // The +6 buffer accommodates any block produced during seed restoration
     // before all v4.2 binaries are deployed.
-    params.timeDecayCooldownActivationHeight = 44255;
+    params.timeDecayCooldownActivationHeight = 44250;  // v4.2.0 emergency drop 2026-05-03: chain stalled at tip=44249 for 5h, miners stuck in legacy v4.1 cooldown. Original activation 44255 (tip+6) was unreachable because legacy cooldown blocks the very block production that would advance the chain. Drop to tip+1 so the next block produced fires the time-decay path immediately and unsticks the chain. All 4 seeds + miner have v4.2.0 binary; new activation 44250 deploy unblocks block 44250 onward under time-decay rules.
     params.cooldownTimeDecaySeconds = 60;      // 1 cooldown-block drains per 60s wall-clock
     params.vdfCooldownShortWindow = 0;         // Disabled at genesis — avoids short-window MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window cooldown + time-based expiry from genesis
