@@ -14,6 +14,7 @@
 #include <digital_dna/verification_manager.h>  // Phase 2: DNA Verification & Attestation
 #include <consensus/ichain_selector.h>             // Phase 5: frozen interface
 #include <consensus/port/chain_selector_impl.h>    // Phase 5: ChainSelectorAdapter
+#include <node/fork_manager.h>                     // Phase 11 A1: ForkManager wiring
 #include <net/port/sync_coordinator.h>             // Phase 6 PR6.5a: ISyncCoordinator complete type for unique_ptr destructor
 #include <net/port/addrman_v2.h>                   // Phase 6 PR6.5b.0: port-namespace IAddressManager impl
 #include <net/port/legacy_addrman_adapter.h>       // Phase 6 PR6.5b.0: legacy IAddressManager fallback
@@ -64,47 +65,36 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
     // The adapter is a thin wrapper; lifetime is tied to NodeContext
     // and MUST be reset before chainstate is freed (handled in Shutdown/Reset).
     //
-    // v4.1 IBD silent-drop fix: gate construction on env-var
-    // DILITHION_USE_NEW_CHAIN_SELECTOR. Default = OFF.
+    // v4.1 IBD silent-drop construction gate (RETAINED in v4.3 as operator
+    // opt-in). The underlying AddBlockIndex flag-merge bug is fixed by
+    // Phase 11 ABI (commit 3a0c2ea above), but we keep this gate to preserve
+    // operator control per Phase 5 PR5.4 partition-risk lesson and the v4.3
+    // emergency deploy review. Setting DILITHION_USE_NEW_CHAIN_SELECTOR=1
+    // is the operator's explicit opt-in to engage the new chain-selection
+    // logic AND the Phase 11 A1 fork-staging adapter.
     //
-    // Why: ChainSelectorAdapter::ProcessNewHeader pre-populates
-    // mapBlockIndex with BLOCK_VALID_HEADER entries during headers
-    // sync. Legacy ActivateBestChain (the production path since PR5.4
-    // reverted the chain-selector default) is the consumer of block
-    // data, but it relies on AddBlockIndex to attach BLOCK_HAVE_DATA.
-    // AddBlockIndex's silent return-false-on-duplicate semantics
-    // (chain.cpp:96-98) drop the new flag, leaving every entry stuck
-    // at BLOCK_VALID_HEADER. block_processing.cpp:891 then never sees
-    // HaveData() == true, blocks are never activated, chain stays at
-    // genesis. Reproduced on SYD mainnet 2026-05-02 with fresh datadir.
+    // The 6 ProcessNewHeader call sites in headers_manager.cpp and the 2
+    // use_port_pm gates in dilithion-node.cpp / dilv-node.cpp already
+    // null-check chain_selector. NodeContext::WireForkStaging() (called by
+    // node startup once blockchain_db is set) is null-safe — it's a no-op
+    // when chain_selector is nullptr (env-var unset).
     //
-    // Suppressing the adapter is a true revert to pre-Phase-6-PR6.1
-    // behavior — legacy ActivateBestChain receives pindex by parameter
-    // from the block-data path and never looks up by hash for
-    // activation input, so removing the prepop side effect is safe.
-    // The 6 ProcessNewHeader call sites in headers_manager.cpp and
-    // the 2 use_port_pm gates in dilithion-node.cpp / dilv-node.cpp
-    // already null-check chain_selector — they double as the suppression
-    // gate. Zero changes needed at the call sites.
-    //
-    // Re-enable after v4.2 lands the proper AddBlockIndex flag-merge
-    // semantics + caller audit. Setting env-var=1 in production is
-    // known-broken; the WARN log at construction time signals operators.
+    // Per v4.3 deploy: the wrapper /root/run-dilv-seed.sh exports
+    // DILITHION_USE_NEW_CHAIN_SELECTOR=1 alongside --usenewpeerman=1; both
+    // are required for the port path to be active. Without the env-var,
+    // chain_selector stays null AND --usenewpeerman=1 logs an ERROR and
+    // falls back to legacy CIbdCoordinator (fail-loud).
     try {
         const char* selector_env = std::getenv("DILITHION_USE_NEW_CHAIN_SELECTOR");
         const bool use_new_selector = (selector_env != nullptr) && (std::strcmp(selector_env, "1") == 0);
         if (use_new_selector) {
             chain_selector = std::make_unique<::dilithion::consensus::port::ChainSelectorAdapter>(*chainstate);
-            LogPrintf(ALL, INFO, "Phase 5: chain selector adapter wired (env-var=1, opt-in)");
-            LogPrintf(ALL, WARN,
-                "DILITHION_USE_NEW_CHAIN_SELECTOR=1 enables an opt-in path with a "
-                "known IBD silent-drop bug (header pre-pop loses BLOCK_HAVE_DATA on "
-                "block-data arrival). Do not use in production until v4.2.");
+            LogPrintf(ALL, INFO, "v4.3: chain selector adapter wired (env-var=1, opt-in; A1 fork-staging deferred until WireForkStaging)");
         } else {
             chain_selector = nullptr;
             LogPrintf(ALL, INFO,
-                "Phase 5: chain selector adapter SUPPRESSED (default; env-var=1 "
-                "known to have IBD silent-drop until v4.2)");
+                "v4.3: chain selector adapter SUPPRESSED (default; set "
+                "DILITHION_USE_NEW_CHAIN_SELECTOR=1 to engage new path)");
         }
     } catch (const std::exception& e) {
         LogPrintf(ALL, ERROR, "Failed to instantiate chain selector adapter: %s", e.what());
@@ -238,6 +228,52 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
 
     LogPrintf(ALL, INFO, "NodeContext initialized successfully");
     return true;
+}
+
+bool NodeContext::WireForkStaging() {
+    // Phase 11 A1: rebuild the chain selector adapter with the ForkManager
+    // singleton + blockchain_db wired in, enabling fork-staging dispatch
+    // on ProcessNewBlock. Idempotent — calling twice with the same db is
+    // safe (we just reconstruct the adapter, which is a thin wrapper).
+    //
+    // v4.3 conflict-resolution: respect the v4.1 IBD silent-drop construction
+    // gate retained at NodeContext::Init. If chain_selector was suppressed
+    // there (env-var unset → chain_selector == nullptr), the operator did NOT
+    // opt in to the new path; do NOT silently construct a staging-enabled
+    // adapter here. Stay null. The 6 ProcessNewHeader / 2 use_port_pm null
+    // checks downstream rely on this.
+    if (!chain_selector) {
+        LogPrintf(ALL, INFO,
+                  "WireForkStaging: chain_selector was suppressed at Init "
+                  "(DILITHION_USE_NEW_CHAIN_SELECTOR != 1); fork-staging stays disabled");
+        return true;  // Not an error — operator opted out via env-var.
+    }
+    if (!chainstate || !blockchain_db) {
+        LogPrintf(ALL, WARN,
+                  "WireForkStaging: prerequisites not ready (chainstate=%s, blockchain_db=%s); "
+                  "fork-staging stays in Phase-5 mode",
+                  chainstate ? "ok" : "null",
+                  blockchain_db ? "ok" : "null");
+        return false;
+    }
+
+    try {
+        // Reset BEFORE constructing the new adapter — both reference the same
+        // CChainState&, but the unique_ptr swap is atomic enough for our
+        // single-threaded startup invocation. NodeContext::WireForkStaging is
+        // called from the main thread before any block-receive thread starts,
+        // so no concurrent chain_selector access is possible during the swap.
+        chain_selector.reset();
+        chain_selector = std::make_unique<::dilithion::consensus::port::ChainSelectorAdapter>(
+            *chainstate,
+            &ForkManager::GetInstance(),
+            blockchain_db);
+        LogPrintf(ALL, INFO, "Phase 11 A1: chain selector adapter re-wired with fork-staging dispatch");
+        return true;
+    } catch (const std::exception& e) {
+        LogPrintf(ALL, ERROR, "WireForkStaging failed: %s", e.what());
+        return false;
+    }
 }
 
 void NodeContext::Shutdown() {

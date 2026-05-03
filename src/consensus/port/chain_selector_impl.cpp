@@ -15,19 +15,34 @@
 #include <consensus/chain.h>
 #include <consensus/chain_work.h>
 #include <core/chainparams.h>             // Phase 6 PR6.1: nMapBlockIndexCap
-#include <core/node_context.h>           // g_node_context.sync_coordinator
+#include <core/node_context.h>           // g_node_context.sync_coordinator + fork_staging dispatch
 #include <node/block_index.h>
+#include <node/blockchain_storage.h>      // Phase 11 A1: CBlockchainDB
+#include <node/fork_candidate.h>          // Phase 11 A1: ForkBlock / ForkBlockStatus
+#include <node/fork_manager.h>            // Phase 11 A1: ForkManager singleton
 #include <node/ibd_coordinator.h>         // IsInitialBlockDownload (legacy backing kept through Phase 9+)
 #include <net/port/sync_coordinator.h>    // Phase 6 PR6.5a: ISyncCoordinator surface
 #include <primitives/block.h>
 
 #include <atomic>
 #include <cassert>
+#include <iostream>
 
 namespace dilithion::consensus::port {
 
 ChainSelectorAdapter::ChainSelectorAdapter(CChainState& chainstate)
-    : m_chainstate(chainstate)
+    : m_chainstate(chainstate),
+      m_fork_manager(nullptr),
+      m_db(nullptr)
+{
+}
+
+ChainSelectorAdapter::ChainSelectorAdapter(CChainState& chainstate,
+                                           ForkManager* fork_manager,
+                                           CBlockchainDB* db)
+    : m_chainstate(chainstate),
+      m_fork_manager(fork_manager),
+      m_db(db)
 {
 }
 
@@ -93,6 +108,98 @@ bool ChainSelectorAdapter::ProcessNewBlock(std::shared_ptr<const CBlock> block,
         return false;
     }
 
+    // ========================================================================
+    // Phase 11 A1: Fork-staging dispatch.
+    //
+    // If a fork is being staged (created upstream in ibd_coordinator's fork-
+    // detection logic) AND this block belongs to that fork's expected range,
+    // route it through ForkManager INSTEAD OF calling ActivateBestChain
+    // directly. This restores the legacy block_processing.cpp:447-528 +
+    // 1331-1417 staging guarantee on the port path:
+    //   * Block is pre-validated (PoW + nBits + MIK) via PreValidateBlock
+    //     BEFORE any chainstate mutation.
+    //   * Active chain is NEVER disconnected until the fork has more
+    //     cumulative work AND all received blocks pass pre-validation.
+    //   * Pre-validation failure cancels the fork; the original chain
+    //     remains untouched.
+    //
+    // Mirrors block_processing.cpp's invocation pattern. nullptr-guard on
+    // m_fork_manager / m_db preserves the Phase 5 ctor's behavior for tests
+    // that intentionally bypass staging.
+    // ========================================================================
+    if (m_fork_manager != nullptr && m_db != nullptr && m_fork_manager->HasActiveFork()) {
+        auto fork = m_fork_manager->GetActiveFork();
+        if (fork) {
+            const int32_t height = pindex->nHeight;
+            if (fork->IsExpectedBlock(hash, height)) {
+                // Stage the block (idempotent on duplicate height).
+                if (!m_fork_manager->AddBlockToFork(*block, hash, height)) {
+                    // Out-of-range or other refusal — do NOT mutate chain.
+                    return false;
+                }
+
+                // Pre-validate (PoW + nBits + MIK) — only if not already done.
+                ForkBlock* forkBlock = fork->GetBlockAtHeight(height);
+                if (forkBlock && forkBlock->status == ForkBlockStatus::PENDING) {
+                    if (!m_fork_manager->PreValidateBlock(*forkBlock, *m_db)) {
+                        // Pre-validation failed — cancel fork, leave chain untouched.
+                        // Mirrors block_processing.cpp:507. We do NOT invalidate
+                        // headers or ban peers from inside the chain-selector
+                        // adapter — those are PeerManager concerns.
+                        const std::string reason =
+                            "Fork block failed pre-validation: " + forkBlock->invalidReason;
+                        m_fork_manager->CancelFork(reason);
+                        std::cerr << "[ChainSelectorAdapter] " << reason << std::endl;
+                        return false;
+                    }
+                }
+
+                // Decide whether to trigger chain switch. Mirrors the
+                // block_processing.cpp:1343-1374 gate:
+                //   * all received fork blocks must be PREVALIDATED
+                //   * fork tip must have MORE chainwork than current tip
+                // Otherwise stage and wait for more blocks.
+                if (!fork->AllReceivedBlocksPrevalidated()) {
+                    return true;  // Staged successfully; chainstate unchanged.
+                }
+
+                const int32_t highestPrevalidated = fork->GetHighestPrevalidatedHeight();
+                if (highestPrevalidated < 0) {
+                    return true;  // Nothing prevalidated yet — keep staging.
+                }
+
+                ForkBlock* highestBlock = fork->GetBlockAtHeight(highestPrevalidated);
+                if (!highestBlock) {
+                    return true;
+                }
+                CBlockIndex* forkIndex = m_chainstate.GetBlockIndex(highestBlock->hash);
+                CBlockIndex* currentTip = m_chainstate.GetTip();
+                bool forkHasMoreWork = false;
+                if (forkIndex && currentTip) {
+                    forkHasMoreWork = (currentTip->nChainWork < forkIndex->nChainWork);
+                }
+                if (!forkHasMoreWork) {
+                    return true;  // Wait for more fork work; chainstate unchanged.
+                }
+
+                // Trigger chain switch. TriggerChainSwitch re-acquires the
+                // ForkManager mutex briefly to read m_activeFork, then
+                // releases it before calling g_chainstate.ActivateBestChain.
+                // ActivateBestChain owns its own cs_main locking. Lock order
+                // matches the legacy path at block_processing.cpp:1374.
+                bool ok = m_fork_manager->TriggerChainSwitch(g_node_context, *m_db);
+                if (triggered_reorg) *triggered_reorg = ok;  // chain switch == reorg
+                return ok;
+            }
+            // Block is not in fork range. Fall through to ActivateBestChain.
+            // (block_processing.cpp's hash-mismatch + RecordHashMismatch
+            // handling lives in the receive layer; staging here just sees
+            // "not for this fork" and processes normally.)
+        }
+    }
+
+    // No active fork OR block not for the fork OR staging disabled (Phase 5
+    // ctor / nullptr db). Default Phase 5 behavior: forward to ActivateBestChain.
     bool reorg = false;
     if (!m_chainstate.ActivateBestChain(pindex, *block, reorg)) {
         return false;

@@ -613,6 +613,14 @@ fork_staging_legacy_path_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/fork_staging_leg
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ fork_staging_legacy_path_tests built successfully$(COLOR_RESET)"
 
+# Phase 11 A1: port-path fork-staging dispatch tests. Locks the routing logic
+# in ChainSelectorAdapter::ProcessNewBlock that re-implements the legacy
+# block_processing.cpp staging behavior on the port path. 5 cases.
+port_fork_staging_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/port_fork_staging_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ port_fork_staging_tests built successfully$(COLOR_RESET)"
+
 # Phase 10 PR10.1: per-RPC unit tests for Phase 9 telemetry surface.
 # 9 cases locking v0.1.2 schemas of getsyncstatus + getblockdownloadstats
 # + getpeerinfo manager_class extension. Closes Cursor Phase 9 S4 + Layer-2

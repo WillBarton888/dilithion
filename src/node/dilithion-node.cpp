@@ -2932,6 +2932,15 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // IBD HANG FIX #14: Register blockchain_db for block serving
         g_node_context.blockchain_db = &blockchain;
 
+        // Phase 11 A1: now that blockchain_db is wired, enable fork-staging
+        // dispatch on the port chain selector adapter. This routes port-path
+        // ProcessNewBlock through ForkManager (validate-before-disconnect)
+        // instead of calling ActivateBestChain directly. Without this call,
+        // --usenewpeerman=true would bypass fork-staging on P2P-arriving blocks.
+        if (!g_node_context.WireForkStaging()) {
+            std::cerr << "[startup] WARN: WireForkStaging failed — port path will not stage forks" << std::endl;
+        }
+
         // Keep legacy globals for backward compatibility during migration
         // REMOVED: g_peer_manager assignment - CBlockFetcher now uses dependency injection
         // REMOVED: Legacy global assignments - use NodeContext directly

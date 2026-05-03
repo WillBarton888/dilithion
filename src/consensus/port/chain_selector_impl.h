@@ -22,12 +22,30 @@
 #include <consensus/ichain_selector.h>
 
 class CChainState;
+class CBlockchainDB;
+class ForkManager;
 
 namespace dilithion::consensus::port {
 
 class ChainSelectorAdapter final : public ::dilithion::consensus::IChainSelector {
 public:
+    // Phase 5 backward-compat ctor (no fork-staging). Used by chain_selector_tests
+    // and any caller that does not yet have a ForkManager wired. ProcessNewBlock
+    // forwards directly to ActivateBestChain (Phase 5 behavior).
     explicit ChainSelectorAdapter(CChainState& chainstate);
+
+    // Phase 11 A1 ctor — wires fork-staging. When a non-null fork_manager is
+    // present AND it has an active fork covering the incoming block, ProcessNewBlock
+    // routes the block through staging (AddBlockToFork + PreValidateBlock +
+    // TriggerChainSwitch) instead of calling ActivateBestChain directly. This
+    // restores the legacy block_processing.cpp staging guarantee on the port path.
+    //
+    // Both pointers are non-owning. nullptr fork_manager OR nullptr db disables
+    // staging and reverts to the Phase 5 forwarder. Production wiring lives in
+    // NodeContext::Init.
+    ChainSelectorAdapter(CChainState& chainstate,
+                         ForkManager* fork_manager,
+                         CBlockchainDB* db);
     ~ChainSelectorAdapter() override = default;
 
     ChainSelectorAdapter(const ChainSelectorAdapter&) = delete;
@@ -53,6 +71,8 @@ public:
 
 private:
     CChainState& m_chainstate;
+    ForkManager* m_fork_manager;     // Phase 11 A1 — non-owning, nullable
+    CBlockchainDB* m_db;             // Phase 11 A1 — non-owning, nullable
 };
 
 }  // namespace dilithion::consensus::port
