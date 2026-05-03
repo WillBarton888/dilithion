@@ -470,11 +470,30 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
                         continue;
                     }
 
-                    // Add to chain state (may fail if another thread beat us - that's OK)
-                    CBlockIndex* pOrphanIndexRaw = pOrphanIndex.get();
+                    // Add to chain state. With Phase 11 ABI flag-merge semantics
+                    // (chain.cpp AddBlockIndex), this returns true on merge into
+                    // an existing entry — the moved-from unique_ptr is destroyed
+                    // and any raw pointer to its payload is dangling. We must
+                    // re-resolve via GetBlockIndex to get the canonical map-owned
+                    // CBlockIndex* before any further use. (Cursor v4.3 close-readiness
+                    // review of ABI surfaced this orphan-path UAF.)
                     if (!m_chainstate.AddBlockIndex(orphanBlockHash, std::move(pOrphanIndex))) {
-                        // Another thread already added this orphan - just erase from pool
+                        // (Practically unreachable now that ABI returns true on merge.
+                        // Kept defensively in case AddBlockIndex shape changes again.)
                         g_node_context.orphan_manager->EraseOrphanBlock(orphanHash);
+                        continue;
+                    }
+
+                    // Re-resolve the raw pointer post-AddBlockIndex. Whether the
+                    // moved unique_ptr was adopted (fresh insertion) or destroyed
+                    // (merge into existing entry), the chainstate map now owns
+                    // the canonical CBlockIndex* for this hash.
+                    CBlockIndex* pOrphanIndexRaw = m_chainstate.GetBlockIndex(orphanBlockHash);
+                    if (!pOrphanIndexRaw) {
+                        // Should be impossible after AddBlockIndex returned true.
+                        // Surface loudly rather than UAF on a dangling get().
+                        std::cerr << "[ValidationQueue] FATAL: AddBlockIndex returned true but GetBlockIndex returned null for "
+                                  << orphanBlockHash.GetHex().substr(0, 16) << "..." << std::endl;
                         continue;
                     }
 
