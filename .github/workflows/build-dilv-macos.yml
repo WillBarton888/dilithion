@@ -43,7 +43,7 @@ jobs:
         export CFLAGS="-I$OPENSSL_PREFIX/include -I$MINIUPNPC_PREFIX/include -I$GMP_PREFIX/include"
         export CXXFLAGS="-std=c++17 -I$OPENSSL_PREFIX/include -I$MINIUPNPC_PREFIX/include -I$GMP_PREFIX/include"
         make clean
-        make dilv-node check-wallet-balance -j$(sysctl -n hw.ncpu) CXXFLAGS="$CXXFLAGS" CPPFLAGS="$CPPFLAGS" LDFLAGS="$LDFLAGS"
+        make dilv-node check-wallet-balance -j$(sysctl -n hw.ncpu)
         ls -lh dilv-node check-wallet-balance
 
     - name: Extract version from tag
