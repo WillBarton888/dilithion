@@ -1329,99 +1329,48 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
     // CONSENSUS-ENFORCED COOLDOWN (hard fork at dfmpCooldownConsensusHeight)
     // ====================================================================
     // After activation, reject blocks where the miner's MIK identity
-    // is still within its cooldown period.  This prevents cheaters from
+    // is still within its cooldown period. This prevents cheaters from
     // bypassing the voluntary miner-side cooldown.
     //
-    // STALL EXEMPTION: If the timestamp gap between this block and its
-    // parent is large enough, bypass cooldown enforcement.  During a
-    // stall all miners may be in cooldown, creating a permanent deadlock
-    // where no block can ever be produced (BUG #274).
+    // The block below has TWO PATHS:
     //
-    // V2 (stallExemptionV2Height): Threshold raised from 300s to 600s.
-    // Additionally, stall bypass requires a different miner from the
-    // previous block (unless solo mining).  Prevents private fork mining
-    // via repeated stall exemption abuse.
+    //   v4.2.0 hard-fork (above timeDecayCooldownActivationHeight):
+    //       Single self-correcting cooldown rule. Cooldown drains by 1 block
+    //       per cooldownTimeDecaySeconds of wall-clock — no exemption tiers,
+    //       no stall bypass needed because cooldowns naturally clear over
+    //       time. See spec .claude/contracts/v4_2_time_decay_cooldown_spec.md.
+    //
+    //   Legacy v4.1 (below timeDecayCooldownActivationHeight):
+    //       Block-count cooldown + V2 stall-exemption tiers. Comment for
+    //       this path is INSIDE the `else` branch below — kept verbatim for
+    //       historical-block validation but no new design discussion.
     if (block.IsVDFBlock() && g_node_context.cooldown_tracker && !assumeValid) {
-        bool chainStalled = false;
+        // ====================================================================
+        // v4.2.0 — TIME-DECAY COOLDOWN PATH (replaces stall-exemption tier system)
+        // ====================================================================
+        // At and above timeDecayCooldownActivationHeight, the new self-correcting
+        // rule applies via IsInCooldown's internal branch. The stall-exemption
+        // tier 1/2 logic below is BYPASSED — under the new rule no exemption is
+        // ever needed because cooldowns naturally drain with wall-clock time.
+        //
+        // CheckVDFCooldown calls cooldown_tracker.IsInCooldown(mik, height,
+        // blockTimestamp) which branches internally: above activation it uses
+        // the time-decay formula, below activation the legacy block-only path.
+        // CheckConsecutiveMiner and CheckMIKWindowCap continue to run unchanged
+        // below this block — they enforce orthogonal invariants that time-decay
+        // does NOT subsume (HIGH-1 fix, see spec §4.2).
+        int timeDecayActivationHeight = Dilithion::g_chainParams ?
+            Dilithion::g_chainParams->timeDecayCooldownActivationHeight : 999999999;
 
-        int stabilizationHeight = Dilithion::g_chainParams ?
-            Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
-
-        if (pindex->nHeight >= stabilizationHeight) {
-            // Post-stabilization: NO stall exemption.
-            // Time-based cooldown expiry handles stalls naturally.
-            // Stall exemption was exploited for private fork mining (2026-03-31).
-            // chainStalled stays false.
-        } else if (pindex->pprev) {
-            int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(pindex->pprev->nTime);
-
-            int stallV2Height = Dilithion::g_chainParams ?
-                Dilithion::g_chainParams->stallExemptionV2Height : 999999999;
-
-            if (pindex->nHeight >= stallV2Height) {
-                // V2: Two-tier stall exemption to prevent private fork mining
-                // while avoiding deadlocks during genuine long stalls.
-                //
-                // Tier 1 (600-1199s): bypass cooldown ONLY if different miner
-                //   (or solo miner).  Blocks the ~384s attack pattern.
-                // Tier 2 (1200s+): bypass cooldown unconditionally.
-                //   Prevents permanent deadlock when only the previous miner
-                //   is available during a genuine extended stall.
-                static constexpr int64_t STALL_THRESHOLD_V2 = 600;
-                static constexpr int64_t STALL_UNCONDITIONAL = 1200;
-                chainStalled = (gap >= STALL_THRESHOLD_V2);
-
-                if (chainStalled && gap < STALL_UNCONDITIONAL) {
-                    // Tier 1: require different miner (unless solo)
-                    std::array<uint8_t, 20> currentMik{};
-                    std::array<uint8_t, 20> prevMik{};
-                    bool haveCurrent = ExtractCoinbaseMIKIdentity(block, currentMik);
-
-                    CBlock prevBlock;
-                    bool havePrev = false;
-                    if (pdb != nullptr) {
-                        havePrev = pdb->ReadBlock(pindex->pprev->GetBlockHash(), prevBlock);
-                        if (havePrev) {
-                            havePrev = ExtractCoinbaseMIKIdentity(prevBlock, prevMik);
-                        }
-                    }
-
-                    if (haveCurrent && havePrev && currentMik == prevMik) {
-                        // Same miner — force recalc of active miners at this
-                        // height (fixes stale cache issue in stall path)
-                        g_node_context.cooldown_tracker->IsInCooldown(currentMik, pindex->nHeight);
-                        int activeMiners = g_node_context.cooldown_tracker->GetActiveMiners();
-                        if (activeMiners > 1) {
-                            chainStalled = false;  // Reject stall exemption
-                            if (g_verbose.load(std::memory_order_relaxed))
-                                std::cout << "[Chain] Block " << pindex->nHeight
-                                          << ": stall exemption DENIED (same miner as prev, "
-                                          << activeMiners << " active miners)" << std::endl;
-                        }
-                    }
-                }
-                // Tier 2 (gap >= 1200s): chainStalled stays true unconditionally
-            } else {
-                // Legacy: 300s threshold, no miner check
-                chainStalled = (gap >= 300);
-            }
-        }
-
-        if (chainStalled) {
-            if (g_verbose.load(std::memory_order_relaxed))
-                std::cout << "[Chain] Block " << pindex->nHeight
-                          << ": cooldown check skipped (chain stall -- "
-                          << (block.nTime - pindex->pprev->nTime)
-                          << "s since last block)" << std::endl;
-        } else {
+        if (pindex->nHeight >= timeDecayActivationHeight) {
+            // v4.2.0 path — single check, no exemption tiers.
             std::string cooldownError;
-            // Pass block.nTime for time-based cooldown expiry
             int64_t blockTs = static_cast<int64_t>(block.nTime);
             if (!CheckVDFCooldown(block, pindex->nHeight,
                                    *g_node_context.cooldown_tracker, cooldownError,
                                    blockTs)) {
                 std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
-                          << " REJECTED: cooldown violation" << std::endl;
+                          << " REJECTED: time-decay cooldown active" << std::endl;
                 std::cerr << "[Chain] " << cooldownError << std::endl;
 
                 pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
@@ -1429,6 +1378,111 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
                     pdb->WriteBlockIndex(blockHash, *pindex);
                 }
                 return false;
+            }
+        } else {
+            // ----------------------------------------------------------------
+            // LEGACY v4.1 PATH — block-count cooldown + stall-exemption tiers.
+            // ----------------------------------------------------------------
+            // STALL EXEMPTION: If the timestamp gap between this block and its
+            // parent is large enough, bypass cooldown enforcement. During a
+            // stall all miners may be in cooldown, creating a permanent
+            // deadlock where no block can ever be produced (BUG #274).
+            //
+            // V2 (stallExemptionV2Height): Threshold raised from 300s to 600s.
+            // Additionally, stall bypass requires a different miner from the
+            // previous block (unless solo mining). Prevents private fork
+            // mining via repeated stall exemption abuse.
+            //
+            // Subsumed by the v4.2.0 time-decay rule above-activation.
+            // Retained for historical-block validation only.
+            bool chainStalled = false;
+
+            int stabilizationHeight = Dilithion::g_chainParams ?
+                Dilithion::g_chainParams->stabilizationForkHeight : 999999999;
+
+            if (pindex->nHeight >= stabilizationHeight) {
+                // Post-stabilization: NO stall exemption.
+                // Time-based cooldown expiry handles stalls naturally.
+                // Stall exemption was exploited for private fork mining (2026-03-31).
+                // chainStalled stays false.
+            } else if (pindex->pprev) {
+                int64_t gap = static_cast<int64_t>(block.nTime) - static_cast<int64_t>(pindex->pprev->nTime);
+
+                int stallV2Height = Dilithion::g_chainParams ?
+                    Dilithion::g_chainParams->stallExemptionV2Height : 999999999;
+
+                if (pindex->nHeight >= stallV2Height) {
+                    // V2: Two-tier stall exemption to prevent private fork mining
+                    // while avoiding deadlocks during genuine long stalls.
+                    //
+                    // Tier 1 (600-1199s): bypass cooldown ONLY if different miner
+                    //   (or solo miner).  Blocks the ~384s attack pattern.
+                    // Tier 2 (1200s+): bypass cooldown unconditionally.
+                    //   Prevents permanent deadlock when only the previous miner
+                    //   is available during a genuine extended stall.
+                    static constexpr int64_t STALL_THRESHOLD_V2 = 600;
+                    static constexpr int64_t STALL_UNCONDITIONAL = 1200;
+                    chainStalled = (gap >= STALL_THRESHOLD_V2);
+
+                    if (chainStalled && gap < STALL_UNCONDITIONAL) {
+                        // Tier 1: require different miner (unless solo)
+                        std::array<uint8_t, 20> currentMik{};
+                        std::array<uint8_t, 20> prevMik{};
+                        bool haveCurrent = ExtractCoinbaseMIKIdentity(block, currentMik);
+
+                        CBlock prevBlock;
+                        bool havePrev = false;
+                        if (pdb != nullptr) {
+                            havePrev = pdb->ReadBlock(pindex->pprev->GetBlockHash(), prevBlock);
+                            if (havePrev) {
+                                havePrev = ExtractCoinbaseMIKIdentity(prevBlock, prevMik);
+                            }
+                        }
+
+                        if (haveCurrent && havePrev && currentMik == prevMik) {
+                            // Same miner — force recalc of active miners at this
+                            // height (fixes stale cache issue in stall path)
+                            g_node_context.cooldown_tracker->IsInCooldown(currentMik, pindex->nHeight);
+                            int activeMiners = g_node_context.cooldown_tracker->GetActiveMiners();
+                            if (activeMiners > 1) {
+                                chainStalled = false;  // Reject stall exemption
+                                if (g_verbose.load(std::memory_order_relaxed))
+                                    std::cout << "[Chain] Block " << pindex->nHeight
+                                              << ": stall exemption DENIED (same miner as prev, "
+                                              << activeMiners << " active miners)" << std::endl;
+                            }
+                        }
+                    }
+                    // Tier 2 (gap >= 1200s): chainStalled stays true unconditionally
+                } else {
+                    // Legacy: 300s threshold, no miner check
+                    chainStalled = (gap >= 300);
+                }
+            }
+
+            if (chainStalled) {
+                if (g_verbose.load(std::memory_order_relaxed))
+                    std::cout << "[Chain] Block " << pindex->nHeight
+                              << ": cooldown check skipped (chain stall -- "
+                              << (block.nTime - pindex->pprev->nTime)
+                              << "s since last block)" << std::endl;
+            } else {
+                std::string cooldownError;
+                // Pass block.nTime for time-based cooldown expiry
+                int64_t blockTs = static_cast<int64_t>(block.nTime);
+                if (!CheckVDFCooldown(block, pindex->nHeight,
+                                       *g_node_context.cooldown_tracker, cooldownError,
+                                       blockTs)) {
+                    std::cerr << "[Chain] ERROR: Block " << pindex->nHeight
+                              << " REJECTED: cooldown violation" << std::endl;
+                    std::cerr << "[Chain] " << cooldownError << std::endl;
+
+                    pindex->nStatus |= CBlockIndex::BLOCK_FAILED_VALID;
+                    if (pdb != nullptr) {
+                        pdb->WriteBlockIndex(blockHash, *pindex);
+                    }
+                    return false;
+                }
             }
         }
     }

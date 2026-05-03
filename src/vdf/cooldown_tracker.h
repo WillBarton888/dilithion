@@ -64,17 +64,33 @@ public:
      *      observed during 2026-04-25 incident: time-based expiry let one
      *      miner win 3 consecutive blocks because each was >360s after the
      *      previous (cooldown=8 * targetBlockTime=45 = 360s). 999999999 =
-     *      time-based expiry never retired (legacy behaviour). */
+     *      time-based expiry never retired (legacy behaviour).
+     *  timeDecayActivationHeight: v4.2.0 — height at which the time-decay
+     *      cooldown rule activates. At and above this height, IsInCooldown
+     *      uses the new self-correcting rule:
+     *          effective_cooldown = max(0, cooldown_blocks
+     *                                   - max(0, time_since) / decay_seconds)
+     *      A miner is in cooldown iff blocks_since < effective_cooldown.
+     *      This subsumes the v4.1 stall-exemption-tier system. Below this
+     *      height, the legacy v4.0.22 / v4.1 paths run unchanged.
+     *      999999999 = disabled (legacy paths only).
+     *  timeDecaySeconds: seconds of wall-clock that drain 1 cooldown-block
+     *      under the time-decay rule. Default 60 (mainnet). Only consulted
+     *      when timeDecayActivationHeight is reached. */
     explicit CCooldownTracker(int activeWindow = ACTIVE_WINDOW,
                               int shortWindow = 0,
                               int activationHeight = 999999999,
                               int targetBlockTime = 45,
-                              int timeBasedExpiryRetiredHeight = 999999999)
+                              int timeBasedExpiryRetiredHeight = 999999999,
+                              int timeDecayActivationHeight = 999999999,
+                              int timeDecaySeconds = 60)
         : m_activeWindow(activeWindow),
           m_shortWindow(shortWindow),
           m_stabilizationHeight(activationHeight),
           m_targetBlockTime(targetBlockTime),
-          m_timeBasedExpiryRetiredHeight(timeBasedExpiryRetiredHeight) {}
+          m_timeBasedExpiryRetiredHeight(timeBasedExpiryRetiredHeight),
+          m_timeDecayActivationHeight(timeDecayActivationHeight),
+          m_timeDecaySeconds(timeDecaySeconds > 0 ? timeDecaySeconds : 60) {}
 
     /** Compute cooldown from active miner count. */
     static int CalculateCooldown(int activeMiners);
@@ -82,10 +98,35 @@ public:
     /** Active window size this instance was constructed with. */
     int GetActiveWindow() const { return m_activeWindow; }
 
+    /** v4.2.0: time-decay activation height this instance was constructed with. */
+    int GetTimeDecayActivationHeight() const { return m_timeDecayActivationHeight; }
+
+    /** v4.2.0: decay rate in seconds (1 cooldown-block drains per N seconds). */
+    int GetTimeDecaySeconds() const { return m_timeDecaySeconds; }
+
+    /** v4.2.0: whether the time-decay path is the binding cooldown rule at `height`. */
+    bool IsTimeDecayActive(int height) const {
+        return height >= m_timeDecayActivationHeight;
+    }
+
     // --- Query interface ---
 
     /** Is this address currently in cooldown at the given height?
-     *  currentTimestamp: block timestamp for time-based expiry (0 = disabled). */
+     *  currentTimestamp: block timestamp.
+     *
+     *  Below `m_timeDecayActivationHeight` (legacy path):
+     *      currentTimestamp = 0 disables time-based expiry; only block-count cooldown applies.
+     *
+     *  At or above `m_timeDecayActivationHeight` (v4.2.0 time-decay path):
+     *      **PRECONDITION: currentTimestamp MUST be > 0.**
+     *      Passing 0 above activation is a programming error — the time-decay
+     *      formula needs a real timestamp. The implementation treats
+     *      `currentTimestamp == 0` as the strictly-conservative case (no
+     *      time-decay drain, equivalent to pure block-count cooldown — i.e.
+     *      the function returns the SAFER answer "in cooldown" more often,
+     *      never returns "eligible" when it shouldn't), but this is a safety
+     *      fallback, not intended semantics. Consensus callers (chain.cpp,
+     *      vdf_validation.cpp) MUST pass `block.nTime`. */
     bool IsInCooldown(const Address& addr, int height, int64_t currentTimestamp = 0) const;
     /** Option C simulation helper:
      *  evaluate cooldown as if `excludeHeight` were disconnected first.
@@ -190,8 +231,14 @@ private:
     int m_activeWindow{ACTIVE_WINDOW};      // long window
     int m_shortWindow{0};                   // short window (0 = disabled)
     int m_stabilizationHeight{999999999};   // activation height for dual-window + time expiry
-    int m_targetBlockTime{45};              // seconds per block
+    // m_targetBlockTime: LEGACY-ONLY (pre-timeDecayActivationHeight). Used by
+    // the v4.0.22 time-based-expiry calculation in IsInCooldown's legacy
+    // branch. Above the v4.2.0 activation, the time-decay rule uses
+    // m_timeDecaySeconds instead — m_targetBlockTime is unread.
+    int m_targetBlockTime{45};              // seconds per block (LEGACY-ONLY, see above)
     int m_timeBasedExpiryRetiredHeight{999999999};  // v4.0.22: above this height, block-only cooldown
+    int m_timeDecayActivationHeight{999999999};     // v4.2.0: above this height, time-decay rule replaces stall exemption
+    int m_timeDecaySeconds{60};                     // v4.2.0: 60s wall-clock drains 1 cooldown-block
 
     // address → height of most recent win
     std::map<Address, int> m_lastWinHeight;
@@ -243,7 +290,7 @@ private:
     void RecalcShortActiveMiners(int height) const;
 
     /** Compute effective cooldown.  Caller must hold m_mutex. */
-    int ComputeEffectiveCooldown(int height) const;
+    int ComputeEffectiveCooldownUnlocked(int height) const;
 
     // Lazy cache for active miner count (mutable for const query methods).
     mutable int m_cachedActiveMinersMut{0};

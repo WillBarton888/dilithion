@@ -15,9 +15,20 @@ int CCooldownTracker::CalculateCooldown(int activeMiners)
     return std::clamp(cooldown, MIN_COOLDOWN, MAX_COOLDOWN);
 }
 
-int CCooldownTracker::ComputeEffectiveCooldown(int height) const
+int CCooldownTracker::ComputeEffectiveCooldownUnlocked(int height) const
 {
     // Caller must hold m_mutex.
+    //
+    // v4.2.0 MED-E note: above m_timeDecayActivationHeight, this function is
+    // called by the time-decay path in IsInCooldown. The dual-window blend
+    // below (long ∩ short) is preserved AS-IS — under v4.2 it composes with
+    // the time-decay rule rather than replacing it. On DilV mainnet
+    // m_shortWindow=0 (chainparams `vdfCooldownShortWindow=0`), so the blend
+    // is a no-op and the spec's "single self-correcting rule" property
+    // holds. **INVARIANT for v4.2 deployments: vdfCooldownShortWindow MUST
+    // remain 0 above the time-decay activation height.** A non-zero value
+    // would compose the short-window-min cooldown with time-decay in a way
+    // the spec never analyzed and which the v4.2 unit tests do not cover.
     RecalcActiveMiners(height);
     int longCooldown = CalculateCooldown(m_cachedActiveMinersMut);
 
@@ -39,7 +50,54 @@ bool CCooldownTracker::IsInCooldown(const Address& addr, int height, int64_t cur
     if (it == m_lastWinHeight.end())
         return false;
 
-    int cooldown = ComputeEffectiveCooldown(height);
+    // ----------------------------------------------------------------------
+    // v4.2.0 — TIME-DECAY COOLDOWN PATH
+    // ----------------------------------------------------------------------
+    // At and above m_timeDecayActivationHeight, the legacy block-only +
+    // stall-exemption logic is REPLACED by a single self-correcting rule:
+    //
+    //   effective_cooldown = max(0, cooldown_blocks - max(0, time_since)/decay)
+    //   in_cooldown        = blocks_since < effective_cooldown
+    //
+    // This subsumes the V1/V2 stall exemption tiers, the time-based expiry,
+    // and the post-stabilization branching at chain.cpp:1339-1500. See
+    // .claude/contracts/v4_2_time_decay_cooldown_spec.md.
+    //
+    // CheckConsecutiveMiner and CheckMIKWindowCap remain ACTIVE alongside
+    // this path — they enforce orthogonal invariants (no same MIK twice in a
+    // row; aggregate window cap) that time-decay does NOT subsume.
+    if (height >= m_timeDecayActivationHeight) {
+        int blocksSince = height - it->second;
+        int cooldownBlocks = ComputeEffectiveCooldownUnlocked(height);
+
+        // HIGH-3: clamp time_since to non-negative. Block timestamps may
+        // legally regress (only median-of-11 must monotonically increase).
+        // Without the clamp, negative time_since with integer division
+        // produces a negative time_decrement, and the subtraction below
+        // would EXTEND cooldown beyond the block-count baseline (more
+        // restrictive than v4.1) — wrong direction. The clamp guarantees
+        // the time-decay path can only soften cooldown, never extend it.
+        int64_t timeSince = 0;
+        auto tsIt = m_lastWinTimestamp.find(addr);
+        if (tsIt != m_lastWinTimestamp.end() && tsIt->second > 0
+                                             && currentTimestamp > 0) {
+            timeSince = currentTimestamp - tsIt->second;
+            if (timeSince < 0) timeSince = 0;
+        }
+
+        // LOW-1: int64_t to avoid overflow at absurd offline durations.
+        const int decay = (m_timeDecaySeconds > 0) ? m_timeDecaySeconds : 60;
+        int64_t timeDecrement = timeSince / decay;
+        int64_t effective = std::max<int64_t>(0,
+            static_cast<int64_t>(cooldownBlocks) - timeDecrement);
+
+        return static_cast<int64_t>(blocksSince) < effective;
+    }
+
+    // ----------------------------------------------------------------------
+    // LEGACY PATH (height < m_timeDecayActivationHeight) — UNCHANGED
+    // ----------------------------------------------------------------------
+    int cooldown = ComputeEffectiveCooldownUnlocked(height);
     int blockGap = height - it->second;
 
     // Block-gap expiry: not in cooldown if enough blocks have passed
@@ -74,7 +132,26 @@ bool CCooldownTracker::IsInCooldownExcludingHeight(const Address& addr, int heig
     if (excludeHeight < 0 || m_heightToWinner.find(excludeHeight) == m_heightToWinner.end()) {
         auto it = m_lastWinHeight.find(addr);
         if (it == m_lastWinHeight.end()) return false;
-        int cooldown = ComputeEffectiveCooldown(height);
+
+        // v4.2.0: time-decay path (mirror of IsInCooldown above-activation branch)
+        if (height >= m_timeDecayActivationHeight) {
+            int blocksSince = height - it->second;
+            int cooldownBlocks = ComputeEffectiveCooldownUnlocked(height);
+            int64_t timeSince = 0;
+            auto tsIt = m_lastWinTimestamp.find(addr);
+            if (tsIt != m_lastWinTimestamp.end() && tsIt->second > 0
+                                                 && currentTimestamp > 0) {
+                timeSince = currentTimestamp - tsIt->second;
+                if (timeSince < 0) timeSince = 0;
+            }
+            const int decay = (m_timeDecaySeconds > 0) ? m_timeDecaySeconds : 60;
+            int64_t timeDecrement = timeSince / decay;
+            int64_t effective = std::max<int64_t>(0,
+                static_cast<int64_t>(cooldownBlocks) - timeDecrement);
+            return static_cast<int64_t>(blocksSince) < effective;
+        }
+
+        int cooldown = ComputeEffectiveCooldownUnlocked(height);
         int blockGap = height - it->second;
         if (blockGap >= cooldown) return false;
         // v4.0.22: gated time-based expiry (see IsInCooldown for rationale)
@@ -142,6 +219,25 @@ bool CCooldownTracker::IsInCooldownExcludingHeight(const Address& addr, int heig
     }
 
     int blockGap = height - it->second;
+
+    // v4.2.0: time-decay path on simulated state (mirror of IsInCooldown
+    // above-activation branch, but using simLastWinTs for the timestamp
+    // lookup so the excluded height is reflected correctly)
+    if (height >= m_timeDecayActivationHeight) {
+        int64_t timeSince = 0;
+        auto tsIt = simLastWinTs.find(addr);
+        if (tsIt != simLastWinTs.end() && tsIt->second > 0
+                                       && currentTimestamp > 0) {
+            timeSince = currentTimestamp - tsIt->second;
+            if (timeSince < 0) timeSince = 0;
+        }
+        const int decay = (m_timeDecaySeconds > 0) ? m_timeDecaySeconds : 60;
+        int64_t timeDecrement = timeSince / decay;
+        int64_t effective = std::max<int64_t>(0,
+            static_cast<int64_t>(cooldown) - timeDecrement);
+        return static_cast<int64_t>(blockGap) < effective;
+    }
+
     if (blockGap >= cooldown) return false;
 
     // v4.0.22: gated time-based expiry (see IsInCooldown for rationale)
@@ -241,7 +337,7 @@ int CCooldownTracker::GetLastWinHeight(const Address& addr) const
 int CCooldownTracker::GetEffectiveCooldown(int height) const
 {
     std::lock_guard<std::mutex> lock(m_mutex);
-    return ComputeEffectiveCooldown(height);
+    return ComputeEffectiveCooldownUnlocked(height);
 }
 
 void CCooldownTracker::OnBlockConnected(int height, const Address& winner, int64_t blockTimestamp)

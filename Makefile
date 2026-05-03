@@ -847,6 +847,13 @@ vdf_lottery_test: $(CORE_OBJECTS) $(OBJ_DIR)/vdf/vdf_lottery_test.o $(DILITHIUM_
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ vdf_lottery_test built successfully$(COLOR_RESET)"
 
+# v4.2.0 — Time-decay cooldown unit tests. Standalone (only depends on
+# cooldown_tracker.cpp + std). See spec §7.1.
+v4_2_time_decay_cooldown_tests: $(OBJ_DIR)/test/v4_2_time_decay_cooldown_tests.o $(OBJ_DIR)/vdf/cooldown_tracker.o
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS)
+	@echo "$(COLOR_GREEN)✓ v4_2_time_decay_cooldown_tests built successfully$(COLOR_RESET)"
+
 test_passphrase_validator: $(OBJ_DIR)/wallet/passphrase_validator.o $(OBJ_DIR)/test_passphrase_validator.o
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)

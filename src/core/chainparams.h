@@ -273,6 +273,34 @@ public:
     // each block was just over the threshold. 999999999 = never retired.
     int timeBasedCooldownExpiryRetiredHeight;
 
+    // v4.2.0 — Time-decay cooldown activation height (HARD FORK).
+    // After this height, the legacy block-only cooldown + V2 stall exemption
+    // tier system at chain.cpp is REPLACED by a single self-correcting rule:
+    //
+    //   miner is in cooldown if blocks_since_last_win < max(0,
+    //       cooldown_blocks - max(0, time_since_last_win) / cooldownTimeDecaySeconds)
+    //
+    // Equivalent: every miner currently in cooldown has their effective
+    // cooldown reduced by 1 block for every cooldownTimeDecaySeconds of
+    // wall-clock that passes. Naturally rate-limits attackers (1 block per
+    // ~43 min for single-miner concentration) while recovering automatically
+    // from low-hashpower stalls.
+    //
+    // Replaces brittle stall-exemption-tier system (chain.cpp:1339-1500 v4.1).
+    // Does NOT replace CheckConsecutiveMiner or CheckMIKWindowCap — those run
+    // independently and remain active.
+    //
+    // 999999999 = disabled (legacy cooldown path active; default for any chain
+    //             not yet activated)
+    int timeDecayCooldownActivationHeight{999999999};
+
+    // v4.2.0 — Decay rate for time-decay cooldown.
+    // 60 = mainnet default (1 block of cooldown drains per 60 seconds wall-clock).
+    // Smaller = faster recovery but more attack-permissive for slow chains.
+    // Larger = slower recovery but more conservative attack rate cap.
+    // See c:\tmp\v4_2_cooldown_sensitivity.py for the sensitivity table.
+    int cooldownTimeDecaySeconds{60};
+
     // v4.1 deterministic snapshot: number of distinct MIK identities that
     // had mined at least one block by height 44232 on the canonical pre-fork
     // chain. Embedded for the v4.1 mandatory rollback so every v4.1 node

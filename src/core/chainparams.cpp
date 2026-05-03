@@ -142,6 +142,8 @@ ChainParams ChainParams::Mainnet() {
     params.consecutiveMinerStallExemptionRetiredHeight = 999999999;  // v4.0.21 Patch A: disabled on DIL (no VDF)
     params.soloExemptionLifetimeGateHeight = 999999999;              // v4.0.21 Patch C: disabled on DIL (no VDF)
     params.timeBasedCooldownExpiryRetiredHeight = 999999999;         // v4.0.22 Patch E: disabled on DIL (no VDF)
+    params.timeDecayCooldownActivationHeight = 999999999;            // v4.2.0: disabled on DIL (no VDF / no per-MIK cooldown)
+    params.cooldownTimeDecaySeconds = 60;                            // v4.2.0: ignored on DIL but kept for type-safety
     params.vdfCooldownShortWindow = 0;               // Disabled (VDF not active on mainnet)
     params.stabilizationForkHeight = 999999999;      // Disabled (VDF not active on mainnet)
     params.mikWindowCapWindow = 0;                   // Disabled (VDF not active on mainnet)
@@ -343,6 +345,8 @@ ChainParams ChainParams::Testnet() {
     params.consecutiveMinerStallExemptionRetiredHeight = 0;  // v4.0.21 Patch A: testnet retires stall exemption from genesis
     params.soloExemptionLifetimeGateHeight = 0;              // v4.0.21 Patch C: testnet activates lifetime gate from genesis
     params.timeBasedCooldownExpiryRetiredHeight = 0;         // v4.0.22 Patch E: testnet retires time-based expiry from genesis
+    params.timeDecayCooldownActivationHeight = 0;            // v4.2.0: testnet activates time-decay cooldown from genesis
+    params.cooldownTimeDecaySeconds = 60;                    // v4.2.0: 60s decay rate (1 cooldown-block per minute)
     params.vdfCooldownShortWindow = 0;         // Disabled — avoids MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window + time expiry from genesis
     params.mikWindowCapWindow = 480;           // 480 blocks = ~6h at 45s/block (MVP)
@@ -511,6 +515,18 @@ ChainParams ChainParams::DilV() {
     params.consecutiveMinerStallExemptionRetiredHeight = 44233;
     params.soloExemptionLifetimeGateHeight = 44233;
     params.timeBasedCooldownExpiryRetiredHeight = 44233;
+    // v4.2.0 — Time-decay cooldown activation, height 44255 on DilV mainnet.
+    // The brittle stall-exemption-tier system in chain.cpp is REPLACED by the
+    // self-correcting time-decay rule at and above this height. See spec
+    // .claude/contracts/v4_2_time_decay_cooldown_spec.md.
+    //
+    // Chosen as tip+6 from the 2026-05-03 stall-recovery cutover (London tip
+    // was 44249 at decision time; NYC/SYD/SGP recovering). Forward-activation
+    // (no in-flight blocks need re-validation) → zero consensus-fork risk.
+    // The +6 buffer accommodates any block produced during seed restoration
+    // before all v4.2 binaries are deployed.
+    params.timeDecayCooldownActivationHeight = 44255;
+    params.cooldownTimeDecaySeconds = 60;      // 1 cooldown-block drains per 60s wall-clock
     params.vdfCooldownShortWindow = 0;         // Disabled at genesis — avoids short-window MIN_COOLDOWN bypass
     params.stabilizationForkHeight = 0;        // Dual-window cooldown + time-based expiry from genesis
 
@@ -725,6 +741,20 @@ ChainParams ChainParams::Regtest() {
     // (DIL-style sentinel) to keep the legacy time-based expiry path
     // active on regtest, matching the cooldown_tracker.h design comment.
     params.timeBasedCooldownExpiryRetiredHeight = 999999999;
+
+    // v4.2.0 PR follow-up: disable time-decay cooldown on regtest as well, for
+    // the same reason as Patch E — single-miner regtest harnesses need the
+    // legacy time-based expiry to escape MIN_COOLDOWN=2. Above-activation
+    // tests construct their own CCooldownTracker with explicit params and do
+    // NOT rely on chainparams; so disabling the chainparams field here only
+    // affects the regtest-via-chainparams path.
+    params.timeDecayCooldownActivationHeight = 999999999;
+    // ISSUE-2 (close-readiness): set every chain's cooldownTimeDecaySeconds
+    // explicitly. Regtest copies from testnet which sets 60; if testnet were
+    // to change to a different rate (e.g. 30 for fast cycles), regtest would
+    // silently inherit it while having activation disabled — confusing.
+    // Make the asymmetry explicit instead.
+    params.cooldownTimeDecaySeconds = 60;
 
     return params;
 }
