@@ -92,16 +92,69 @@ bool CChainState::AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex
     // Invariant: Hash must match block index hash
     Invariant(pindex->GetBlockHash() == hash);
 
-    // Check if already exists (normal during concurrent block processing)
-    if (mapBlockIndex.count(hash) > 0) {
-        return false;
+    // Phase 11 ABI flag-merge: when an entry for this hash already exists
+    // (normal during the headers-sync → block-data sequence on the new
+    // peer manager / chain selector path), MERGE the new entry's nStatus
+    // bits into the existing entry rather than silently dropping the new
+    // call. The pre-fix behaviour was a silent return-false on duplicate
+    // (chain.cpp:96-98 in v4.1), which left header-prepopulated entries
+    // stuck at BLOCK_VALID_HEADER and prevented HaveData() from ever
+    // becoming true — chain stayed at genesis on a fresh datadir running
+    // with chain_selector enabled (SYD mainnet 2026-05-02).
+    //
+    // Merge semantics (mirrors Bitcoin Core's BlockManager::AddToBlockIndex
+    // accumulating-flags model):
+    //   - nStatus: existing |= incoming (monotonic, never loses a flag)
+    //   - pprev:   if existing was null and incoming has a parent, adopt it
+    //   - Topology disagreement (different parent / height / chain work)
+    //     is a programming bug → ConsensusInvariant trip.
+    //
+    // The function returns true on the merge path. The incoming `pindex`
+    // is dropped (its unique_ptr destructor runs at function exit).
+    auto existing_it = mapBlockIndex.find(hash);
+    if (existing_it != mapBlockIndex.end()) {
+        CBlockIndex* existing = existing_it->second.get();
+        ConsensusInvariant(existing != nullptr);
+
+        // Topology must agree across the two CBlockIndex constructions.
+        // Both calls compute height/chainwork from the same header chain,
+        // so disagreement = bug, not a benign race.
+        ConsensusInvariant(existing->nHeight == pindex->nHeight);
+        ConsensusInvariant(existing->nChainWork == pindex->nChainWork);
+
+        // Parent linkage: at least one of the two must agree, and if both
+        // are present they must point to the same prev hash. Adoption of
+        // a previously-null pprev is allowed (the second caller may know
+        // the parent even if the first caller did not).
+        if (existing->pprev != nullptr && pindex->pprev != nullptr) {
+            ConsensusInvariant(existing->pprev->GetBlockHash() == pindex->pprev->GetBlockHash());
+        } else if (existing->pprev == nullptr && pindex->pprev != nullptr) {
+            // First caller did not know the parent; second caller does.
+            // Adopt the new linkage. Validate the parent really is in the
+            // map (same invariant the first-time-add path checks below).
+            uint256 parentHash = pindex->pprev->GetBlockHash();
+            ConsensusInvariant(mapBlockIndex.count(parentHash) > 0);
+            existing->pprev = pindex->pprev;
+        }
+        // (existing->pprev != nullptr && pindex->pprev == nullptr): keep
+        // existing linkage. The incoming entry simply lacks information
+        // the existing entry already has.
+
+        // The load-bearing line: monotonic flag accumulation. BLOCK_VALID_*
+        // and BLOCK_HAVE_* and BLOCK_FAILED_* all OR cleanly. Idempotent
+        // on identical-flag re-adds.
+        existing->nStatus |= pindex->nStatus;
+
+        return true;
     }
+
+    // First-time add — original semantics from here on.
 
     // Consensus invariant: If block has parent, parent must exist in map
     if (pindex->pprev != nullptr) {
         uint256 parentHash = pindex->pprev->GetBlockHash();
         ConsensusInvariant(mapBlockIndex.count(parentHash) > 0);
-        
+
         // Consensus invariant: Height must be parent height + 1
         ConsensusInvariant(pindex->nHeight == pindex->pprev->nHeight + 1);
     } else {

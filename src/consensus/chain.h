@@ -304,8 +304,28 @@ public:
     void SetTipForTest(CBlockIndex* pindex) { pindexTip = pindex; }
 
     /**
-     * Add block index to in-memory map
-     * HIGH-C001 FIX: Now takes unique_ptr for automatic ownership transfer
+     * Add (or merge) a block index entry in the in-memory map.
+     *
+     * HIGH-C001 FIX: Takes unique_ptr for automatic ownership transfer.
+     *
+     * Phase 11 ABI flag-merge semantics: if an entry for `hash` already
+     * exists (normal during the headers-sync → block-data sequence on
+     * the new peer manager / chain selector path), this MERGES the new
+     * entry's nStatus bits into the existing entry via bitwise OR, and
+     * adopts a previously-null pprev pointer if the new caller supplies
+     * one. The incoming `pindex` is dropped on the merge path.
+     *
+     * Topology must agree on duplicate calls — same height, same chain
+     * work, same parent (when both have one). Disagreement trips a
+     * ConsensusInvariant.
+     *
+     * Returns true on first-time add OR successful merge. Returns false
+     * only when `pindex == nullptr`. Aborts via Invariant/ConsensusInvariant
+     * on hash mismatch, missing parent, or topology disagreement.
+     *
+     * This replaces the v4.1 silent-return-false-on-duplicate semantics
+     * that left header-prepopulated entries stuck at BLOCK_VALID_HEADER
+     * forever (SYD mainnet IBD silent-drop, 2026-05-02).
      */
     bool AddBlockIndex(const uint256& hash, std::unique_ptr<CBlockIndex> pindex);
 
