@@ -860,6 +860,53 @@ bool CConnman::ProcessQueuedMessage(const QueuedMessage& msg) {
         }
     }
 
+    // =========================================================================
+    // Phase 11 PR6.5b.2 closure (v4.3) — port-CPeerManager dispatch.
+    //
+    // Sequential-not-nested γ dual-dispatch: legacy m_msg_processor returned
+    // FIRST (above); now route the same message into the port handler under
+    // --usenewpeerman=1 (m_port_peer_manager non-null). Inert under flag=0
+    // (pointer null). Mirrors peer-event dual-dispatch at connman.cpp:91-92
+    // (DispatchPeerConnected) and :104-105 (DispatchPeerDisconnected).
+    //
+    // SAFE:
+    //   - No connman locks held here (BlocksWorker / HeadersWorker / inline
+    //     control path all release their queue mutexes BEFORE calling this).
+    //   - Port owns its own mutex hierarchy (m_peers_mutex < m_sync_state_mutex
+    //     < m_blocks_in_flight_mutex < cs_main); no new lock-order edge.
+    //   - Port's IPeerScorer is independent of legacy CPeerManager — port
+    //     misbehavior ticks do NOT double-count legacy ticks; they're
+    //     observational telemetry under flag=1 (Phase 9 PR9.3 intent).
+    //   - Outer try/catch is defense-in-depth. Port's own try/catch
+    //     (peer_manager.cpp:545-567) already routes throws to UnknownMessage.
+    //     This catch logs anything that escapes the inner wrapper.
+    //
+    // Failure handling: port's `false` return is IGNORED. Connman's existing
+    // legacy misbehavior tracking (below) is unchanged and still drives the
+    // disconnect on legacy CPeerManager score >100. Port-side disconnect
+    // wiring is deferred (Phase 9+).
+    //
+    // Reachability: with this dispatch, MSG_BLOCK reaches port HandleBlock →
+    // m_chain_selector.ProcessNewBlock → ChainSelectorAdapter::ProcessNewBlock
+    // (A1 fork-staging). Without it, A1 is unreachable from production P2P.
+    // Closes the drift-watch comment in
+    // src/test/peer_manager_dual_dispatch_tests.cpp:19-23.
+    // =========================================================================
+    if (m_port_peer_manager) {
+        try {
+            CDataStream vRecv(msg.data);
+            (void)m_port_peer_manager->ProcessMessage(msg.node_id, msg.command, vRecv);
+        } catch (const std::exception& e) {
+            LogPrintf(NET, WARN,
+                "[CConnman] Port ProcessMessage threw on cmd '%s' from node %d: %s\n",
+                msg.command.c_str(), msg.node_id, e.what());
+        } catch (...) {
+            LogPrintf(NET, WARN,
+                "[CConnman] Port ProcessMessage threw unknown exception on cmd '%s' from node %d\n",
+                msg.command.c_str(), msg.node_id);
+        }
+    }
+
     // Handle misbehavior tracking on failure
     if (!success && m_peer_manager) {
         auto peer = m_peer_manager->GetPeer(msg.node_id);

@@ -485,6 +485,16 @@ public:
         m_peer_manager = &pm;
     }
 
+    // Test-only: invoke the private ProcessQueuedMessage without spinning up
+    // the BlocksWorker / HeadersWorker / inline control-thread path. Used by
+    // PR6.5b.2 (v4.3) connman block-routing tests to exercise the port-
+    // CPeerManager dispatch path deterministically. Restricted to test
+    // fixtures by convention; matches SetTestPeerManager's "Test-only" tag.
+    bool TestProcessQueuedMessage(int node_id, const std::string& command,
+                                  const std::vector<uint8_t>& data) {
+        return ProcessQueuedMessage(QueuedMessage{node_id, command, data});
+    }
+
 public:
     // Phase 6 PR6.5b.1b: centralized peer-event dispatch helpers. Each replaces
     // inlined "legacy call + optional port call" pairs at the 4 connman event
