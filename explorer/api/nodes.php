@@ -8,26 +8,41 @@
  */
 
 require_once __DIR__ . "/rpc.php";
+require_once __DIR__ . "/metrics_helpers.php";
 
 $config = getChainConfig();
 $chain = $config['chain'];
 $rpcPort = $config['rpc_port'];
 
-// 3-second cache
-$cacheFile = __DIR__ . "/../cache/nodes-{$chain}.json";
-if (file_exists($cacheFile)) {
-    $cacheAge = time() - filemtime($cacheFile);
-    if ($cacheAge < 3) {
-        $cached = file_get_contents($cacheFile);
-        if ($cached !== false) {
-            $data = json_decode($cached, true);
-            if ($data !== null) {
-                $data['cached'] = true;
-                $data['cacheAge'] = $cacheAge;
-                sendJSON($data);
-            }
-        }
-    }
+// 15-second cache + single-flight. Without single-flight, every cache expiry
+// races N FPM workers into the same fan-out (12 RPCs across 4 seeds), bursting
+// the seed rate-limiter (10 tokens / 1 RPS per IP) and making remote seeds
+// flicker offline in the UI. Pattern is the same as PR #49 stats.php.
+$cacheFile = _explorerCacheDir() . "/nodes-{$chain}.json";
+
+function _serveCache(string $file, int $maxAge, bool $allowStale = false): bool {
+    if (!file_exists($file)) return false;
+    $age = time() - filemtime($file);
+    if (!$allowStale && $age >= $maxAge) return false;
+    $cached = file_get_contents($file);
+    if ($cached === false) return false;
+    $data = json_decode($cached, true);
+    if ($data === null) return false;
+    $data['cached'] = true;
+    $data['cacheAge'] = $age;
+    sendJSON($data);
+    return true;
+}
+
+if (_serveCache($cacheFile, 15)) { /* unreachable; sendJSON exits */ }
+
+$lock = _acquireSingleFlight($cacheFile);
+if (!$lock) {
+    // Another worker is recomputing — serve whatever cache we have, even if
+    // older than the 15s window. Better stale than stampede.
+    if (_serveCache($cacheFile, PHP_INT_MAX, true)) { /* exits */ }
+    // No cache at all and contended → return empty rather than stampede.
+    sendJSON(['nodes' => [], 'chain' => $chain, 'consensusHeight' => 0, 'contended' => true]);
 }
 
 $seedNodes = [
@@ -133,4 +148,5 @@ $response = [
 ];
 
 @file_put_contents($cacheFile, json_encode($response));
+_releaseSingleFlight($lock);
 sendJSON($response);

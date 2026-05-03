@@ -32,6 +32,14 @@ const SEED_NODES = [
 // Cache dir lives at explorer/cache (sibling of api/). PHP-FPM (www-data)
 // must be able to write here. Bootstrap on first call so a fresh deploy
 // doesn't need a manual mkdir.
+//
+// IMPORTANT operator note: if the cache dir already exists owned by root
+// (e.g. created by a manual `mkdir` or a one-off root-run script), this
+// function does NOT chown it. www-data will fail _acquireSingleFlight()
+// silently (fopen 'c' returns false), every miss falls into the contended
+// path, and the explorer appears to flap. Fix: `chown -R www-data:www-data
+// /root/dilithion/explorer/cache/`. Lesson from the 2026-05-03 explorer
+// flap incident.
 function _explorerCacheDir(): string {
     $dir = __DIR__ . "/../cache";
     if (!is_dir($dir)) @mkdir($dir, 0775, true);
