@@ -637,7 +637,7 @@ ChainParams ChainParams::DilV() {
     // PRE-RELEASE GATE: grep this file for lifetimeMinerCountAt44232; the
     // value MUST be > 0 before tagging v4.1 (the release SOP includes
     // this check).
-    params.lifetimeMinerCountAt44232 = 65;  // PASS-2: captured 2026-05-02 08:36 UTC from SYD canary (DILITHION_PASS_1_CAPTURE)
+    params.lifetimeMinerCountAt44232 = 255;  // v4.1.2 re-capture 2026-05-03: original 65 was from the BUGGY sliding-window query (window=200, captured at tip=44233) and never matched the fixed lifetime-store semantic. Re-captured 2026-05-03 against the canonical chain (Phase 1 checkpoint at 44233 = 927a1e79... passed). Three independent computations on chains whose Phase 1 passed (SYD live, user's local Windows, LDN-source snapshot) converged on 255.
 
     // No assume-valid yet
     params.defaultAssumeValid = "";
