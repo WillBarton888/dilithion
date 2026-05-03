@@ -429,8 +429,19 @@ CNode* CConnman::ConnectNode(const NetProtocol::CAddress& addr, bool manual,
             }
         }
         if (outbound_count >= static_cast<size_t>(m_options.nMaxOutbound)) {
-            LogPrintf(NET, WARN, "[CConnman] Outbound connection limit reached (%zu/%d)\n",
-                      outbound_count, m_options.nMaxOutbound);
+            // v4.2.0 — throttle this WARN to once per 60s. At-limit is a
+            // persistent steady state on a healthy mesh (every retry by
+            // the connection scheduler hits this branch), so without the
+            // throttle the log floods. CAS so concurrent rejected
+            // attempts only emit one line.
+            const int64_t now = GetTime();
+            int64_t last = m_outbound_limit_log_last.load();
+            if (now - last >= OUTBOUND_LIMIT_LOG_INTERVAL_SECONDS &&
+                m_outbound_limit_log_last.compare_exchange_strong(last, now)) {
+                LogPrintf(NET, WARN, "[CConnman] Outbound connection limit reached (%zu/%d) — suppressing further at-limit warnings for %lds\n",
+                          outbound_count, m_options.nMaxOutbound,
+                          static_cast<long>(OUTBOUND_LIMIT_LOG_INTERVAL_SECONDS));
+            }
             CSock::Close(sock);
             return nullptr;
         }

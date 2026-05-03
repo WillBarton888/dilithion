@@ -399,6 +399,15 @@ private:
     std::vector<NetProtocol::CAddress> m_manual_nodes;
     mutable std::mutex cs_manual_nodes;
 
+    // v4.2.0: throttle the "Outbound connection limit reached" warning to
+    // once per 60s. The connection-attempt scheduler retries frequently
+    // while at capacity (the at-limit state is persistent on a healthy
+    // mesh), so without throttling each attempt produces an identical WARN
+    // line, drowning the log. Stores the unix timestamp of the last
+    // emission; comparison uses unsigned-safe arithmetic.
+    static constexpr int64_t OUTBOUND_LIMIT_LOG_INTERVAL_SECONDS = 60;
+    mutable std::atomic<int64_t> m_outbound_limit_log_last{0};
+
 public:
     // When true (--connect used), skip hardcoded seed connections and AddrMan.
     // Only connect to manually specified nodes.
