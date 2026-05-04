@@ -2591,11 +2591,24 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
     // walks back to genesis and depth equals pindexMostWork->nHeight. No
     // reorg is happening (nothing to disconnect), so the cap is bypassed.
     //
-    // On rejection: MarkBlockAsFailed(pindexMostWork) drops the over-deep
-    // candidate from m_setBlockIndexCandidates so the next outer-loop
-    // FindMostWorkChainImpl returns the next-best candidate. Return false
-    // (NOT m_chain_needs_rebuild) — chain is unchanged, this is a clean
-    // refusal.
+    // v4.3.3 F8 (Layer-3 HIGH-2 + state-replay S3): on rejection, DROP the
+    // candidate from m_setBlockIndexCandidates WITHOUT MarkBlockAsFailed.
+    // The pre-F8 implementation called MarkBlockAsFailed(pindexMostWork)
+    // which propagates BLOCK_FAILED_CHILD to all descendants — permanently
+    // poisoning the canonical chain when a node restored from a >100-block-
+    // stale snapshot. Depth ≠ invalid; the candidate is on a longer chain
+    // we simply cannot safely reach in-process. Mirrors F5's "drop, don't
+    // fail" semantics.
+    //
+    // S3 follow-on: depth-rejection is operationally a "we cannot catch up
+    // in-process" condition. Set m_chain_needs_rebuild so the v4.3.2-M1
+    // main-loop helper (Dilithion::MaybeTriggerChainRebuild) observes the
+    // flag and writes the auto_rebuild marker via the user-respecting
+    // config.datadir — wrapper restart triggers wipe-and-IBD recovery.
+    // We DELIBERATELY do not call WriteAutoRebuildMarker directly here
+    // because chain.cpp doesn't have config.datadir in scope; reusing the
+    // M1 helper's plumbing is the only path that respects --datadir=PATH
+    // (the H1 defect Layer-3 caught on v4.3.2-M1).
     if (pindexTip != nullptr && pindexFork != nullptr) {
         static const int64_t MAX_REORG_DEPTH = 100;  // matches legacy chain.cpp:780
         const int64_t reorg_depth =
@@ -2606,8 +2619,14 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
                       << " exceeds MAX_REORG_DEPTH=" << MAX_REORG_DEPTH
                       << " (tip h=" << pindexTip->nHeight
                       << ", fork h=" << pindexFork->nHeight
-                      << "). Dropping candidate; retrying with next-best." << std::endl;
-            MarkBlockAsFailed(pindexMostWork);
+                      << "). Dropping candidate (NOT marking failed); flagging "
+                      << "rebuild for wrapper-driven recovery." << std::endl;
+            // F8 HIGH-2 fix: erase, don't MarkBlockAsFailed.
+            m_setBlockIndexCandidates.erase(pindexMostWork);
+            // F8 / S3 follow-on: surface m_chain_needs_rebuild so the
+            // M1 main-loop helper writes the auto_rebuild marker via the
+            // user-respecting config.datadir on the next iteration.
+            m_chain_needs_rebuild.store(true);
             return false;
         }
     }
