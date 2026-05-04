@@ -450,7 +450,7 @@ dilv-genesis-vdf: $(CORE_OBJECTS) $(OBJ_DIR)/tools/dilv_genesis_vdf.o $(DILITHIU
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests peer_scorer_tests peer_scorer_banman_integration_tests header_proof_checker_tests chain_selector_tests getchaintips_equivalence_tests chain_case_2_5_equivalence_tests chain_work_smoke_tests reorg_wal_crash_injection_tests competing_sibling_below_checkpoint_tests headers_manager_to_chain_selector_wiring_tests fast_path_2_boundary_tests v4_1_checkpoint_enforcement_tests v4_1_chain_selector_suppression_tests auto_rebuild_marker_mode_symmetry_tests add_block_index_flag_merge_tests
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests peer_scorer_tests peer_scorer_banman_integration_tests header_proof_checker_tests chain_selector_tests getchaintips_equivalence_tests chain_case_2_5_equivalence_tests chain_work_smoke_tests reorg_wal_crash_injection_tests competing_sibling_below_checkpoint_tests headers_manager_to_chain_selector_wiring_tests fast_path_2_boundary_tests v4_1_checkpoint_enforcement_tests v4_1_chain_selector_suppression_tests auto_rebuild_marker_mode_symmetry_tests add_block_index_flag_merge_tests port_chain_selector_invariants_tests legacy_vs_port_differential_tests
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
@@ -797,6 +797,23 @@ auto_rebuild_marker_mode_symmetry_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/auto_re
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ auto_rebuild_marker_mode_symmetry_tests built successfully$(COLOR_RESET)"
+
+# v4.3.3 T1: synthetic regression harness for canary-3 reproduction +
+# F1-F6 invariants in port-path chain selection. See
+# src/test/port_chain_selector_invariants_tests.cpp for full context.
+port_chain_selector_invariants_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/port_chain_selector_invariants_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ port_chain_selector_invariants_tests built successfully$(COLOR_RESET)"
+
+# v4.3.3 T2: differential testing harness — legacy vs port path equivalence
+# enforcement (audit modality 3 from feedback_audit_techniques_beyond_code_review).
+# Permanent CI infrastructure: every future port change that introduces an
+# unexpected divergence between legacy and port paths fails this suite.
+legacy_vs_port_differential_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/legacy_vs_port_differential_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ legacy_vs_port_differential_tests built successfully$(COLOR_RESET)"
 
 # Phase 5 Day 4 V1: deterministic WAL transition trace test (plan §13 hard gate #3).
 reorg_wal_crash_injection_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/reorg_wal_crash_injection_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
