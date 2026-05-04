@@ -136,10 +136,24 @@ void CIbdCoordinator::Tick() {
     // sequence (write marker → set running=false → return) was an in-Tick()
     // optimization to avoid touching headers/blocks after deciding to die; the
     // helper preserves the kill-flag semantics and the main loop's
-    // running.load() check handles the rest. (The remainder of this Tick()
-    // does not depend on chain state being healthy; it operates on the IBD
-    // state machine + peer-manager side, which is safe to step through one
-    // last time before the loop exits.)
+    // running.load() check handles the rest.
+    //
+    // BEHAVIOURAL DELTA vs v4.3.1 (Cursor pre-impl review S3, 2026-05-04):
+    // when Needs* is already true at Tick() entry, legacy behaviour skipped
+    // the rest of THIS Tick(). The new ordering runs ONE additional full
+    // Tick() body — including DownloadBlocks() which can issue GETDATA P2P
+    // requests for blocks already in flight, and AttemptForkRecovery() which
+    // can mutate fork-detection state — before MaybeTriggerChainRebuild
+    // shuts the process down on the next main-loop iteration. There is NO
+    // production guard elsewhere that skips ConnectTip/validation purely
+    // because NeedsChainRebuild() is true (those reads only appear in this
+    // recovery path + tests). Bounded to one coordinator tick after the
+    // condition is observable; preferable to indefinite operation with no
+    // marker and continued corruption (the bug v4.3.1 had under
+    // --usenewpeerman=1). Strict byte-for-byte parity with legacy "no
+    // further coordinator work" would require an early-return here that
+    // duplicates the flag poll — explicit maintainability tradeoff that we
+    // accepted in favour of the single-chokepoint helper design.
     // =========================================================================
 
     int header_height = m_node_context.headers_manager->GetBestHeight();
