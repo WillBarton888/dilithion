@@ -56,6 +56,24 @@ class CTxMemPool;  // BUG #109 FIX: Mempool for confirmed TX cleanup
  * has a temporal grace-period gate (m_vdfTipAcceptTime check) that
  * prevents oscillation after a tip is accepted. That's a separate
  * concern handled at activation logic, not at the comparator level.
+ *
+ * SCOPE NOTE (Cursor v4.3.3 review S8 LOW, 2026-05-04):
+ * the F9 vdfOutput tie-break runs whenever chainwork is equal and both
+ * vdfOutputs are non-null — it does NOT explicitly gate on "same-height
+ * sibling only." In production this is benign because:
+ *   * chainwork is the cumulative sum of (1/target) over the chain;
+ *     equal chainwork at different heights would require difficulty
+ *     asymmetry across the diverging parts of the two chains —
+ *     extremely rare on DIL (RandomX+ASERT) and impossible on DilV
+ *     (constant-difficulty VDF distribution).
+ *   * Even if F9 ordered cross-height candidates "wrongly" by
+ *     vdfOutput, the actual REORG decision is gated downstream at
+ *     ActivateBestChain by F10's same-height + same-parent + equal-
+ *     chainwork check. Cross-height candidates fall through to the
+ *     normal chainwork-greater path and reorg correctly.
+ * Documented per Cursor's request rather than hardening the comparator
+ * itself; an in-comparator height check would add a chain.h dependency
+ * on CBlockIndex::nHeight and is unnecessary given the downstream gate.
  */
 struct CBlockIndexWorkComparator {
     bool operator()(const CBlockIndex* a, const CBlockIndex* b) const {

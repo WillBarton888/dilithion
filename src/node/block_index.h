@@ -156,9 +156,29 @@ public:
     //! Idempotent: second call sees BLOCK_HAVE_DATA already set and validity
     //! already at TRANSACTIONS, so no mutation. Safe under retry / replay.
     //!
-    //! Future block-receipt sites: DO NOT open-code `nStatus |= BLOCK_HAVE_DATA`.
-    //! Always call `pindex->MarkBlockReceived()`. If you need a different
-    //! validity level (rare), use `RaiseValidity(level)` directly with comment.
+    //! ENFORCEMENT POLICY (Cursor v4.3.3 review S13 LOW, 2026-05-04):
+    //! Future block-receipt sites: DO NOT open-code
+    //! `nStatus |= BLOCK_HAVE_DATA`. Always call
+    //! `pindex->MarkBlockReceived()`. The ONLY legitimate places that
+    //! still write the HAVE_DATA bit directly are:
+    //!   1. `dilithion-node.cpp:2507` / `dilv-node.cpp:2394` — genesis
+    //!      bootstrap (`nStatus = BLOCK_VALID_CHAIN | BLOCK_HAVE_DATA`).
+    //!      Genesis is a one-shot bootstrap event, not a "received" event;
+    //!      validity is BLOCK_VALID_CHAIN by definition (the active-chain
+    //!      block at h=0). Do NOT replace these with MarkBlockReceived.
+    //!   2. `chain.cpp:1718` / F2 — `ConnectTip` ORs HAVE_DATA on
+    //!      successful connect AS A BACKSTOP for header-first paths
+    //!      where MarkBlockReceived didn't fire (e.g., ProcessNewHeader
+    //!      created the index). This is intentional defense-in-depth.
+    //!
+    //! Code review for any change touching block_processing.cpp,
+    //! block_validation_queue.cpp, dilithion-node.cpp, dilv-node.cpp, or
+    //! any new block-ingress path MUST verify MarkBlockReceived is the
+    //! ONLY way HAVE_DATA reaches a freshly-allocated CBlockIndex. The
+    //! 3 exceptions above are exhaustive.
+    //!
+    //! If you need a different validity level (rare), use
+    //! `RaiseValidity(level)` directly with a comment explaining why.
     void MarkBlockReceived() {
         nStatus |= BLOCK_HAVE_DATA;
         RaiseValidity(BLOCK_VALID_TRANSACTIONS);
