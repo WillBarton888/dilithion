@@ -125,6 +125,13 @@ public:
     //! predicate; post-F1 they don't, and this helper supplies the explicit
     //! invariant at the production block-arrival sites.
     bool RaiseValidity(uint32_t level) {
+        // v4.3.3 F12 (Layer-3 round 2 LOW-1): defensive guard against an
+        // OOB level argument. Pre-guard, passing BLOCK_HAVE_DATA(=8) by
+        // mistake would silently destroy validLevel (the OR step writes
+        // 8 into the status, but post-F1 mask=0x07 reads it back as 0).
+        // No current caller does this, but we mask the input to ensure
+        // any future caller misuse fails closed (level clamped to mask).
+        level &= BLOCK_VALID_MASK;
         if ((nStatus & BLOCK_VALID_MASK) < level) {
             nStatus = (nStatus & ~BLOCK_VALID_MASK) | level;
             return true;

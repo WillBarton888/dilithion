@@ -176,7 +176,16 @@ bool ChainSelectorAdapter::ProcessNewBlock(std::shared_ptr<const CBlock> block,
                 CBlockIndex* currentTip = m_chainstate.GetTip();
                 bool forkHasMoreWork = false;
                 if (forkIndex && currentTip) {
-                    forkHasMoreWork = (currentTip->nChainWork < forkIndex->nChainWork);
+                    // v4.3.3 F13 (Layer-3 v4.3.1 I1, deferred until now):
+                    // raw uint256 op< is little-endian (memcmp-based) and
+                    // is NOT a consensus-safe comparison for chainwork.
+                    // ChainWorkGreaterThan is the canonical big-endian
+                    // comparator (declared at consensus/pow.h:149); both
+                    // legacy and port paths use it elsewhere. Switching
+                    // here ensures fork-staging's "fork has more work"
+                    // decision matches the comparator's verdict.
+                    forkHasMoreWork = ChainWorkGreaterThan(
+                        forkIndex->nChainWork, currentTip->nChainWork);
                 }
                 if (!forkHasMoreWork) {
                     return true;  // Wait for more fork work; chainstate unchanged.
