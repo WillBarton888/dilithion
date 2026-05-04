@@ -2504,6 +2504,18 @@ CBlockIndex* CChainState::FindMostWorkChainImpl()
             // requirement is enforced by F3's pre-validation pass at
             // ActivateBestChainStep entry, which reads every block in the
             // disconnect+connect plan including the leaf.
+            //
+            // INVARIANT ASSUMPTION (Cursor pre-impl S4, 2026-05-04): F5's
+            // intermediates-only design relies on F3 actually running and
+            // catching a missing-data leaf. F3 in ActivateBestChainStep is
+            // gated on `(pdb || m_testReadBlockOverride)`. In production
+            // pdb is always non-null (constructed at node startup before
+            // any reorg can happen), so the invariant holds. In test
+            // scaffolds where neither pdb nor a test override is wired,
+            // F3 is skipped and a missing-data leaf could slip through.
+            // Tests that exercise FindMostWorkChainImpl directly with such
+            // a state must either provide pdb/override OR explicitly add
+            // BLOCK_HAVE_DATA to the leaf they synthesize.
             if (pancestor != pindexNew &&
                 !(pancestor->nStatus & CBlockIndex::BLOCK_HAVE_DATA)) {
                 fMissingData = true;
