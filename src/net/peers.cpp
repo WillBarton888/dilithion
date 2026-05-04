@@ -9,6 +9,7 @@
 #include <node/block_index.h>
 #include <node/mempool.h>
 #include <net/port/sync_coordinator.h>  // Phase 6 PR6.5a: routes via ISyncCoordinator
+#include <net/headers_manager.h>        // F19: CHeadersManager::OnPeerDisconnected
 #include <net/net.h>
 #include <net/connman.h>
 #include <net/protocol.h>
@@ -1025,6 +1026,13 @@ bool CPeerManager::EvictPeersIfNeeded() {
     if (peer) {
         LogPrintf(NET, INFO, "Evicting peer %d (score: %d, addr: %s)",
                   peer_to_evict, eviction_candidates[0].second, peer->addr.ToString().c_str());
+        // F22 (v4.3.3 Track B): eviction used RemovePeer only, bypassing
+        // CConnman::DispatchPeerDisconnected — port OnPeerDisconnected (F18+)
+        // never ran. Mirror DisconnectNodes ordering: dispatch first while
+        // CPeer/CNode state is still observable, then legacy map removal.
+        if (g_node_context.connman) {
+            g_node_context.connman->DispatchPeerDisconnected(peer_to_evict);
+        }
         RemovePeer(peer_to_evict);
         return true;
     }
@@ -1637,6 +1645,14 @@ void CPeerManager::OnPeerDisconnected(int peer_id)
             collector->on_peer_disconnected(peer_dna_id);
         }
     }
+
+    // F19/F20/F21 (v4.3.3 Track B): leak-class cleanups — methods existed but
+    // had no production caller on the disconnect path.
+    if (g_node_context.headers_manager) {
+        g_node_context.headers_manager->OnPeerDisconnected(peer_id);
+    }
+    connection_quality.RemovePeer(peer_id);
+    m_peer_bandwidth_throttle.RemovePeer(peer_id);
 
     // The actual peer removal is handled by RemovePeer()
 }

@@ -1550,6 +1550,23 @@ void CPeerManager::OnPeerDisconnected(NodeId peer) {
             }
         }
     }
+
+    // v4.3.3 F18 (Layer-3 round 5 / Track B audit, 2026-05-04): clean up the
+    // shared CPeerScorer entry for this peer. Without this call, m_scores
+    // grows unbounded as peers churn — after ~10× MAX_TOTAL_CONNECTIONS
+    // disconnects the assertion at peer_scorer.cpp:128 fires (SIGABRT).
+    // LDN canary 2026-05-04 crashed 9 times in 8h on this defect.
+    //
+    // The shared IPeerScorer reference is the same instance legacy
+    // CPeerManager::RemoveNode resets on its disconnect path
+    // (peers.cpp:1753); F18 makes the port-side disconnect self-contained
+    // so paths that bypass legacy RemoveNode (e.g., EvictPeersIfNeeded at
+    // peers.cpp:1028) don't leak port-side scorer entries.
+    //
+    // Lock order: ResetScore takes only m_scorer's internal mutex
+    // (peer_scorer.cpp:65). Called here after all peer-manager-internal
+    // mutexes are released (each scope above ended). No deadlock risk.
+    m_scorer.ResetScore(peer);
 }
 
 }  // namespace port

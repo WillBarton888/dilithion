@@ -10,6 +10,7 @@
 #include <net/port/maybe_punish_node.h>  // Phase 3: HeaderRejectReason enum
 #include <net/banman.h>   // Bitcoin Core-style ban manager with persistence
 #include <net/peer_discovery.h>  // Network: Enhanced peer discovery
+#include <net/bandwidth_throttle.h>   // F21: per-peer throttle cleanup on disconnect
 #include <net/connection_quality.h>  // Network: Connection quality metrics
 #include <net/socket.h>   // Phase 2: Socket in CPeer
 #include <net/node_state.h>  // Phase 3: For QueuedBlock
@@ -251,6 +252,10 @@ private:
     
     // Network: Connection quality tracking
     CConnectionQualityTracker connection_quality;
+
+    // F21 (v4.3.3 Track B): single throttle table for future send/recv hooks;
+    // RemovePeer on disconnect prevents map growth once RecordTransfer is wired.
+    CPerPeerThrottle m_peer_bandwidth_throttle;
 
 public:
     // Connection limits — public so CPeerScorer (and any future
