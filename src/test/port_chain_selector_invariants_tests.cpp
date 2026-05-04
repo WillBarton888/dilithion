@@ -281,14 +281,24 @@ void test_t1_2_reorg_depth_cap_rejects_deep_sibling()
     bool ok = cs.ActivateBestChainStep(picked, /*pblock_optional=*/nullptr,
                                        fInvalidFound);
 
-    // F4: depth 200 > 100 → MarkBlockAsFailed(picked) + return false.
+    // F4 (post-F8 semantics, Layer-3 HIGH-2 + state-replay S3): depth
+    // 200 > 100 → erase from candidates (NOT MarkBlockAsFailed) + set
+    // m_chain_needs_rebuild for wrapper-driven recovery via the
+    // v4.3.2-M1 main-loop helper.
     assert(!ok);
     assert(cs.GetTip() == activeTip);
     assert(cs.GetTip()->nHeight == 200);
-    assert(!cs.NeedsChainRebuild());
 
-    // The over-deep candidate has been MarkBlockAsFailed'd.
-    assert(sibPrev->nStatus & CBlockIndex::BLOCK_FAILED_VALID);
+    // F8 HIGH-2 fix: candidate is NOT marked failed (depth ≠ invalid).
+    // The canonical chain remains eligible for re-consideration when the
+    // operator runs reconsiderblock or after wipe-and-IBD.
+    assert(!(sibPrev->nStatus & CBlockIndex::BLOCK_FAILED_VALID));
+    assert(!(sibPrev->nStatus & CBlockIndex::BLOCK_FAILED_CHILD));
+
+    // F8 S3 follow-on: rebuild flagged for the M1 main-loop helper to
+    // observe, write auto_rebuild marker via config.datadir, and trigger
+    // wrapper restart with wipe-and-IBD recovery.
+    assert(cs.NeedsChainRebuild());
 
     DisengagePath();
     std::cout << " OK\n";
@@ -395,6 +405,78 @@ void test_t1_4_bit_mask_have_data_only_is_not_candidate()
 
     // Post-F1: predicate must say NOT a candidate.
     assert(!cs.IsBlockACandidateForActivation(bad));
+
+    std::cout << " OK\n";
+}
+
+// ---------------------------------------------------------------------------
+// T1.7 — F7 (Layer-3 HIGH-1): RaiseValidity after HAVE_DATA OR makes the
+// block a candidate. This regression test simulates the EXACT production
+// sequence at every block-arrival site (block_processing.cpp:1083 etc.):
+//
+//   pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;          // F1
+//   pblockIndex->RaiseValidity(CBlockIndex::BLOCK_VALID_TRANSACTIONS);  // F7
+//
+// Step 1 alone (pre-F7 production state under post-F1 mask 0x07) leaves
+// the block at validLevel=0, predicate FALSE. Step 2 raises it to 3,
+// predicate TRUE. T1.4 proves the negative; T1.7 proves the positive AND
+// that RaiseValidity actually mutates correctly.
+//
+// Without this test: future code changes that remove the F7 RaiseValidity
+// call at any of the 5 production sites would silently revert v4.3.3 to
+// the chain-stalling state Layer-3 caught. T1.4 alone would not catch it
+// (T1.4 tests the negative case). T1/T2 helpers auto-OR HAVE_DATA when
+// level >= TRANSACTIONS, so they cannot reproduce the production gap.
+// ---------------------------------------------------------------------------
+void test_t1_7_raise_validity_after_have_data_makes_candidate()
+{
+    std::cout << "  test_t1_7_raise_validity_after_have_data_makes_candidate..." << std::flush;
+
+    CChainState cs;
+
+    // Genesis with full status (just to satisfy SetTip).
+    auto pG = MakeIdx(/*chain_id=*/0xE0, nullptr, 0,
+                      CBlockIndex::BLOCK_VALID_TRANSACTIONS |
+                      CBlockIndex::BLOCK_HAVE_DATA, 1, 1);
+    uint256 hG = pG->GetBlockHash();
+    assert(cs.AddBlockIndex(hG, std::move(pG)));
+    cs.SetTip(cs.GetBlockIndex(hG));
+
+    // Step 1: build a CBlockIndex the way production does — nStatus=0
+    // initially (default-constructed), then OR-merge BLOCK_HAVE_DATA (F1).
+    // Crucially: NO automatic raise of the level field.
+    auto pNew = MakeIdx(/*chain_id=*/0xE1, cs.GetBlockIndex(hG), 1,
+                        /*status=*/0,
+                        /*work=*/10, /*seq=*/2);
+    pNew->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
+
+    // Pre-F7 state: HAVE_DATA flag set, but level field = 0. Predicate
+    // must say NOT a candidate (post-F1 mask). This is the chain-stalling
+    // bug Layer-3 caught.
+    assert((pNew->nStatus & CBlockIndex::BLOCK_VALID_MASK) == 0);
+    assert(pNew->nStatus & CBlockIndex::BLOCK_HAVE_DATA);
+    uint256 hNew = pNew->GetBlockHash();
+    assert(cs.AddBlockIndex(hNew, std::move(pNew)));
+    CBlockIndex* arrived = cs.GetBlockIndex(hNew);
+    assert(!cs.IsBlockACandidateForActivation(arrived));  // pre-F7: FALSE
+
+    // Step 2: apply F7 — RaiseValidity to BLOCK_VALID_TRANSACTIONS. The
+    // helper must mutate nStatus correctly and return true (raised).
+    const bool raised = arrived->RaiseValidity(CBlockIndex::BLOCK_VALID_TRANSACTIONS);
+    assert(raised);
+    assert((arrived->nStatus & CBlockIndex::BLOCK_VALID_MASK)
+           == CBlockIndex::BLOCK_VALID_TRANSACTIONS);
+    // HAVE_DATA preserved.
+    assert(arrived->nStatus & CBlockIndex::BLOCK_HAVE_DATA);
+    // Predicate now TRUE — block enters the candidate set.
+    assert(cs.IsBlockACandidateForActivation(arrived));
+
+    // Idempotency: second RaiseValidity at the same level returns false
+    // and does not mutate.
+    const bool raised_again = arrived->RaiseValidity(CBlockIndex::BLOCK_VALID_TRANSACTIONS);
+    assert(!raised_again);
+    assert((arrived->nStatus & CBlockIndex::BLOCK_VALID_MASK)
+           == CBlockIndex::BLOCK_VALID_TRANSACTIONS);
 
     std::cout << " OK\n";
 }
@@ -524,7 +606,7 @@ void test_t1_6_per_ancestor_data_gate_drops_leaf_with_missing_intermediate()
 int main()
 {
     std::cout << "=== v4.3.3 port chain-selector invariants regression suite ===\n";
-    std::cout << "    (T1.1-T1.6 — synthetic harness for F1-F6 fixes)\n";
+    std::cout << "    (T1.1-T1.7 — synthetic harness for F1-F8 fixes)\n";
 
     test_t1_4_bit_mask_have_data_only_is_not_candidate();
     test_t1_5_prune_candidates_keeps_only_geq_tip_work();
@@ -532,7 +614,8 @@ int main()
     test_t1_3_pre_validation_atomicity_no_disconnect_on_unreadable();
     test_t1_6_per_ancestor_data_gate_drops_leaf_with_missing_intermediate();
     test_t1_1_canary_3_header_only_chain_with_bait_leaf();
+    test_t1_7_raise_validity_after_have_data_makes_candidate();
 
-    std::cout << "\n=== All 6 T1 tests passed ===\n";
+    std::cout << "\n=== All 7 T1 tests passed ===\n";
     return 0;
 }
