@@ -6447,13 +6447,23 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         rpc_server.SetAttestationRateLimit(config.attestation_rate_limit);  // Sybil defense Phase 0
         rpc_server.SetDataDir(Dilithion::g_chainParams->dataDir);  // For swap state persistence
 
-        // Phase 2+3: Seed attestation initialization (relay-only DilV nodes only)
+        // Phase 2+3: Seed attestation initialization (ALL DilV mainnet seeds)
         // Loads ASN database and attestation signing key so seeds can serve
         // getmikattestation RPC requests from miners.
+        //
+        // v4.3 fix 2026-05-04: removed `config.relay_only` gate. NYC runs
+        // without --relay-only because it's the bridge host. Under the prior
+        // gate, NYC's seed_attestation_key.dat existed on disk but was never
+        // loaded — RegisterSeedAttestation() never called — making NYC
+        // unable to serve getmikattestation RPCs ("is only available on seed
+        // nodes" error). Network attestation capacity dropped from 4-of-4
+        // baked-in seed pubkeys to 3-of-4 functional. Fix: gate attestation
+        // init only on IsDilV() (the chain semantic), not on a CLI flag
+        // unrelated to attestation. Bridge ops are unaffected because
+        // attestation init only registers an RPC handler + loads keys.
         static Attestation::CSeedAttestationKey seedAttestKey;
         static CASNDatabase asnDatabase;
-        if (config.relay_only && Dilithion::g_chainParams &&
-            Dilithion::g_chainParams->IsDilV()) {
+        if (Dilithion::g_chainParams && Dilithion::g_chainParams->IsDilV()) {
             std::string dataDir = Dilithion::g_chainParams->dataDir;
 
             // Load ASN database from data directory (or project root)
