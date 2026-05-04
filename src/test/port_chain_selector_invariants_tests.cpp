@@ -488,6 +488,76 @@ void test_t1_7_raise_validity_after_have_data_makes_candidate()
 }
 
 // ---------------------------------------------------------------------------
+// T1.8 — F14 (Layer-3 round 2 LOW-2 / MEDIUM-3): canonical block-receipt
+// flag-setter regression test.
+//
+// Layer-3 round 2 flagged that T1.7 verifies the RaiseValidity helper
+// in isolation but would NOT catch removal of the F7 RaiseValidity call
+// at any of the 5 production block-arrival sites — silent regression
+// to the canary-3 chain-stall state.
+//
+// F14 closes the gap by extracting the F1+F7 pattern into a single
+// CBlockIndex::MarkBlockReceived helper called from all 5 production
+// sites. T1.8 exercises that helper and asserts:
+//   * Post-MarkBlockReceived: HAVE_DATA bit set, validLevel = TRANSACTIONS.
+//   * Post-MarkBlockReceived: IsBlockACandidateForActivation returns TRUE.
+//   * Idempotency: second MarkBlockReceived call leaves nStatus unchanged.
+//   * Pre-MarkBlockReceived (default-constructed CBlockIndex):
+//     IsBlockACandidateForActivation returns FALSE — confirms the gate is
+//     real. (Identical assertion to T1.4's negative case but framed
+//     adjacent to the positive case for clarity.)
+//
+// Future regression-prevention: any site that records a block-receipt
+// MUST call MarkBlockReceived. If a developer open-codes
+// `nStatus |= BLOCK_HAVE_DATA` without raising validity, the production
+// chain stalls under --usenewpeerman=1 — and a code reviewer scanning
+// for the helper-call pattern will catch the deviation immediately.
+// ---------------------------------------------------------------------------
+void test_t1_8_mark_block_received_canonical_flag_setter()
+{
+    std::cout << "  test_t1_8_mark_block_received_canonical_flag_setter..." << std::flush;
+
+    CChainState cs;
+
+    // Genesis with full status.
+    auto pG = MakeIdx(/*chain_id=*/0xF0, nullptr, 0,
+                      CBlockIndex::BLOCK_VALID_TRANSACTIONS |
+                      CBlockIndex::BLOCK_HAVE_DATA, 1, 1);
+    uint256 hG = pG->GetBlockHash();
+    assert(cs.AddBlockIndex(hG, std::move(pG)));
+    cs.SetTip(cs.GetBlockIndex(hG));
+
+    // Pre-receipt: build a CBlockIndex the way production does — default-
+    // constructed and not-yet-flagged. Predicate must say NOT a candidate.
+    auto pNew = MakeIdx(/*chain_id=*/0xF1, cs.GetBlockIndex(hG), 1,
+                        /*status=*/0,
+                        /*work=*/10, /*seq=*/2);
+    assert((pNew->nStatus & CBlockIndex::BLOCK_VALID_MASK) == 0);
+    assert(!(pNew->nStatus & CBlockIndex::BLOCK_HAVE_DATA));
+    uint256 hNew = pNew->GetBlockHash();
+    assert(cs.AddBlockIndex(hNew, std::move(pNew)));
+    CBlockIndex* arrived = cs.GetBlockIndex(hNew);
+    assert(!cs.IsBlockACandidateForActivation(arrived));
+
+    // F14: call the canonical block-receipt flag-setter. Must atomically
+    // set HAVE_DATA and raise validity to TRANSACTIONS.
+    arrived->MarkBlockReceived();
+    assert(arrived->nStatus & CBlockIndex::BLOCK_HAVE_DATA);
+    assert((arrived->nStatus & CBlockIndex::BLOCK_VALID_MASK)
+           == CBlockIndex::BLOCK_VALID_TRANSACTIONS);
+    // Predicate now TRUE — block enters the candidate set.
+    assert(cs.IsBlockACandidateForActivation(arrived));
+
+    // Idempotency: second call leaves state unchanged.
+    const uint32_t status_after_first = arrived->nStatus;
+    arrived->MarkBlockReceived();
+    assert(arrived->nStatus == status_after_first);
+    assert(cs.IsBlockACandidateForActivation(arrived));
+
+    std::cout << " OK\n";
+}
+
+// ---------------------------------------------------------------------------
 // T1.5 — PruneBlockIndexCandidates correctness.
 // ---------------------------------------------------------------------------
 void test_t1_5_prune_candidates_keeps_only_geq_tip_work()
@@ -612,7 +682,7 @@ void test_t1_6_per_ancestor_data_gate_drops_leaf_with_missing_intermediate()
 int main()
 {
     std::cout << "=== v4.3.3 port chain-selector invariants regression suite ===\n";
-    std::cout << "    (T1.1-T1.7 — synthetic harness for F1-F8 fixes)\n";
+    std::cout << "    (T1.1-T1.8 — synthetic harness for F1-F14 fixes)\n";
 
     test_t1_4_bit_mask_have_data_only_is_not_candidate();
     test_t1_5_prune_candidates_keeps_only_geq_tip_work();
@@ -621,7 +691,8 @@ int main()
     test_t1_6_per_ancestor_data_gate_drops_leaf_with_missing_intermediate();
     test_t1_1_canary_3_header_only_chain_with_bait_leaf();
     test_t1_7_raise_validity_after_have_data_makes_candidate();
+    test_t1_8_mark_block_received_canonical_flag_setter();
 
-    std::cout << "\n=== All 7 T1 tests passed ===\n";
+    std::cout << "\n=== All 8 T1 tests passed ===\n";
     return 0;
 }

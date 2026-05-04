@@ -5662,11 +5662,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
             auto pblockIndex = std::make_unique<CBlockIndex>(block);
             pblockIndex->phashBlock = blockHash;
-            // v4.3.3 F1: OR-merge (mirrors upstream accumulating-flag idiom).
-            pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
-            // v4.3.3 F7 (Layer-3 HIGH-1): supply BLOCK_VALID_TRANSACTIONS so
-            // the block enters the candidate set under --usenewpeerman=1.
-            pblockIndex->RaiseValidity(CBlockIndex::BLOCK_VALID_TRANSACTIONS);
+            // v4.3.3 F14: canonical block-receipt flag-setter (F1 + F7 combined).
+            pblockIndex->MarkBlockReceived();
 
             // Link to parent block
             pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
@@ -5893,12 +5890,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Create block index
             auto pblockIndex = std::make_unique<CBlockIndex>(block);
             pblockIndex->phashBlock = blockHash;
-            // v4.3.3 F1: OR-merge (mirrors upstream accumulating-flag idiom).
-            pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
-            // v4.3.3 F7 (Layer-3 HIGH-1): supply BLOCK_VALID_TRANSACTIONS so
-            // the locally-mined block enters the candidate set under
-            // --usenewpeerman=1.
-            pblockIndex->RaiseValidity(CBlockIndex::BLOCK_VALID_TRANSACTIONS);
+            // v4.3.3 F14: canonical block-receipt flag-setter for the DIL
+            // local-mining path (F1 + F7 combined).
+            pblockIndex->MarkBlockReceived();
             pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
             if (!pblockIndex->pprev) {
                 std::cerr << "[VDF] ERROR: Cannot find parent block" << std::endl;

@@ -1076,18 +1076,13 @@ BlockProcessResult ProcessNewBlock(
     // =========================================================================
     auto pblockIndex = std::make_unique<CBlockIndex>(block);
     pblockIndex->phashBlock = blockHash;
-    // v4.3.3 F1: OR-merge instead of assign. The default-constructed
-    // CBlockIndex has nStatus=0 so this is functionally identical here,
-    // but mirrors upstream Bitcoin Core's accumulating-flag idiom and
-    // is robust against any future code path that might pre-set bits.
-    pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
-    // v4.3.3 F7 (Layer-3 HIGH-1): post-F1 the validity-level field (mask
-    // 0x07) is disjoint from BLOCK_HAVE_DATA(=8). Without explicitly
-    // raising the level field, IsBlockACandidateForActivation rejects
-    // every block arriving via this path under --usenewpeerman=1 and the
-    // chain stalls. Mirrors upstream Bitcoin Core's
-    // ReceivedBlockTransactions::RaiseValidity at validation.cpp:3778.
-    pblockIndex->RaiseValidity(CBlockIndex::BLOCK_VALID_TRANSACTIONS);
+    // v4.3.3 F14 (Layer-3 round 2 LOW-2): canonical block-receipt
+    // flag-setter. Combines the F1 BLOCK_HAVE_DATA OR-merge with the F7
+    // BLOCK_VALID_TRANSACTIONS validity-raise into ONE op. Mirrors
+    // upstream Bitcoin Core's ReceivedBlockTransactions invariant
+    // (validation.cpp:3774,3778). DO NOT split this back into open-coded
+    // F1+F7 — the helper is the canonical contract.
+    pblockIndex->MarkBlockReceived();
 
 
 

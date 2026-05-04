@@ -138,6 +138,31 @@ public:
         }
         return false;
     }
+
+    //! v4.3.3 F14 (Layer-3 round 2 LOW-2 / MEDIUM-3): canonical block-receipt
+    //! flag-setter. Call this AT EVERY production site that records a newly-
+    //! arrived full block (P2P receipt, validation queue, orphan-resolve, local
+    //! mining, etc.). Combines the F1 OR-merge of BLOCK_HAVE_DATA with the F7
+    //! RaiseValidity to BLOCK_VALID_TRANSACTIONS into ONE atomic-meaning op.
+    //!
+    //! Why a helper: pre-F14 the F1+F7 pattern was open-coded at 5 production
+    //! sites (block_processing, block_validation_queue ×2, dilithion-node ×2,
+    //! dilv-node). Layer-3 round 2 flagged that future code changes could
+    //! remove the F7 RaiseValidity call without breaking T1.7 (which tests
+    //! the helper, not the call sites) — silent regression to the canary-3
+    //! chain-stall state. F14 makes the contract explicit: "call this; both
+    //! flags get set together; never duplicate the pattern."
+    //!
+    //! Idempotent: second call sees BLOCK_HAVE_DATA already set and validity
+    //! already at TRANSACTIONS, so no mutation. Safe under retry / replay.
+    //!
+    //! Future block-receipt sites: DO NOT open-code `nStatus |= BLOCK_HAVE_DATA`.
+    //! Always call `pindex->MarkBlockReceived()`. If you need a different
+    //! validity level (rare), use `RaiseValidity(level)` directly with comment.
+    void MarkBlockReceived() {
+        nStatus |= BLOCK_HAVE_DATA;
+        RaiseValidity(BLOCK_VALID_TRANSACTIONS);
+    }
 };
 
 #endif
