@@ -328,6 +328,26 @@ bool CChainState::ShouldReplaceVDFTip(CBlockIndex* pindexNew, const CBlock* pblo
     return true;
 }
 
+// v4.3.3 F10 + F15 (Layer-3 round 3 HIGH-1): VDF grace-period anchor with
+// first-arrival-only predicate. Called from the port-path connect-loop in
+// ActivateBestChainStep. See doc in chain.h for full rationale.
+bool CChainState::MaybeAnchorVdfGrace(CBlockIndex* p) {
+    if (p == nullptr) return false;
+    if (p->nVersion < 4) return false;
+    if (!Dilithion::g_chainParams) return false;
+    if (p->nHeight < Dilithion::g_chainParams->vdfLotteryActivationHeight) return false;
+    // F15 first-arrival-only check: legacy Case 2.5 explicitly does NOT
+    // reset m_vdfTipAcceptTime on sibling replacement at same height
+    // (chain.cpp:723 comment: "Do NOT reset ... preventing infinite
+    // replacement chains"). The port path's connect-loop iterates per
+    // block; we anchor only when arriving at a height we have not yet
+    // anchored at.
+    if (p->nHeight == m_vdfTipAcceptHeight) return false;
+    m_vdfTipAcceptTime = std::chrono::steady_clock::now();
+    m_vdfTipAcceptHeight = p->nHeight;
+    return true;
+}
+
 bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block, bool& reorgOccurred) {
     // CRITICAL-1 FIX: Acquire lock before accessing shared state
     // This protects pindexTip, mapBlockIndex, and all chain operations
@@ -2926,18 +2946,10 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
         pindexTip = p;
         m_cachedHeight.store(p->nHeight, std::memory_order_release);
 
-        // v4.3.3 F10: anchor the VDF grace-period clock when we arrive
-        // at a new tip height. Mirrors legacy chain.cpp:622-627 which
-        // does the same in Case 2 (extend-by-one). For multi-block
-        // reorgs the FINAL connect-loop iteration anchors the timestamp
-        // at the post-reorg tip height — exactly what F10's grace gate
-        // expects: "first arrived at THIS height at THIS time."
-        if (p->nVersion >= 4 &&
-            Dilithion::g_chainParams &&
-            p->nHeight >= Dilithion::g_chainParams->vdfLotteryActivationHeight) {
-            m_vdfTipAcceptTime = std::chrono::steady_clock::now();
-            m_vdfTipAcceptHeight = p->nHeight;
-        }
+        // v4.3.3 F10 + F15: anchor the VDF grace-period clock ONLY on
+        // first arrival at a height. See MaybeAnchorVdfGrace doc for
+        // the legacy-equivalence rationale.
+        MaybeAnchorVdfGrace(p);
         // v4.3.1: persist DB best-block on every tip mutation. Same rationale
         // as disconnect-loop write above. With per-step writes, the tail
         // post-loop write below is redundant on success but harmless.

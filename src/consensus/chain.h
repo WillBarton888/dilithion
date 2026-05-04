@@ -347,6 +347,38 @@ public:
     }
 
     /**
+     * v4.3.3 F10 + F15 (Layer-3 round 3 HIGH-1, 2026-05-04): anchor the
+     * VDF grace-period clock ONLY when a block at a NEW height connects.
+     * Mirrors legacy semantics:
+     *   - chain.cpp:622-627 (Case 2: extend-by-one to a NEW height) → anchor.
+     *   - chain.cpp:723 (Case 2.5: sibling replacement at SAME height) →
+     *     "Do NOT reset m_vdfTipAcceptTime — the grace window is anchored
+     *     to the FIRST block at this height, preventing infinite
+     *     replacement chains."
+     *
+     * Predicate: anchor only when `p->nHeight != m_vdfTipAcceptHeight`
+     * (forward progress). Pre-F15 the anchor fired on EVERY successful
+     * ConnectTip, including Case 2.5 replacements — letting a stream of
+     * incoming lower-vdfOutput siblings within the original grace window
+     * perpetuate replacements indefinitely. F15 closes that gap.
+     *
+     * Also gates on:
+     *   - Block version >= 4 (VDF blocks).
+     *   - p->nHeight >= vdfLotteryActivationHeight (post-VDF activation).
+     *   - g_chainParams non-null.
+     *
+     * Public + virtual-free: callable from the connect-loop and from
+     * unit tests directly without setting up a full ActivateBestChainStep
+     * fixture.
+     *
+     * Returns true if the anchor was actually updated, false if the
+     * predicate did not fire (already anchored at this height, or
+     * not VDF-applicable). Tests use the return value to assert
+     * first-arrival-only semantics.
+     */
+    bool MaybeAnchorVdfGrace(CBlockIndex* p);
+
+    /**
      * v4.0.19: Record an UndoBlock failure for a specific block.
      * Increments counter if same hash as last failure, resets to 1 if different.
      * Sets m_chain_needs_rebuild when threshold reached.

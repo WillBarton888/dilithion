@@ -45,10 +45,12 @@
 
 #include <consensus/chain.h>
 #include <consensus/pow.h>
+#include <core/chainparams.h>
 #include <node/block_index.h>
 #include <primitives/block.h>
 
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
@@ -58,6 +60,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <thread>
 #include <vector>
 
 namespace {
@@ -558,6 +561,129 @@ void test_t1_8_mark_block_received_canonical_flag_setter()
 }
 
 // ---------------------------------------------------------------------------
+// T1.9 — F10 + F15 (Layer-3 round 3 HIGH-1): VDF grace-period anchor must
+// fire ONLY on first arrival at a height. Layer-3 round 3 caught that
+// pre-F15 the connect-loop anchor reset on every successful ConnectTip,
+// including reorg-replacement connects — perpetuating replacements
+// indefinitely while legacy seeds settle on first arrival. T1.9 asserts
+// the post-F15 first-arrival-only semantics.
+//
+// Cases:
+//   * Anchor fires once at h=N (first arrival): returns true, fields updated.
+//   * Re-call with same-height sibling (Case 2.5 replacement): returns
+//     false, fields UNCHANGED — proves the F15 predicate.
+//   * Forward progress to h=N+1: returns true, fields updated to new height.
+//   * Pre-VDF-activation block (height < activation): returns false.
+//   * Non-VDF-version block (nVersion < 4): returns false.
+//   * Null block: returns false.
+//
+// Without F15 the same-height-sibling case would re-anchor and the test
+// fails; with F15 the test passes.
+// ---------------------------------------------------------------------------
+void test_t1_9_grace_period_anchor_first_arrival_only()
+{
+    std::cout << "  test_t1_9_grace_period_anchor_first_arrival_only..." << std::flush;
+
+    // Stub ChainParams with VDF activation at h=0 so any block post-genesis
+    // qualifies. Save + restore globally so other tests aren't affected.
+    Dilithion::ChainParams* savedParams = Dilithion::g_chainParams;
+    Dilithion::ChainParams stub;
+    stub.vdfLotteryActivationHeight = 0;
+    Dilithion::g_chainParams = &stub;
+
+    CChainState cs;
+
+    // Genesis-like block at h=0 (VDF version, full status).
+    auto pG = MakeIdx(/*chain_id=*/0xD0, nullptr, 0,
+                      CBlockIndex::BLOCK_VALID_TRANSACTIONS |
+                      CBlockIndex::BLOCK_HAVE_DATA, 1, 1);
+    uint256 hG = pG->GetBlockHash();
+    assert(cs.AddBlockIndex(hG, std::move(pG)));
+    cs.SetTip(cs.GetBlockIndex(hG));
+
+    // Block A at h=1 (first arrival; AddBlockIndex enforces
+    // height == prev->height+1, so we use consecutive heights here).
+    auto pA = MakeIdx(/*chain_id=*/0xD1, cs.GetBlockIndex(hG), 1,
+                      CBlockIndex::BLOCK_VALID_TRANSACTIONS |
+                      CBlockIndex::BLOCK_HAVE_DATA, 100, 2);
+    uint256 hA = pA->GetBlockHash();
+    assert(cs.AddBlockIndex(hA, std::move(pA)));
+    CBlockIndex* A = cs.GetBlockIndex(hA);
+
+    // Pre-anchor state: m_vdfTipAcceptHeight = -1 (default).
+    assert(cs.m_vdfTipAcceptHeight == -1);
+
+    // Case 1: first arrival at h=1. Anchor MUST fire.
+    const bool first = cs.MaybeAnchorVdfGrace(A);
+    assert(first == true);
+    assert(cs.m_vdfTipAcceptHeight == 1);
+    const auto t_A = cs.m_vdfTipAcceptTime;
+    assert(t_A != std::chrono::steady_clock::time_point{});
+
+    // Case 2: sibling B at h=1 (Case 2.5 replacement). Must NOT re-anchor.
+    auto pB = MakeIdx(/*chain_id=*/0xD2, cs.GetBlockIndex(hG), 1,
+                      CBlockIndex::BLOCK_VALID_TRANSACTIONS |
+                      CBlockIndex::BLOCK_HAVE_DATA, 100, 3);
+    uint256 hB = pB->GetBlockHash();
+    assert(cs.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = cs.GetBlockIndex(hB);
+
+    // Sleep a non-zero interval so any erroneous re-anchor would advance the
+    // timestamp, allowing equality assertion below to detect the regression.
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    const bool replacement = cs.MaybeAnchorVdfGrace(B);
+    assert(replacement == false);
+    assert(cs.m_vdfTipAcceptHeight == 1);
+    assert(cs.m_vdfTipAcceptTime == t_A);  // UNCHANGED — F15 invariant
+
+    // Case 3: forward progress to h=2. Anchor MUST re-fire at new height.
+    auto pC = MakeIdx(/*chain_id=*/0xD3, A, 2,
+                      CBlockIndex::BLOCK_VALID_TRANSACTIONS |
+                      CBlockIndex::BLOCK_HAVE_DATA, 200, 4);
+    uint256 hC = pC->GetBlockHash();
+    assert(cs.AddBlockIndex(hC, std::move(pC)));
+    CBlockIndex* C = cs.GetBlockIndex(hC);
+
+    std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    const bool forward = cs.MaybeAnchorVdfGrace(C);
+    assert(forward == true);
+    assert(cs.m_vdfTipAcceptHeight == 2);
+    assert(cs.m_vdfTipAcceptTime != t_A);  // updated
+
+    // Case 4: pre-VDF-activation block (lift activation height higher than
+    // block height). Must NOT anchor.
+    stub.vdfLotteryActivationHeight = 100;
+    auto pD = MakeIdx(/*chain_id=*/0xD4, C, 3,
+                      CBlockIndex::BLOCK_VALID_TRANSACTIONS |
+                      CBlockIndex::BLOCK_HAVE_DATA, 300, 5);
+    uint256 hD = pD->GetBlockHash();
+    assert(cs.AddBlockIndex(hD, std::move(pD)));
+    CBlockIndex* D = cs.GetBlockIndex(hD);
+    const bool pre_vdf = cs.MaybeAnchorVdfGrace(D);
+    assert(pre_vdf == false);
+    assert(cs.m_vdfTipAcceptHeight == 2);  // unchanged from Case 3
+
+    // Restore activation height.
+    stub.vdfLotteryActivationHeight = 0;
+
+    // Case 5: non-VDF-version block (manually downgrade nVersion). Must NOT
+    // anchor.
+    D->nVersion = 3;  // pre-VDF era
+    const bool non_vdf = cs.MaybeAnchorVdfGrace(D);
+    assert(non_vdf == false);
+    assert(cs.m_vdfTipAcceptHeight == 2);
+
+    // Case 6: null pointer. Must return false safely.
+    const bool null_block = cs.MaybeAnchorVdfGrace(nullptr);
+    assert(null_block == false);
+
+    // Restore global chainparams.
+    Dilithion::g_chainParams = savedParams;
+
+    std::cout << " OK\n";
+}
+
+// ---------------------------------------------------------------------------
 // T1.5 — PruneBlockIndexCandidates correctness.
 // ---------------------------------------------------------------------------
 void test_t1_5_prune_candidates_keeps_only_geq_tip_work()
@@ -682,7 +808,7 @@ void test_t1_6_per_ancestor_data_gate_drops_leaf_with_missing_intermediate()
 int main()
 {
     std::cout << "=== v4.3.3 port chain-selector invariants regression suite ===\n";
-    std::cout << "    (T1.1-T1.8 — synthetic harness for F1-F14 fixes)\n";
+    std::cout << "    (T1.1-T1.9 — synthetic harness for F1-F15 fixes)\n";
 
     test_t1_4_bit_mask_have_data_only_is_not_candidate();
     test_t1_5_prune_candidates_keeps_only_geq_tip_work();
@@ -692,7 +818,8 @@ int main()
     test_t1_1_canary_3_header_only_chain_with_bait_leaf();
     test_t1_7_raise_validity_after_have_data_makes_candidate();
     test_t1_8_mark_block_received_canonical_flag_setter();
+    test_t1_9_grace_period_anchor_first_arrival_only();
 
-    std::cout << "\n=== All 8 T1 tests passed ===\n";
+    std::cout << "\n=== All 9 T1 tests passed ===\n";
     return 0;
 }
