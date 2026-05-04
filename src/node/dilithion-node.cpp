@@ -2625,6 +2625,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     return 1;
                 }
                 g_chainstate.SetTip(pgenesisIndexPtr);
+                // v4.3.1: seed candidate set after tip established. Without
+                // this, m_setBlockIndexCandidates stays empty after disk load
+                // — under env-var=1 path, FindMostWorkChainImpl returns
+                // whichever single block was last inserted, never comparing
+                // against tip's chainwork. Caused LDN tip-going-backwards /
+                // dual-hash deadlock 2026-05-04.
+                g_chainstate.RecomputeCandidates();
                 std::cout << " ✓" << std::endl;
                 std::cout << "  [OK] Loaded chain state: 1 block (height 0)" << std::endl;
             } else if (!(hashBestBlock.IsNull())) {
@@ -2783,6 +2790,13 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 }
 
                 g_chainstate.SetTip(pindexTip);
+                // v4.3.1: seed candidate set after tip established. Without
+                // this, m_setBlockIndexCandidates stays empty after disk load
+                // — under env-var=1 path, FindMostWorkChainImpl returns
+                // whichever single block was last inserted, never comparing
+                // against tip's chainwork. Caused LDN tip-going-backwards /
+                // dual-hash deadlock 2026-05-04.
+                g_chainstate.RecomputeCandidates();
                 g_chain_height.store(static_cast<unsigned int>(pindexTip->nHeight));  // BUG #108 FIX: Set global height for TX validation
 
                 // BUG #270 FIX: Ensure all blocks on the active chain have BLOCK_VALID_CHAIN set.

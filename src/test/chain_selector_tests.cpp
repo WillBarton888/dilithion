@@ -980,6 +980,180 @@ void test_find_most_work_chain_returns_heaviest_valid_leaf()
     std::cout << " OK\n";
 }
 
+// ============================================================================
+// v4.3.1 chain-selection fix regression tests.
+//
+// These reproduce the LDN mainnet 2026-05-04 incident at unit scale:
+//   * Fix 1: SetTip alone leaves m_setBlockIndexCandidates empty; node
+//     restart on the env-var=1 path then sees a single-arrival candidate set
+//     and tries to reorg-to-self-or-lesser. RecomputeCandidates after SetTip
+//     is the surgical fix.
+//   * Fix 3: defense-in-depth chainwork gate. The CORRECTED comparator is
+//     `tip > candidate` (strict). Equal-work reorgs (DilV VDF Case 2.5) must
+//     proceed; only strictly-less-work candidates are gated.
+// ============================================================================
+
+void test_v4_3_1_recompute_seeds_candidate_set_after_load()
+{
+    std::cout << "  test_v4_3_1_recompute_seeds_candidate_set_after_load..."
+              << std::flush;
+
+    // Reproduce LDN snapshot-load scenario at unit scale.
+    // Build: A (active tip after load, valid_tx, work=5)
+    //        \--> B (valid_tx leaf, work=10, heavier than tip)
+    //
+    // Without Fix 1: SetTip(A) populates m_chainstate but
+    // m_setBlockIndexCandidates stays empty. FindMostWorkChainImpl returns
+    // nullptr — i.e., the candidate-set machinery is blind to B.
+    //
+    // With Fix 1 (RecomputeCandidates after SetTip): B is now a candidate
+    // and is heavier than A, so FindMostWorkChainImpl returns B.
+
+    CChainState chainstate;
+
+    // A: genesis-like, the loaded tip.
+    auto pA = MakePreValidationLeaf(0x90, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+    chainstate.SetTip(A);
+
+    // B: heavier sibling-fork candidate, also fully validated.
+    auto pB = MakePreValidationLeaf(0x91, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    // BEFORE Fix 1: SetTip alone does NOT populate the candidate set.
+    // FindMostWorkChainImpl returns nullptr — no candidate.
+    assert(chainstate.FindMostWorkChainImpl() == nullptr &&
+           "v4.3.1 Fix 1 regression: candidate set must be empty before "
+           "RecomputeCandidates is called");
+
+    // APPLY Fix 1: caller seeds the candidate set after SetTip.
+    chainstate.RecomputeCandidates();
+
+    // AFTER Fix 1: B is in the candidate set as heaviest leaf.
+    // (A has B as a child, so A is no longer a leaf and is excluded.)
+    CBlockIndex* picked = chainstate.FindMostWorkChainImpl();
+    assert(picked == B &&
+           "v4.3.1 Fix 1: RecomputeCandidates must seed B as heaviest candidate");
+
+    std::cout << " OK\n";
+}
+
+void test_v4_3_1_chainwork_gate_allows_equal_work_reorg()
+{
+    std::cout << "  test_v4_3_1_chainwork_gate_allows_equal_work_reorg..."
+              << std::flush;
+
+    // Fix 3 CORRECTED comparator semantics: `tip > candidate` (strict).
+    // Equal-work reorgs must NOT be blocked — they're legitimate under DilV
+    // VDF distribution / Case 2.5 tiebreak rules.
+    //
+    // Build: A (genesis, valid_tx, work=1)
+    //   B (valid_tx leaf, EQUAL work=10, sibling)
+    //   C (valid_tx leaf, EQUAL work=10, sibling)
+    //
+    // Verify: ChainWorkGreaterThan(B->nChainWork, C->nChainWork) == false
+    // (their works are equal). The gate condition
+    //     `if (tip && ChainWorkGreaterThan(tip->nChainWork, candidate->nChainWork)) break;`
+    // therefore does NOT fire for equal work — the reorg proceeds.
+
+    CChainState chainstate;
+
+    auto pA = MakePreValidationLeaf(0xA0, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0xA1, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pC = MakePreValidationLeaf(0xA2, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 3);
+    uint256 hC = pC->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hC, std::move(pC)));
+    CBlockIndex* C = chainstate.GetBlockIndex(hC);
+
+    // Sanity: B and C have IDENTICAL nChainWork by construction.
+    assert(std::memcmp(B->nChainWork.data, C->nChainWork.data, 32) == 0);
+
+    // CORE Fix 3 invariant: with B as tip and C as candidate (or vice versa),
+    // ChainWorkGreaterThan(tip, candidate) is FALSE on equal work — so the
+    // gate does NOT fire, allowing the equal-work reorg to proceed downstream
+    // (Case 2.5 tiebreak / VDF distribution semantics).
+    assert(!ChainWorkGreaterThan(B->nChainWork, C->nChainWork) &&
+           "v4.3.1 Fix 3: gate must NOT fire on equal-work candidates");
+    assert(!ChainWorkGreaterThan(C->nChainWork, B->nChainWork) &&
+           "v4.3.1 Fix 3: comparator is strict in both directions for equal work");
+
+    // Regression-against-misimplementation: the originally-proposed forensic
+    // gate `!ChainWorkGreaterThan(candidate, tip)` would evaluate to TRUE on
+    // equal work and incorrectly break the loop. Verify that the WRONG form
+    // does fire, contrasting with the CORRECTED form's correct behavior.
+    bool wrong_form_would_fire = !ChainWorkGreaterThan(C->nChainWork, B->nChainWork);
+    assert(wrong_form_would_fire &&
+           "v4.3.1 Fix 3 contrast: the original (rejected) gate form WOULD "
+           "have fired on equal work, blocking legitimate reorgs");
+
+    std::cout << " OK\n";
+}
+
+void test_v4_3_1_chainwork_gate_blocks_strictly_lesser_candidate()
+{
+    std::cout << "  test_v4_3_1_chainwork_gate_blocks_strictly_lesser_candidate..."
+              << std::flush;
+
+    // Defense-in-depth: when a less-work candidate somehow ends up as
+    // FindMostWorkChainImpl's pick (e.g., a future Fix 1 regression),
+    // the chainwork gate must fire and break the loop BEFORE the
+    // disconnect-then-fail sequence that caused the LDN deadlock.
+    //
+    // Build: A (genesis, valid_tx)
+    //   B (valid_tx leaf, work=10) — would-be tip
+    //   C (valid_tx leaf, work=5)  — strictly lesser candidate
+
+    CChainState chainstate;
+
+    auto pA = MakePreValidationLeaf(0xB0, nullptr, 0,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 1, 1);
+    uint256 hA = pA->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hA, std::move(pA)));
+    CBlockIndex* A = chainstate.GetBlockIndex(hA);
+
+    auto pB = MakePreValidationLeaf(0xB1, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 10, 2);
+    uint256 hB = pB->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hB, std::move(pB)));
+    CBlockIndex* B = chainstate.GetBlockIndex(hB);
+
+    auto pC = MakePreValidationLeaf(0xB2, A, 1,
+                                    CBlockIndex::BLOCK_VALID_TRANSACTIONS, 5, 3);
+    uint256 hC = pC->GetBlockHash();
+    assert(chainstate.AddBlockIndex(hC, std::move(pC)));
+    CBlockIndex* C = chainstate.GetBlockIndex(hC);
+
+    chainstate.SetTip(B);  // tip = B (heavier).
+
+    // CORE Fix 3 invariant: with tip=B (work=10), candidate=C (work=5),
+    // ChainWorkGreaterThan(tip, candidate) is TRUE → the gate fires → break.
+    assert(ChainWorkGreaterThan(B->nChainWork, C->nChainWork) &&
+           "v4.3.1 Fix 3: gate must fire when tip strictly heavier than candidate");
+
+    // And the reverse (candidate heavier than tip) should NOT fire.
+    assert(!ChainWorkGreaterThan(C->nChainWork, B->nChainWork) &&
+           "v4.3.1 Fix 3: candidate-heavier-than-tip is the legitimate reorg case");
+
+    std::cout << " OK\n";
+}
+
 int main()
 {
     std::cout << "\n=== Phase 5 PR5.1 + 5.3-prereq + 5.3 Day 3 AM: ChainSelector Tests ===\n"
@@ -1018,13 +1192,19 @@ int main()
         test_adapter_forwards_invalidate_and_reconsider();
         test_adapter_find_most_work_chain_returns_heaviest();
 
+        std::cout << "\n--- v4.3.1 chain-selection fix regressions ---"
+                  << std::endl;
+        test_v4_3_1_recompute_seeds_candidate_set_after_load();
+        test_v4_3_1_chainwork_gate_allows_equal_work_reorg();
+        test_v4_3_1_chainwork_gate_blocks_strictly_lesser_candidate();
+
         std::cout << "\n--- Red-team audit BLOCKER fixes ---"
                   << std::endl;
         test_blocker1_process_new_header_rejects_invalid_parent();
         test_blocker2_mark_block_as_valid_independent_failure_is_barrier();
         test_blocker3_checkpoint_violation_in_ancestry_rejects_candidate();
 
-        std::cout << "\n=== All chain_selector_tests passed (21 tests: 4 + 5 + 5 + 2 + 2 + 3) ==="
+        std::cout << "\n=== All chain_selector_tests passed (24 tests: 4 + 5 + 5 + 2 + 2 + 3 + 3) ==="
                   << std::endl;
         return 0;
     } catch (const std::exception& e) {

@@ -502,6 +502,24 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                 if (!pindexMostWork) break;
                 if (pindexMostWork == pindexTip) break;  // already at best
 
+                // v4.3.1: defense-in-depth chainwork gate. ONLY skip reorg
+                // when current tip has STRICTLY GREATER work than the
+                // candidate. Equal-work activation is LEGITIMATE under DilV
+                // VDF distribution / Case 2.5 tiebreak semantics and must
+                // NOT be blocked. The condition is `tip > candidate` (strict),
+                // NOT `!greater(candidate, tip)` which would also fire on
+                // equal-work and break legitimate reorgs.
+                //
+                // Cheap insurance against any future regression in the
+                // candidate-set seeding (Fix 1 in this same change): if a
+                // single-element candidate set ever surfaces a less-work
+                // leaf, this gate prevents the disconnect-then-fail sequence
+                // that caused the LDN tip-going-backwards deadlock 2026-05-04.
+                if (pindexTip && ChainWorkGreaterThan(pindexTip->nChainWork,
+                                                     pindexMostWork->nChainWork)) {
+                    break;
+                }
+
                 // Phase 5 BLOCKER 3 fix (red-team audit 2026-04-26):
                 // checkpoint validation must cover the FULL ancestry from
                 // the current tip up to pindexMostWork, not just the
@@ -2545,6 +2563,30 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
         pindexTip = p->pprev;
         m_cachedHeight.store(pindexTip ? pindexTip->nHeight : -1,
                              std::memory_order_release);
+        // v4.3.1: persist DB best-block on every tip mutation so on-disk
+        // state stays aligned with in-memory pindexTip across crash + restart.
+        // Without this, a botched-reorg sequence leaves DB pointing at a hash
+        // that is no longer the in-memory tip (LDN dual-hash deadlock 2026-05-04).
+        // fsync per disconnect step — acceptable: production reorg depth
+        // bounded by cooldown rules + per-MIK caps.
+        // Test override takes precedence (consistent with legacy tail write
+        // semantic at the end of this function); production path requires pdb.
+        if (pindexTip && (m_testWriteBestBlockOverride || pdb)) {
+            bool wbb_ok = false;
+            if (m_testWriteBestBlockOverride) {
+                wbb_ok = m_testWriteBestBlockOverride(pindexTip->GetBlockHash());
+            } else {
+                wbb_ok = pdb->WriteBestBlock(pindexTip->GetBlockHash());
+            }
+            if (!wbb_ok) {
+                std::cerr << "[CRITICAL] ActivateBestChainStep: WriteBestBlock "
+                          << "failed at disconnect step h=" << pindexTip->nHeight
+                          << ". Triggering auto_rebuild." << std::endl;
+                if (m_reorgWAL) m_reorgWAL->AbortReorg();
+                m_chain_needs_rebuild.store(true);
+                return false;
+            }
+        }
         ++disconnectedCount;
         if (m_reorgWAL) m_reorgWAL->UpdateDisconnectProgress(disconnectedCount);
     }
@@ -2627,20 +2669,43 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
         // Advance tip after each successful connect.
         pindexTip = p;
         m_cachedHeight.store(p->nHeight, std::memory_order_release);
+        // v4.3.1: persist DB best-block on every tip mutation. Same rationale
+        // as disconnect-loop write above. With per-step writes, the tail
+        // post-loop write below is redundant on success but harmless.
+        if (pindexTip && (m_testWriteBestBlockOverride || pdb)) {
+            bool wbb_ok = false;
+            if (m_testWriteBestBlockOverride) {
+                wbb_ok = m_testWriteBestBlockOverride(pindexTip->GetBlockHash());
+            } else {
+                wbb_ok = pdb->WriteBestBlock(pindexTip->GetBlockHash());
+            }
+            if (!wbb_ok) {
+                std::cerr << "[CRITICAL] ActivateBestChainStep: WriteBestBlock "
+                          << "failed at connect step h=" << p->nHeight
+                          << ". Triggering auto_rebuild." << std::endl;
+                if (m_reorgWAL) m_reorgWAL->AbortReorg();
+                m_chain_needs_rebuild.store(true);
+                return false;
+            }
+        }
         ++connectedCount;
         if (m_reorgWAL) m_reorgWAL->UpdateConnectProgress(connectedCount);
     }
 
     // 8) Full reorg success — persist best block to disk.
-    // TEST-ONLY override (Phase 5 Day 4 Patch B equivalence harness):
-    // when set, replaces pdb->WriteBestBlock to allow simulation of
-    // WriteBestBlock failure (Scenario 5 — silent-proceed lock).
+    // v4.3.1: per-step writes above already persisted the latest tip on each
+    // mutation. This tail write is now defense-in-depth (matches legacy
+    // Case 2/2.5/3 final-write pattern at chain.cpp:560/614/1112). On
+    // success this is a no-op duplicate write of the same hash already on
+    // disk; if test override is set we still drive it through the same
+    // sink for harness symmetry. Failure here NO LONGER triggers rebuild
+    // because the per-step writes above already would have caught any
+    // I/O failure mid-loop and aborted with auto_rebuild.
     if (pindexTip) {
         if (m_testWriteBestBlockOverride) {
             (void)m_testWriteBestBlockOverride(pindexTip->GetBlockHash());
-            // Mirror legacy: return value captured but ignored (silent-proceed).
         } else if (pdb) {
-            pdb->WriteBestBlock(pindexTip->GetBlockHash());
+            (void)pdb->WriteBestBlock(pindexTip->GetBlockHash());
         }
     }
     if (m_reorgWAL) m_reorgWAL->CompleteReorg();

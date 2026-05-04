@@ -400,9 +400,9 @@ void test_scenario_4_both_connects_fail_unrecoverable()
     std::cout << " OK (deliberate divergence from legacy Patch B documented)\n";
 }
 
-void test_scenario_5_write_best_block_fails_silent_proceed()
+void test_scenario_5_write_best_block_fails_triggers_rebuild()
 {
-    std::cout << "  test_scenario_5_write_best_block_fails_silent_proceed..."
+    std::cout << "  test_scenario_5_write_best_block_fails_triggers_rebuild..."
               << std::flush;
 
     EngageNewPath();
@@ -430,17 +430,21 @@ void test_scenario_5_write_best_block_fails_silent_proceed()
     bool reorg = false;
     bool ok = cs.ActivateBestChain(f.Y, f.blockY, reorg);
 
-    // Locked behavior: silent-proceed. The reorg "succeeds" from caller's
-    // perspective; in-memory tip moves to Y; on-disk best-block stays at X.
-    // Hardening tracked as PHASE-5.X-WRITEBESTBLOCK-RESILIENCE.
-    assert(ok);
-    assert(reorg);
-    assert(cs.GetTip() == f.Y);
-    assert(!cs.NeedsChainRebuild());
+    // v4.3.1 (formerly "scenario_5_write_best_block_fails_silent_proceed"):
+    // WriteBestBlock failure now SURFACES auto_rebuild rather than silently
+    // proceeding. The previous "silent-proceed locked" behavior left in-memory
+    // tip + on-disk best-block divergent — exactly the LDN dual-hash deadlock
+    // pattern from 2026-05-04. PHASE-5.X-WRITEBESTBLOCK-RESILIENCE: implemented.
+    //
+    // Expected: the per-step write at the disconnect-loop fires first
+    // (rewinding tip to A on disk), it fails, auto_rebuild is set,
+    // ActivateBestChainStep returns false → ActivateBestChain returns false.
+    assert(!ok && "WriteBestBlock failure must surface as ActivateBestChain failure");
+    assert(cs.NeedsChainRebuild() && "auto_rebuild must be set on WBB failure");
     assert(wbbCalled && "WriteBestBlock override must have fired");
 
     DisengagePath();
-    std::cout << " OK (silent-proceed locked; hardening ticket: PHASE-5.X-WRITEBESTBLOCK-RESILIENCE)\n";
+    std::cout << " OK (WriteBestBlock failure surfaces auto_rebuild — PHASE-5.X-WRITEBESTBLOCK-RESILIENCE delivered in v4.3.1)\n";
 }
 
 int main()
@@ -450,10 +454,16 @@ int main()
               << std::endl;
     try {
         test_scenario_1_replacement_succeeds();
+        // v4.3.1 hotfix: run scenario_5 (updated for new WBB-failure semantics)
+        // BEFORE scenario_2/3/4. Scenario_2 has a PRE-EXISTING assertion
+        // failure on port/v4.3-rc1 HEAD (asserts `ok=true` after connect-fail
+        // post-disconnect-commit, but the BLOCKER #1 fix already surfaces
+        // auto_rebuild → ok=false). Tracked as a separate v4.3-rc1 fix; not
+        // in scope for v4.3.1's chain-selection candidate-set seeding work.
+        test_scenario_5_write_best_block_fails_triggers_rebuild();
         test_scenario_2_connect_replacement_fails_then_recovers();
         test_scenario_3_disconnect_old_tip_fails();
         test_scenario_4_both_connects_fail_unrecoverable();
-        test_scenario_5_write_best_block_fails_silent_proceed();
         std::cout << "\n=== All 5 V1 scenarios passed ===\n"
                   << "\nNext: V2 integration test (regtest/testnet sync env-var=0 vs =1\n"
                   << "+ leveldb_diff). PR5.4 (Patch B deletion) gates on V1 + V2 both green.\n"
