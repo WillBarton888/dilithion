@@ -2513,6 +2513,66 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
     }
     std::reverse(connect.begin(), connect.end());
 
+    // 3.5) v4.3.3 F3 (audit modality 1 I1 / modality 2 HIGH-1): pre-validate
+    // every disconnect+connect block is readable BEFORE mutating chainstate.
+    // Mirrors legacy Case 3 pattern at chain.cpp:874-910 (CRITICAL-C002).
+    //
+    // Pre-fix, the port path read blocks lazily inside the connect loop
+    // (line ~2620 below) — by the time a missing-block ReadBlock failed,
+    // the disconnect loop had already committed N tip rewinds and persisted
+    // them via WriteBestBlock. The chain emerged truncated and required
+    // operator-consent rebuild via auto_rebuild marker (canary 3, LDN
+    // 2026-05-04 09:58:30: 441 disconnects committed, then ReadBlock failed
+    // at the connect-list head).
+    //
+    // CLEAN FAIL semantics: return false with NO m_chain_needs_rebuild and
+    // NO chainstate mutation. The candidate stays in the set but cannot be
+    // activated until its data lands; F5's per-ancestor data gate will drop
+    // it from the candidate set on the next FindMostWorkChainImpl call if
+    // the missing block doesn't show up.
+    //
+    // Test-override symmetry: m_testReadBlockOverride is consulted with the
+    // same per-block precedence as the connect loop below. Caller's optional
+    // shared_ptr (pblock_optional) covers exactly one block and MUST be the
+    // last connect entry (pindexMostWork) — that block's data is in-hand by
+    // construction, so we skip the readability check for it.
+    if (pdb || m_testReadBlockOverride) {
+        CBlock blockCheck;
+        for (CBlockIndex* p : disconnect) {
+            bool ok = false;
+            if (m_testReadBlockOverride) {
+                ok = m_testReadBlockOverride(p->GetBlockHash(), blockCheck);
+            } else {
+                ok = pdb->ReadBlock(p->GetBlockHash(), blockCheck);
+            }
+            if (!ok) {
+                std::cerr << "[Chain] ActivateBestChainStep: PRE-VALIDATION failed for "
+                          << "disconnect block " << p->GetBlockHash().GetHex().substr(0, 16)
+                          << "... at h=" << p->nHeight << ". Aborting reorg cleanly." << std::endl;
+                // Clean abort: no WAL begin, no chainstate mutation, no
+                // m_chain_needs_rebuild. Caller / outer loop retries.
+                return false;
+            }
+        }
+        for (CBlockIndex* p : connect) {
+            // Caller's in-hand block is guaranteed-readable by construction.
+            if (pblock_optional && pblock_optional->GetHash() == p->GetBlockHash()) continue;
+            bool ok = false;
+            if (m_testReadBlockOverride) {
+                ok = m_testReadBlockOverride(p->GetBlockHash(), blockCheck);
+            } else {
+                ok = pdb->ReadBlock(p->GetBlockHash(), blockCheck);
+            }
+            if (!ok) {
+                std::cerr << "[Chain] ActivateBestChainStep: PRE-VALIDATION failed for "
+                          << "connect block " << p->GetBlockHash().GetHex().substr(0, 16)
+                          << "... at h=" << p->nHeight << ". Aborting reorg cleanly." << std::endl;
+                // Clean abort. Same semantics as above.
+                return false;
+            }
+        }
+    }
+
     // 4) WAL: BeginReorg with the full plan.
     if (m_reorgWAL) {
         std::vector<uint256> disconnectHashes;
