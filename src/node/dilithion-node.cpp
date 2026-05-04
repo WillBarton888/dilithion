@@ -7360,12 +7360,12 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // port (flag=1) sync-coordinator configurations. Single helper,
             // single call site, single point of truth for the recovery path.
             // See dilv-node.cpp main loop for full context.
-            {
-                const std::string datadir = Dilithion::g_chainParams
-                    ? Dilithion::g_chainParams->dataDir
-                    : std::string();
-                Dilithion::MaybeTriggerChainRebuild(g_chainstate, datadir, &g_node_state.running);
-            }
+            //
+            // v4.3.2 M1 H1 (Layer-3 review 2026-05-04): pass config.datadir,
+            // NOT g_chainParams->dataDir — chainparams field ignores
+            // --datadir=PATH; startup marker detection reads config.datadir.
+            // Divergent paths silently sever recovery on non-default datadirs.
+            Dilithion::MaybeTriggerChainRebuild(g_chainstate, config.datadir, &g_node_state.running);
 
             // IBD DEBUG: Log that Tick() returned and main loop continues
             static int main_loop_count = 0;

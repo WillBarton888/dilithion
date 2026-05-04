@@ -7211,12 +7211,16 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // single call site, single point of truth for the recovery path.
             // LDN canary 2026-05-04 regressed 254 blocks because the previous
             // in-Tick() recovery was bypassed under --usenewpeerman=1.
-            {
-                const std::string datadir = Dilithion::g_chainParams
-                    ? Dilithion::g_chainParams->dataDir
-                    : std::string();
-                Dilithion::MaybeTriggerChainRebuild(g_chainstate, datadir, &g_node_state.running);
-            }
+            //
+            // v4.3.2 M1 H1 (Layer-3 review 2026-05-04): pass config.datadir,
+            // NOT g_chainParams->dataDir. The chainparams field is set ONCE
+            // at construction (chainparams.cpp:429 GetDataDir(DILV)) and
+            // ignores --datadir=PATH. The startup marker detection at
+            // dilv-node.cpp:2180 reads config.datadir; if these diverge, the
+            // marker is written to a path the wrapper-restart never inspects
+            // and recovery is silently severed — exactly the LDN canary's
+            // failure shape, just triggered by a different precondition.
+            Dilithion::MaybeTriggerChainRebuild(g_chainstate, config.datadir, &g_node_state.running);
 
             // IBD DEBUG: Log that Tick() returned and main loop continues
             static int main_loop_count = 0;
