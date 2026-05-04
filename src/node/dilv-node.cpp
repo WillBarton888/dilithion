@@ -5800,6 +5800,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             pblockIndex->phashBlock = blockHash;
             // v4.3.3 F1: OR-merge (mirrors upstream accumulating-flag idiom).
             pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
+            // v4.3.3 F7 (Layer-3 HIGH-1): supply BLOCK_VALID_TRANSACTIONS so
+            // the locally-mined VDF block enters the candidate set under
+            // --usenewpeerman=1.
+            pblockIndex->RaiseValidity(CBlockIndex::BLOCK_VALID_TRANSACTIONS);
             pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
             if (!pblockIndex->pprev) {
                 std::cerr << "[VDF] ERROR: Cannot find parent block" << std::endl;

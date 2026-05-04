@@ -355,6 +355,10 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
         pblockIndex->phashBlock = blockHash;
         // v4.3.3 F1: OR-merge (mirrors upstream accumulating-flag idiom).
         pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
+        // v4.3.3 F7 (Layer-3 HIGH-1): supply BLOCK_VALID_TRANSACTIONS now
+        // that F1's disjoint mask no longer accidentally satisfies the
+        // candidate-set predicate via HAVE_DATA bit overlap.
+        pblockIndex->RaiseValidity(CBlockIndex::BLOCK_VALID_TRANSACTIONS);
 
         // Link to parent
         pblockIndex->pprev = m_chainstate.GetBlockIndex(block.hashPrevBlock);
@@ -462,6 +466,10 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
                     pOrphanIndex->phashBlock = orphanBlockHash;
                     // v4.3.3 F1: OR-merge (mirrors upstream accumulating-flag idiom).
                     pOrphanIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
+                    // v4.3.3 F7 (Layer-3 HIGH-1): orphan-resolve path also
+                    // raises validity so the now-connected ex-orphan can
+                    // enter the candidate set under --usenewpeerman=1.
+                    pOrphanIndex->RaiseValidity(CBlockIndex::BLOCK_VALID_TRANSACTIONS);
                     pOrphanIndex->pprev = pOrphanParent;
                     pOrphanIndex->nHeight = orphanHeight;
                     pOrphanIndex->BuildChainWork();

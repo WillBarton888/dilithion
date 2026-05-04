@@ -108,6 +108,29 @@ public:
 
     //! Check if this block or an ancestor failed validation
     bool IsInvalid() const { return (nStatus & BLOCK_FAILED_MASK) != 0; }
+
+    //! Raise the validity level if it is currently lower than the requested
+    //! level. Leaves data / failure flag bits untouched. Mirrors upstream
+    //! Bitcoin Core's `CBlockIndex::RaiseValidity(BlockStatus level)` at
+    //! `src/chain.h` (used by `ReceivedBlockTransactions` to mark a block
+    //! eligible for activation once its data has been received).
+    //!
+    //! Returns true iff the level was actually raised (caller may use this
+    //! to gate downstream side-effects such as setBlockIndexCandidates
+    //! insertion).
+    //!
+    //! v4.3.3 F7 (Layer-3 HIGH-1): introduced after F1 made BLOCK_VALID_MASK
+    //! disjoint from BLOCK_HAVE_DATA. Pre-F1 the bit overlap meant
+    //! BLOCK_HAVE_DATA-only blocks accidentally satisfied the candidate
+    //! predicate; post-F1 they don't, and this helper supplies the explicit
+    //! invariant at the production block-arrival sites.
+    bool RaiseValidity(uint32_t level) {
+        if ((nStatus & BLOCK_VALID_MASK) < level) {
+            nStatus = (nStatus & ~BLOCK_VALID_MASK) | level;
+            return true;
+        }
+        return false;
+    }
 };
 
 #endif
