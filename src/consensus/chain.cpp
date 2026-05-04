@@ -2499,6 +2499,39 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
     // For genesis activation, pindexTip is null — pindexFork stays null and
     // disconnect list is empty; connect list walks pindexMostWork all the way back.
 
+    // 1.5) v4.3.3 F4 (audit modality 1 I2 / modality 2 MEDIUM-6): reorg depth
+    // cap on the port path. Mirrors legacy chain.cpp:780-792 MAX_REORG_DEPTH=100.
+    //
+    // Pre-fix, the port path's ActivateBestChainStep had no depth check —
+    // canary 3 attempted a 441-block reorg unconstrained. The legacy cap
+    // would have hard-rejected it.
+    //
+    // Genesis exemption: when pindexTip is null we are activating from a
+    // fresh datadir / genesis-only state; the connect list legitimately
+    // walks back to genesis and depth equals pindexMostWork->nHeight. No
+    // reorg is happening (nothing to disconnect), so the cap is bypassed.
+    //
+    // On rejection: MarkBlockAsFailed(pindexMostWork) drops the over-deep
+    // candidate from m_setBlockIndexCandidates so the next outer-loop
+    // FindMostWorkChainImpl returns the next-best candidate. Return false
+    // (NOT m_chain_needs_rebuild) — chain is unchanged, this is a clean
+    // refusal.
+    if (pindexTip != nullptr && pindexFork != nullptr) {
+        static const int64_t MAX_REORG_DEPTH = 100;  // matches legacy chain.cpp:780
+        const int64_t reorg_depth =
+            static_cast<int64_t>(pindexTip->nHeight) -
+            static_cast<int64_t>(pindexFork->nHeight);
+        if (reorg_depth > MAX_REORG_DEPTH) {
+            std::cerr << "[Chain] ActivateBestChainStep: reorg depth " << reorg_depth
+                      << " exceeds MAX_REORG_DEPTH=" << MAX_REORG_DEPTH
+                      << " (tip h=" << pindexTip->nHeight
+                      << ", fork h=" << pindexFork->nHeight
+                      << "). Dropping candidate; retrying with next-best." << std::endl;
+            MarkBlockAsFailed(pindexMostWork);
+            return false;
+        }
+    }
+
     // 2) Build disconnect list (pindexTip ... pindexFork-exclusive).
     std::vector<CBlockIndex*> disconnect;
     for (CBlockIndex* p = pindexTip; p && p != pindexFork; p = p->pprev) {
