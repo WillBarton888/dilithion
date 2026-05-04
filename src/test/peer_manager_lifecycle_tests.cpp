@@ -42,6 +42,8 @@
 #include <net/port/peer_scorer.h>
 #include <net/port/sync_coordinator.h>
 
+#include <primitives/block.h>
+
 #include <cassert>
 #include <iostream>
 #include <memory>
@@ -206,21 +208,50 @@ void test_lifecycle_observable_state_after_ops()
 }
 
 // ============================================================================
+// Test 5 — v4.3.3: headers path mirrors best-known height into port download
+// state (regression for IBD stall when inbound headers bypass HandleHeaders).
+// ============================================================================
+void test_notify_peer_best_known_from_headers_updates_port_height()
+{
+    std::cout << "  test_notify_peer_best_known_from_headers_updates_port_height..."
+              << std::flush;
+
+    LifecycleFixture fix;
+    constexpr int kPeer = 51;
+    fix.pm.OnPeerConnected(kPeer);
+    assert(fix.pm.GetPeerBestKnownBlockHeight(kPeer) == -1);
+
+    uint256 dummy;
+    dummy.SetHex("0000000000000000000000000000000000000000000000000000000000000001");
+    fix.pm.NotifyPeerBestKnownFromHeaders(kPeer, 44812, dummy);
+    assert(fix.pm.GetPeerBestKnownBlockHeight(kPeer) == 44812);
+
+    fix.pm.NotifyPeerBestKnownFromHeaders(kPeer, 44800, dummy);  // regression down
+    assert(fix.pm.GetPeerBestKnownBlockHeight(kPeer) == 44812);
+
+    fix.pm.NotifyPeerBestKnownFromHeaders(kPeer, 44906, dummy);
+    assert(fix.pm.GetPeerBestKnownBlockHeight(kPeer) == 44906);
+
+    std::cout << " OK\n";
+}
+
+// ============================================================================
 int main()
 {
     std::cout << "Phase 6 PR6.5b.1a — Lifecycle tests for port-CPeerManager\n";
-    std::cout << "  (4-test suite per active_contract.md)\n\n";
+    std::cout << "  (5-test suite per active_contract.md + v4.3.3 catch-up)\n\n";
 
     try {
         test_port_cpeermanager_polymorphic_as_isynccoordinator();
         test_vacuous_defaults_explicit();
         test_lifecycle_idempotency_connect();
         test_lifecycle_observable_state_after_ops();
+        test_notify_peer_best_known_from_headers_updates_port_height();
     } catch (const std::exception& e) {
         std::cerr << "\nFAILED: " << e.what() << "\n";
         return 1;
     }
 
-    std::cout << "\nAll 4 PR6.5b.1a lifecycle tests passed.\n";
+    std::cout << "\nAll 5 PR6.5b.1a lifecycle tests passed.\n";
     return 0;
 }

@@ -21,6 +21,8 @@
 
 #include <net/port/peer_manager.h>
 
+#include <net/peers.h>
+
 #include <consensus/ichain_selector.h>
 #include <consensus/params.h>
 #include <core/node_context.h>
@@ -1501,14 +1503,74 @@ std::vector<PeerInfo> CPeerManager::GetPeerInfo() const {
     return out;
 }
 
+void CPeerManager::insert_peer_if_absent_locked(NodeId peer) {
+    if (m_peers.find(peer) != m_peers.end()) {
+        return;
+    }
+    auto [it, inserted] = m_peers.emplace(peer, std::make_unique<CPeer>(peer));
+    (void)inserted;
+    it->second->nTimeConnectedLocal = GetTime();
+}
+
+void CPeerManager::CatchUpRegisteredLegacyPeers() {
+    ::CPeerManager* legacy = g_node_context.peer_manager.get();
+    if (!legacy) {
+        return;
+    }
+    for (const auto& lp : legacy->GetConnectedPeers()) {
+        if (!lp) {
+            continue;
+        }
+        const NodeId id = lp->id;
+        CNode* node = nullptr;
+        if (g_node_context.connman) {
+            node = g_node_context.connman->GetNode(id);
+        }
+        const bool handshake_done = lp->IsHandshakeComplete(node);
+        const int legacy_best = lp->best_known_height;
+        const int legacy_start = lp->start_height;
+        std::lock_guard<std::mutex> lk(m_peers_mutex);
+        insert_peer_if_absent_locked(id);
+        auto it = m_peers.find(id);
+        if (it == m_peers.end()) {
+            continue;
+        }
+        CPeer& cp = *it->second;
+        cp.m_handshake_complete = handshake_done;
+        if (legacy_best > 0 &&
+            legacy_best > cp.m_block_download.n_best_known_height) {
+            cp.m_block_download.n_best_known_height = legacy_best;
+        }
+        if (legacy_start > 0 && cp.m_block_download.n_starting_height < 0) {
+            cp.m_block_download.n_starting_height = legacy_start;
+        }
+    }
+}
+
+void CPeerManager::NotifyPeerBestKnownFromHeaders(NodeId peer, int height, const uint256& /*hash*/)
+{
+    std::lock_guard<std::mutex> lk(m_peers_mutex);
+    auto it = m_peers.find(peer);
+    if (it == m_peers.end()) {
+        return;
+    }
+    if (height > it->second->m_block_download.n_best_known_height) {
+        it->second->m_block_download.n_best_known_height = height;
+    }
+}
+
+int64_t CPeerManager::GetPeerBestKnownBlockHeight(NodeId peer) const {
+    std::lock_guard<std::mutex> lk(m_peers_mutex);
+    auto it = m_peers.find(peer);
+    if (it == m_peers.end()) {
+        return -1;
+    }
+    return it->second->m_block_download.n_best_known_height;
+}
+
 void CPeerManager::OnPeerConnected(NodeId peer) {
     std::lock_guard<std::mutex> lk(m_peers_mutex);
-    if (m_peers.find(peer) != m_peers.end()) return;  // already connected
-    auto [it, inserted] = m_peers.emplace(peer, std::make_unique<CPeer>(peer));
-    // Local connect-time stamped from GetTime() (PR6.5b.fixups-semantic,
-    // finding PR6.5b.2-SEC-MD-2). Distinct from m_peer_claimed_time which is
-    // set wire-side by HandleVersion after a bounds check.
-    it->second->nTimeConnectedLocal = GetTime();
+    insert_peer_if_absent_locked(peer);
 }
 
 void CPeerManager::OnPeerDisconnected(NodeId peer) {

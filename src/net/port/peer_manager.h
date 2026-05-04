@@ -133,6 +133,21 @@ public:
     void OnPeerConnected(NodeId peer);
     void OnPeerDisconnected(NodeId peer);
 
+    // v4.3.3: connman.Start() runs before RegisterPortPeerManager in node
+    // main(). Peers that connected in that window never received port-side
+    // OnPeerConnected — call once after registration to mirror legacy state.
+    void CatchUpRegisteredLegacyPeers();
+
+    // v4.3.3: Incoming headers are deserialized on the net path
+    // (ProcessHeadersMessage → callback → headers_manager), not via
+    // port::ProcessMessage(HandleHeaders). Mirror legacy
+    // UpdatePeerBestKnownTip so RequestNextBlocks sees non-trivial
+    // n_best_known_height under --usenewpeerman=1.
+    void NotifyPeerBestKnownFromHeaders(NodeId peer, int height, const uint256& hash);
+
+    /// Best-known block height from port block-download state (-1 if unknown).
+    int64_t GetPeerBestKnownBlockHeight(NodeId peer) const;
+
     // ===== Block-download accounting (PR6.5b.4) =====
     //
     // Mark a block hash as in-flight from `peer`. Increments the per-peer
@@ -269,6 +284,10 @@ private:
     //   * Inbound chain.cpp callbacks fire SYNCHRONOUSLY under cs_main
     //     (Option B; not Option A's queue dispatch). PeerManager
     //     handlers MUST be invokable under cs_main.
+
+    // Caller must hold m_peers_mutex. Inserts CPeer(peer) if absent (OnPeerConnected /
+    // CatchUpRegisteredLegacyPeers).
+    void insert_peer_if_absent_locked(NodeId peer);
 
     std::map<NodeId, std::unique_ptr<CPeer>> m_peers;
     mutable std::mutex m_peers_mutex;

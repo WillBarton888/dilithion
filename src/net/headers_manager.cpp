@@ -14,6 +14,7 @@
 #include <util/time.h>
 #include <util/logging.h>  // For g_verbose flag
 #include <node/genesis.h>
+#include <net/port/peer_manager.h>      // v4.3.3: mirror header tip to port PeerManager
 #include <net/port/sync_coordinator.h>  // Phase 6 PR6.5a: IsSynced() via adapter
 #include <consensus/ichain_selector.h>  // Phase 6 PR6.1: chain_selector wiring
 // PR5.5 (2026-04-26): node/fork_manager.h include retired from
@@ -3399,6 +3400,14 @@ void CHeadersManager::HeaderProcessorThread()
             // Update peer tip tracking for FetchBlocks and fork detection
             if (g_node_context.peer_manager) {
                 g_node_context.peer_manager->UpdatePeerBestKnownTip(pending.peer_id, bestHeight, bestHash);
+            }
+            // v4.3.3: port-CPeerManager (--usenewpeerman=1) never runs HandleHeaders on
+            // the inbound path (headers go net.cpp → callback → here). Without this
+            // mirror, m_block_download.n_best_known_height stays at -1 and
+            // RequestNextBlocks never issues GETDATA (IBD async stall).
+            if (auto* port_pm =
+                    dynamic_cast<::dilithion::net::port::CPeerManager*>(g_node_context.sync_coordinator.get())) {
+                port_pm->NotifyPeerBestKnownFromHeaders(pending.peer_id, bestHeight, bestHash);
             }
         } else {
             std::cerr << "[HeadersManager] Failed to process headers from peer "

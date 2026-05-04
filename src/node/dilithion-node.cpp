@@ -5854,8 +5854,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                     // v4.0.17: print BLOCK NOT SELECTED immediately. We KNOW
                     // we lost right now (block is valid but did not become
                     // tip), so deferring would just hide the outcome behind
-                    // the next round's BLOCK PRODUCED message. Height label
-                    // distinguishes from any concurrently-firing deferred
+                    // the next round's BLOCK CANDIDATE PRODUCED message. Height
+                    // label distinguishes from any concurrently-firing deferred
                     // notification for an earlier round.
                     std::cout << std::endl
                               << "======================================" << std::endl
@@ -7091,6 +7091,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_context.connman) {
                 g_node_context.connman->RegisterPortPeerManager(port_pm.get());
             }
+            // v4.3.3: connman.Start() already ran — peers may exist with no port-side
+            // OnPeerConnected. Catch up so Tick()/RequestNextBlocks see real peers.
+            port_pm->CatchUpRegisteredLegacyPeers();
             g_node_context.sync_coordinator = std::move(port_pm);
             LogPrintf(NET, INFO,
                 "Phase 6 PR6.5b.1a/1b: sync_coordinator backed by port-CPeerManager "
