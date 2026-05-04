@@ -173,20 +173,38 @@ bool MaybeTriggerChainRebuild(CChainState& chainstate,
         return false;
     }
 
-    // 3) Print the CRITICAL banner. Format kept byte-identical with the legacy
-    // CIbdCoordinator::Tick() block so operators tailing logs don't lose
-    // pattern matches between v4.3.1 (legacy block) and v4.3.2 (free helper).
+    // 3) Determine the cause class. v4.3.3 F11 (Layer-3 round 2 MEDIUM-1):
+    // chain_rebuild flag can fire from either UndoBlock-family failures
+    // (BUG #277, v4.0.19, v4.3.1 BLOCKER #1 sites) or from F8's reorg-
+    // depth rejection. Read the cause via the chainstate accessor; the
+    // FlagChainRebuild helper guarantees release-store of the reason
+    // BEFORE the flag, so this acquire-load sees a consistent pair.
+    const CChainState::ChainRebuildReason chain_cause =
+        chain_rebuild ? chainstate.GetChainRebuildReason()
+                      : CChainState::ChainRebuildReason::UndoFailure;
+
+    // 4) Print the CRITICAL banner. UTXO-rebuild text unchanged. Chain-
+    // rebuild text branches on cause so operators get accurate diagnostics
+    // (pre-F11 the M1 helper always said "Persistent UndoBlock failure"
+    // even when F8 fired for depth rejection — operationally misleading,
+    // log scrapers misdiagnose).
     std::cerr << "\n==========================================================" << std::endl;
     if (utxo_rebuild) {
         std::cerr << "CRITICAL: UTXO corruption detected! Auto-recovery initiated." << std::endl;
+    } else if (chain_cause == CChainState::ChainRebuildReason::DepthRejection) {
+        std::cerr << "CRITICAL: Reorg depth exceeded MAX_REORG_DEPTH — "
+                  << "bootstrap too stale for in-process catch-up. "
+                  << "Auto-recovery initiated." << std::endl;
     } else {
         std::cerr << "CRITICAL: Persistent UndoBlock failure detected! Auto-recovery initiated." << std::endl;
     }
     std::cerr << "The node will shut down and rebuild on next restart." << std::endl;
     std::cerr << "==========================================================" << std::endl;
 
-    // 4) Build the reason string with the same combined / utxo-only / chain-only
-    // shape used by the legacy block.
+    // 5) Build the marker reason string. Same shape as legacy when cause
+    // is UndoFailure; new "Reorg depth..." text when cause is DepthRejection.
+    // For combined utxo+chain we always use the canonical legacy text
+    // because UTXO corruption is the dominant signal there.
     std::string reason;
     const std::string heightStr = std::to_string(chainstate.GetHeight());
     if (utxo_rebuild && chain_rebuild) {
@@ -195,6 +213,9 @@ bool MaybeTriggerChainRebuild(CChainState& chainstate,
                  + heightStr + " hash=" + failing.GetHex();
     } else if (utxo_rebuild) {
         reason = "UTXO corruption detected at height " + heightStr;
+    } else if (chain_cause == CChainState::ChainRebuildReason::DepthRejection) {
+        reason = "Reorg depth exceeded MAX_REORG_DEPTH at height " + heightStr
+                 + "; bootstrap too stale for in-process catch-up; wipe-and-IBD required";
     } else {
         uint256 failing = chainstate.GetLastUndoFailureHash();
         reason = "Persistent UndoBlock failure at height "

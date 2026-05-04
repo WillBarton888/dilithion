@@ -145,6 +145,28 @@ private:
     mutable std::mutex m_undo_failure_mutex;
     static constexpr int kPersistentUndoFailureThreshold = 3;
 
+public:
+    // v4.3.3 F11 (Layer-3 round 2 MEDIUM-1): cause classification for
+    // m_chain_needs_rebuild. The same flag is set by multiple distinct
+    // failure modes — UndoBlock-undo (legacy v4.0.19), ReadBlock /
+    // ConnectTip / WriteBestBlock failures mid-reorg (v4.3.1 BLOCKER #1
+    // sites), and reorg-depth-cap rejection (v4.3.3 F8). The M1 helper
+    // (Dilithion::MaybeTriggerChainRebuild) needs to know WHY in order
+    // to emit a non-misleading [CRITICAL] banner and reason string.
+    //
+    // Default-initialized to UndoFailure (the only cause pre-F8); F8's
+    // depth-rejection site sets DepthRejection BEFORE flipping
+    // m_chain_needs_rebuild, so the helper observes the cause atomically
+    // with the flag. First-set-wins semantics: M1 helper's once-latch
+    // means only the first cause to fire is reported.
+    enum class ChainRebuildReason : uint32_t {
+        UndoFailure    = 0,  // BUG #277 / v4.0.19 / v4.3.1 BLOCKER #1
+        DepthRejection = 1,  // v4.3.3 F8 (MAX_REORG_DEPTH exceeded)
+    };
+private:
+    std::atomic<ChainRebuildReason> m_chain_rebuild_reason{
+        ChainRebuildReason::UndoFailure};
+
     // ============================================================
     // Phase 5: TEST-ONLY hooks for Patch B equivalence harness.
     // ============================================================
@@ -279,6 +301,32 @@ public:
      * Returns null hash if no failure has been recorded.
      */
     uint256 GetLastUndoFailureHash() const;
+
+    /**
+     * v4.3.3 F11 (Layer-3 round 2 MEDIUM-1): read the cause that flagged
+     * m_chain_needs_rebuild. M1 helper consults this to choose a non-
+     * misleading [CRITICAL] banner. Atomic load — safe to call without
+     * cs_main.
+     */
+    ChainRebuildReason GetChainRebuildReason() const {
+        return m_chain_rebuild_reason.load(std::memory_order_acquire);
+    }
+
+    /**
+     * v4.3.3 F11: atomic flag-and-reason setter. Stores the reason FIRST
+     * (release semantics) then sets the rebuild flag — so any reader that
+     * observes m_chain_needs_rebuild=true via acquire-load is guaranteed
+     * to see the reason that was set in the same logical operation.
+     *
+     * First-cause-wins: M1 helper has a process-lifetime once-latch, so
+     * only the first cause to fire is ever reported. Subsequent calls
+     * are still recorded (the flag and reason are sticky-set) but the
+     * helper bails at the latch.
+     */
+    void FlagChainRebuild(ChainRebuildReason reason) {
+        m_chain_rebuild_reason.store(reason, std::memory_order_release);
+        m_chain_needs_rebuild.store(true, std::memory_order_release);
+    }
 
     /**
      * v4.0.19: Record an UndoBlock failure for a specific block.

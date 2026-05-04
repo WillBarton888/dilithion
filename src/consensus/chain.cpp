@@ -2677,10 +2677,14 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
                       << "rebuild for wrapper-driven recovery." << std::endl;
             // F8 HIGH-2 fix: erase, don't MarkBlockAsFailed.
             m_setBlockIndexCandidates.erase(pindexMostWork);
-            // F8 / S3 follow-on: surface m_chain_needs_rebuild so the
-            // M1 main-loop helper writes the auto_rebuild marker via the
-            // user-respecting config.datadir on the next iteration.
-            m_chain_needs_rebuild.store(true);
+            // F8 / S3 follow-on (F11 enriched): surface m_chain_needs_rebuild
+            // with the cause = DepthRejection so the M1 main-loop helper can
+            // emit a non-misleading [CRITICAL] banner ("reorg depth exceeded
+            // — bootstrap stale" instead of the legacy "Persistent UndoBlock
+            // failure" text). Atomic order in FlagChainRebuild guarantees
+            // any observer of m_chain_needs_rebuild=true via acquire-load
+            // also sees DepthRejection as the cause.
+            FlagChainRebuild(ChainRebuildReason::DepthRejection);
             return false;
         }
     }

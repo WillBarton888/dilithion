@@ -300,6 +300,12 @@ void test_t1_2_reorg_depth_cap_rejects_deep_sibling()
     // wrapper restart with wipe-and-IBD recovery.
     assert(cs.NeedsChainRebuild());
 
+    // F11 (Layer-3 round 2 MEDIUM-1): the cause must be DepthRejection so
+    // the M1 helper emits the correct banner instead of the legacy
+    // "Persistent UndoBlock failure" text.
+    assert(cs.GetChainRebuildReason() ==
+           CChainState::ChainRebuildReason::DepthRejection);
+
     DisengagePath();
     std::cout << " OK\n";
 }
