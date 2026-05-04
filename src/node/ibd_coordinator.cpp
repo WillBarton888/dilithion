@@ -115,56 +115,32 @@ void CIbdCoordinator::Tick() {
     }
 
     // =========================================================================
-    // BUG #277 + v4.0.19: Auto-recovery from chain corruption
+    // v4.3.2 M1: Auto-recovery from chain corruption — moved to free helper
     // =========================================================================
-    // Two failure modes feed into one recovery path:
-    //   - NeedsUTXORebuild()  : ConnectTip's ApplyBlock fails repeatedly (BUG #277)
-    //   - NeedsChainRebuild() : DisconnectTip's UndoBlock fails repeatedly on the
-    //                           same hash (v4.0.19, incident 2026-04-25)
-    // In either case we write the auto_rebuild marker file with a reason describing
-    // which signal fired, then trigger graceful shutdown.
-    {
-        const bool utxo_rebuild = m_chainstate.NeedsUTXORebuild();
-        const bool chain_rebuild = m_chainstate.NeedsChainRebuild();
-        if (utxo_rebuild || chain_rebuild) {
-            static bool recovery_triggered = false;
-            if (!recovery_triggered) {
-                recovery_triggered = true;
-                std::cerr << "\n==========================================================" << std::endl;
-                if (utxo_rebuild) {
-                    std::cerr << "CRITICAL: UTXO corruption detected! Auto-recovery initiated." << std::endl;
-                } else {
-                    std::cerr << "CRITICAL: Persistent UndoBlock failure detected! Auto-recovery initiated." << std::endl;
-                }
-                std::cerr << "The node will shut down and rebuild on next restart." << std::endl;
-                std::cerr << "==========================================================" << std::endl;
-
-                std::string datadir;
-                if (Dilithion::g_chainParams) {
-                    datadir = Dilithion::g_chainParams->dataDir;
-                }
-                // Build combined reason when BOTH signals fire so operators see the
-                // full picture in auto_rebuild (Cursor review feedback, 2026-04-25).
-                std::string reason;
-                const std::string heightStr = std::to_string(m_chainstate.GetHeight());
-                if (utxo_rebuild && chain_rebuild) {
-                    uint256 failing = m_chainstate.GetLastUndoFailureHash();
-                    reason = "UTXO corruption AND persistent UndoBlock failure at height "
-                             + heightStr + " hash=" + failing.GetHex();
-                } else if (utxo_rebuild) {
-                    reason = "UTXO corruption detected at height " + heightStr;
-                } else {
-                    uint256 failing = m_chainstate.GetLastUndoFailureHash();
-                    reason = "Persistent UndoBlock failure at height "
-                             + heightStr + " hash=" + failing.GetHex();
-                }
-                Dilithion::WriteAutoRebuildMarker(datadir, reason);
-
-                g_node_state.running = false;
-            }
-            return;
-        }
-    }
+    // The poll-and-write block previously lived here (lines 126-167 in v4.3.1).
+    // Under `--usenewpeerman=1` this Tick() is bypassed entirely (port
+    // CPeerManager replaces CIbdCoordinatorAdapter as sync_coordinator), so the
+    // legacy in-Tick() recovery path was never reached. LDN canary 2026-05-04
+    // failed because [CRITICAL] Triggering auto_rebuild logs printed but no
+    // marker file was ever written and the chain regressed 254 blocks.
+    //
+    // Logic moved to Dilithion::MaybeTriggerChainRebuild and called from BOTH
+    // dilv-node.cpp and dilithion-node.cpp main loops, AFTER
+    // sync_coordinator->Tick(). That call covers both flag=0 (this Tick still
+    // runs via the adapter) and flag=1 (port path) modes with one code path.
+    //
+    // The early-return-on-recovery semantics from the legacy block are also
+    // preserved at the call site: when the helper fires, running=false is set
+    // and the next main-loop iteration exits before any further work runs. We
+    // do NOT need to early-return from THIS Tick() any more — the legacy
+    // sequence (write marker → set running=false → return) was an in-Tick()
+    // optimization to avoid touching headers/blocks after deciding to die; the
+    // helper preserves the kill-flag semantics and the main loop's
+    // running.load() check handles the rest. (The remainder of this Tick()
+    // does not depend on chain state being healthy; it operates on the IBD
+    // state machine + peer-manager side, which is safe to step through one
+    // last time before the loop exits.)
+    // =========================================================================
 
     int header_height = m_node_context.headers_manager->GetBestHeight();
     int chain_height = m_chainstate.GetHeight();

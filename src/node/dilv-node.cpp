@@ -7204,6 +7204,20 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
                 g_node_context.sync_coordinator->Tick();
             }
 
+            // v4.3.2 M1 fix: poll chainstate's UTXO/chain rebuild flags and
+            // surface auto_rebuild + shutdown if either fires. Lifted out of
+            // CIbdCoordinator::Tick so it runs in BOTH legacy (flag=0) and
+            // port (flag=1) sync-coordinator configurations. Single helper,
+            // single call site, single point of truth for the recovery path.
+            // LDN canary 2026-05-04 regressed 254 blocks because the previous
+            // in-Tick() recovery was bypassed under --usenewpeerman=1.
+            {
+                const std::string datadir = Dilithion::g_chainParams
+                    ? Dilithion::g_chainParams->dataDir
+                    : std::string();
+                Dilithion::MaybeTriggerChainRebuild(g_chainstate, datadir, &g_node_state.running);
+            }
+
             // IBD DEBUG: Log that Tick() returned and main loop continues
             static int main_loop_count = 0;
             if (g_verbose.load(std::memory_order_relaxed) && (++main_loop_count <= 5 || main_loop_count % 60 == 0)) {

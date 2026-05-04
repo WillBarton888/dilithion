@@ -16,8 +16,14 @@
  *   - Auto-rebuild marker handler (BUG #277, post-UTXO-corruption recovery)
  */
 
+#include <atomic>
 #include <string>
 #include <vector>
+
+// Forward decl — full include avoided so genesis_gen / check-wallet-balance
+// (which link util/chain_reset.cpp but never include the chain header) keep
+// minimal dependencies.
+class CChainState;
 
 namespace Dilithion {
 
@@ -54,6 +60,65 @@ bool ConfirmChainReset(const std::string& datadir, bool yesFlag);
  * @return true on success, false if the write failed (logs to stderr on failure)
  */
 bool WriteAutoRebuildMarker(const std::string& datadir, const std::string& reason);
+
+/**
+ * v4.3.2 (M1 fix): poll the chainstate's UTXO/chain rebuild flags and, on
+ * first observed truth, write the auto_rebuild marker and trigger node
+ * shutdown via g_node_state.running=false.
+ *
+ * MUST be called once per main-loop iteration in BOTH the legacy
+ * (CIbdCoordinatorAdapter) and port (CPeerManager) sync-coordinator
+ * configurations. The original recovery flow lived inside
+ * CIbdCoordinator::Tick() at ibd_coordinator.cpp:126-167; under
+ * `--usenewpeerman=1` that Tick() is bypassed entirely (the port
+ * CPeerManager replaces it as the sync_coordinator), so flag-set sites
+ * in chain.cpp (Fix 2) printed `[CRITICAL] Triggering auto_rebuild` but
+ * no marker was ever written and the node continued running on broken
+ * state. LDN canary 2026-05-04: chain regressed h=44518 → h=44265 in
+ * 4 minutes before manual kill.
+ *
+ * Behaviour invariants (preserved verbatim from the legacy
+ * CIbdCoordinator block):
+ *   - Static-once latch — fires AT MOST once per process lifetime.
+ *   - Reads NeedsUTXORebuild() AND NeedsChainRebuild() — combined-reason
+ *     formatting when both fire.
+ *   - Reason format: `"UTXO corruption AND persistent UndoBlock failure
+ *     at height N hash=..."` / `"UTXO corruption detected at height N"`
+ *     / `"Persistent UndoBlock failure at height N hash=..."`.
+ *   - On WriteAutoRebuildMarker failure: still sets running=false (better
+ *     to crash-loop with logged ERROR than continue on broken chain).
+ *
+ * Thread safety: relies on the underlying flags being std::atomic<bool>;
+ * GetLastUndoFailureHash() takes its own internal mutex briefly. Static
+ * latch is single-thread access (main loop only).
+ *
+ * @param chainstate The active CChainState whose flags to poll.
+ * @param datadir Where to write `<datadir>/auto_rebuild`. Empty datadir
+ *        causes WriteAutoRebuildMarker to log a warning and skip the
+ *        write — shutdown is still requested.
+ * @param running_flag Atomic bool the caller wants cleared on trigger
+ *        (production: pointer to `g_node_state.running`). Pass nullptr
+ *        to skip the shutdown signal — used in unit tests that only
+ *        verify the marker-write path. Production callers MUST pass a
+ *        non-null flag; otherwise the node will stay alive on broken
+ *        chain state, defeating the purpose of the helper.
+ * @return true if the trigger fired this call (first-time activation),
+ *         false otherwise (no flags set, OR latch already consumed).
+ *         Production callers ignore the return; tests use it to assert
+ *         exactly-once behaviour across repeated invocations.
+ */
+bool MaybeTriggerChainRebuild(CChainState& chainstate,
+                              const std::string& datadir,
+                              std::atomic<bool>* running_flag);
+
+/**
+ * v4.3.2 (M1 fix) — TEST-ONLY: reset the static-once latch inside
+ * MaybeTriggerChainRebuild so a single test process can drive the
+ * helper through multiple independent scenarios. Production code MUST
+ * NOT call this; the latch is intentionally process-lifetime to
+ * prevent a thrashing recovery loop.
+ */
+void ResetMaybeTriggerLatchForTesting();
 
 } // namespace Dilithion
 
