@@ -28,17 +28,48 @@ class CTxMemPool;  // BUG #109 FIX: Mempool for confirmed TX cleanup
  * Used by CChainState::m_setBlockIndexCandidates to maintain a strict
  * weak ordering with the heaviest-work block first. Tiebreakers (in order):
  *   1. Strictly greater chain work (ChainWorkGreaterThan)
- *   2. Lower nSequenceId (earlier insertion order — deterministic)
- *   3. Pointer comparison (deterministic within a process)
+ *   2. v4.3.3 F9: Lower vdfOutput on equal-work DilV siblings
+ *      (consensus-deterministic; matches legacy ShouldReplaceVDFTip)
+ *   3. Lower nSequenceId (earlier local insertion order — fallback)
+ *   4. Pointer comparison (deterministic within a process)
  *
  * Mirrors upstream Bitcoin Core's `CBlockIndexWorkComparator` in
- * `validation.cpp` v28. The selection algorithm pops the front of the
- * set; that block is the candidate-best leaf for the next reorg.
+ * `validation.cpp` v28 PLUS the DilV-specific VDF tiebreak from the
+ * legacy path. The selection algorithm pops the front of the set; that
+ * block is the candidate-best leaf for the next reorg.
+ *
+ * v4.3.3 F9 (canary 4 mid-deploy fix, 2026-05-04):
+ * Before F9 the comparator only used upstream's tiebreak (chainwork →
+ * nSequenceId → pointer). nSequenceId is assigned at AddBlockIndex time
+ * by LOCAL processing order, so two nodes that received sibling blocks
+ * in different order would assign different nSequenceIds and pick
+ * different siblings on equal-chainwork forks. Legacy DilV's
+ * ShouldReplaceVDFTip (chain.cpp:226-260) uses pindex->header.vdfOutput
+ * (block-intrinsic, consensus-deterministic) — every node agrees on the
+ * winner. F9 ports that rule into the comparator BEFORE the nSequenceId
+ * fallback so port and legacy paths agree on equal-work sibling
+ * selection. NULL-safe for DIL chain (RandomX, no VDF) and for pre-VDF
+ * activation DilV blocks: if either vdfOutput is null/zero, comparator
+ * falls through to nSequenceId.
+ *
+ * Note: F9 is only the ORDERING rule. Legacy `ShouldReplaceVDFTip` also
+ * has a temporal grace-period gate (m_vdfTipAcceptTime check) that
+ * prevents oscillation after a tip is accepted. That's a separate
+ * concern handled at activation logic, not at the comparator level.
  */
 struct CBlockIndexWorkComparator {
     bool operator()(const CBlockIndex* a, const CBlockIndex* b) const {
         if (ChainWorkGreaterThan(a->nChainWork, b->nChainWork)) return true;
         if (ChainWorkGreaterThan(b->nChainWork, a->nChainWork)) return false;
+        // v4.3.3 F9: VDF lowest-output tiebreak. Block-intrinsic and
+        // consensus-deterministic. Skipped on null vdfOutput (DIL chain
+        // or pre-VDF DilV) so legacy non-VDF behavior is unchanged.
+        const uint256& vdfA = a->header.vdfOutput;
+        const uint256& vdfB = b->header.vdfOutput;
+        if (!vdfA.IsNull() && !vdfB.IsNull()) {
+            if (HashLessThan(vdfA, vdfB)) return true;
+            if (HashLessThan(vdfB, vdfA)) return false;
+        }
         if (a->nSequenceId < b->nSequenceId) return true;
         if (b->nSequenceId < a->nSequenceId) return false;
         // Phase 5 red-team CONCERN fix: raw `a < b` between separately-

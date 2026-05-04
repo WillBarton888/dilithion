@@ -418,16 +418,23 @@ void test_diff_h4_fork_and_rejoin()
 }
 
 // ---------------------------------------------------------------------------
-// Happy path H5 — equal-work tiebreak — KNOWN-DIVERGENT (deferred H1).
+// Happy path H5 — equal-work tiebreak — POST-F9: NO DIVERGENCE.
 // ---------------------------------------------------------------------------
 void test_diff_h5_equal_work_tiebreak_known_divergent()
 {
-    std::cout << "  test_diff_h5_equal_work_tiebreak (EXPECT_DIVERGENCE_KNOWN)" << std::endl;
-    // Legacy Case 2.5 uses ShouldReplaceVDFTip (a VDF-output-derived
-    // tiebreak); port path uses the CBlockIndexWorkComparator's
-    // nSequenceId/std::less<T*> tiebreak. Different rules → potentially
-    // different choices on equal-work siblings. Tracked as deferred H1
-    // (chain_selector_impl.cpp:179, separate branch).
+    std::cout << "  test_diff_h5_equal_work_tiebreak (EXPECT_NO_DIVERGENCE — F9)" << std::endl;
+    // Pre-F9: legacy used ShouldReplaceVDFTip (VDF-output-derived) while
+    // port used CBlockIndexWorkComparator's nSequenceId/std::less<T*>
+    // tiebreak. Different rules → divergence.
+    //
+    // Post-F9 (v4.3.3): the port comparator now ALSO uses VDF lowest-
+    // output as the equal-work tiebreak (chain.h:38-50). Both paths
+    // agree on equal-work sibling selection.
+    //
+    // This test now constructs siblings with explicit vdfOutput values
+    // and asserts that under the F9 comparator, the lower-vdfOutput
+    // sibling is selected. If F9 is removed, this test will start
+    // diverging or returning the wrong sibling — caught here.
 
     auto seed = [](CChainState& cs) {
         BuildLinearChain(cs, 0x90, 3);
@@ -435,23 +442,43 @@ void test_diff_h5_equal_work_tiebreak_known_divergent()
         std::memset(hTip.data, 0, 32);
         hTip.data[0] = 0x90; hTip.data[1] = 3;
         CBlockIndex* tip = cs.GetBlockIndex(hTip);
+
+        // Sibling X: chain_id 0x91, vdfOutput byte0=0x10 (LOWER).
         auto pX = MakeIdx(0x91, tip, 4,
                           CBlockIndex::BLOCK_VALID_TRANSACTIONS |
                           CBlockIndex::BLOCK_HAVE_DATA, 100, 1000);
+        std::memset(pX->header.vdfOutput.data, 0, 32);
+        pX->header.vdfOutput.data[0] = 0x10;  // lower in big-endian
         AddBI(cs, std::move(pX));
+
+        // Sibling Y: chain_id 0x92, vdfOutput byte0=0x80 (HIGHER).
         auto pY = MakeIdx(0x92, tip, 4,
                           CBlockIndex::BLOCK_VALID_TRANSACTIONS |
                           CBlockIndex::BLOCK_HAVE_DATA, 100, 2000);
+        std::memset(pY->header.vdfOutput.data, 0, 32);
+        pY->header.vdfOutput.data[0] = 0x80;
         AddBI(cs, std::move(pY));
+
         cs.RecomputeCandidates();
     };
     CChainState legacy, port_;
     seed(legacy);
     seed(port_);
-    ObserveHashPair(legacy.FindMostWorkChainImpl(),
-                    port_.FindMostWorkChainImpl(),
-                    /*expect_divergence=*/true,
-                    "H5 equal-work tiebreak (known H1 deferred)");
+
+    // F9: comparator picks LOWER vdfOutput. X has byte0=0x10, Y has 0x80
+    // → X is "smaller" big-endian-wise → X is selected.
+    CBlockIndex* legacy_pick = legacy.FindMostWorkChainImpl();
+    CBlockIndex* port_pick   = port_.FindMostWorkChainImpl();
+
+    // Both paths must converge on the lower-vdfOutput sibling (X).
+    ObserveHashPair(legacy_pick, port_pick,
+                    /*expect_divergence=*/false,
+                    "H5 equal-work VDF tiebreak (post-F9 convergence)");
+    // Sanity: confirm port path picked X (lower-vdfOutput).
+    if (port_pick) {
+        assert(port_pick->header.vdfOutput.data[0] == 0x10
+               && "F9 must select the LOWER vdfOutput sibling");
+    }
 }
 
 // ---------------------------------------------------------------------------
