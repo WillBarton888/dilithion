@@ -38,7 +38,10 @@ std::unique_ptr<CBlockIndex> MakeGenesisLikeIndex(uint8_t hash_seed)
     pindex->pprev = nullptr;
     pindex->nHeight = 0;
     pindex->nChainWork = uint256();
-    pindex->nStatus = CBlockIndex::BLOCK_VALID_TRANSACTIONS;
+    // v4.3.3 F5: post-F1 layout, BLOCK_VALID_TRANSACTIONS without HAVE_DATA
+    // is no longer "real": OR in BLOCK_HAVE_DATA to encode the production
+    // invariant (a validated block always has data on disk).
+    pindex->nStatus = CBlockIndex::BLOCK_VALID_TRANSACTIONS | CBlockIndex::BLOCK_HAVE_DATA;
     pindex->nSequenceId = 1;
     // Synthetic deterministic hash: byte 0 = seed, rest zeros.
     std::memset(pindex->phashBlock.data, 0, 32);
@@ -145,6 +148,18 @@ CBlockHeader MakeVDFHeader(const uint256& parent_hash, uint32_t nBits, uint32_t 
 
 // Same shape as MakeGenesisLikeIndex above but explicitly named for
 // pre-validation usage with arbitrary status flags.
+//
+// v4.3.3 F5: a synthetic block whose level field is >= BLOCK_VALID_TRANSACTIONS
+// in real production state has been validated AND has data on disk —
+// upstream Bitcoin Core's invariant: BLOCK_VALID_TRANSACTIONS is set by
+// ReceivedBlockTransactions which also ORs BLOCK_HAVE_DATA. Pre-F1's
+// mask=0x1F overlap encoded this implicitly via the predicate; post-F1
+// the bits are disjoint and the test setup must encode it explicitly.
+// We auto-OR BLOCK_HAVE_DATA whenever the caller supplied a level
+// >= BLOCK_VALID_TRANSACTIONS so existing tests keep their original
+// semantic intent (a "fully validated leaf") without 75 call-site edits.
+// Tests that DELIBERATELY want a header-only entry pass status=BLOCK_VALID_HEADER
+// (level==1) and remain unaffected.
 std::unique_ptr<CBlockIndex> MakePreValidationLeaf(uint8_t hash_seed,
                                                    CBlockIndex* parent,
                                                    int height,
@@ -156,6 +171,9 @@ std::unique_ptr<CBlockIndex> MakePreValidationLeaf(uint8_t hash_seed,
     pindex->pprev = parent;
     pindex->nHeight = height;
     pindex->nStatus = status;
+    if ((status & CBlockIndex::BLOCK_VALID_MASK) >= CBlockIndex::BLOCK_VALID_TRANSACTIONS) {
+        pindex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
+    }
     pindex->nSequenceId = seq_id;
     std::memset(pindex->phashBlock.data, 0, 32);
     pindex->phashBlock.data[0] = hash_seed;

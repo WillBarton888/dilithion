@@ -2425,30 +2425,83 @@ CBlockIndex* CChainState::FindMostWorkChainImpl()
     // invalid (BLOCK_FAILED_VALID/CHILD), mark the leaf itself
     // BLOCK_FAILED_CHILD, drop it from candidates, and retry. Mirrors
     // upstream `Chainstate::FindMostWorkChain`.
+    //
+    // v4.3.3 F5 (audit modality 1 I3 / modality 2 HIGH-1): also check
+    // BLOCK_HAVE_DATA on every intermediate ancestor. Pre-fix the walk
+    // only checked IsInvalid() — header-only ancestors (BLOCK_VALID_HEADER
+    // with no BLOCK_HAVE_DATA, no BLOCK_FAILED_*) silently passed and the
+    // candidate was returned to ActivateBestChainStep, which then attempted
+    // the reorg and failed mid-connect on the missing data block (canary 3
+    // LDN 2026-05-04). Upstream Bitcoin Core enforces this exact gate at
+    // validation.cpp:3128-3157.
+    //
+    // Stop conditions for the walk:
+    //   * pancestor == nullptr     — walked off the start of mapBlockIndex; leaf is fine
+    //   * pancestor == pindexTip   — reached the active tip (have data by construction)
+    //   * pancestor->IsOnMainChain() — reached an ancestor of the active tip
+    //   * pancestor->nHeight == 0  — genesis (no parent; always materialized at startup)
+    //
+    // Failure handling differs from invalid-ancestor:
+    //   * Invalid ancestor → MarkBlockAsFailed equivalent (set BLOCK_FAILED_CHILD on leaf,
+    //     erase from candidates). The block is permanently disqualified.
+    //   * Missing-data ancestor → erase from candidates ONLY. Do NOT mark FAILED_CHILD
+    //     because the missing data may still arrive via P2P, at which point the leaf
+    //     should become re-eligible. Mirrors upstream's "drop, don't fail" behavior.
     while (!m_setBlockIndexCandidates.empty()) {
         auto it = m_setBlockIndexCandidates.begin();
         CBlockIndex* pindexNew = *it;
 
-        // Walk ancestry looking for any invalid block.
+        // Walk ancestry looking for any invalid OR missing-data ancestor.
+        // The IsInvalid() check applies to the full chain INCLUSIVE of
+        // pindexNew (a leaf marked FAILED_VALID must not be returned).
+        // The BLOCK_HAVE_DATA check applies to INTERMEDIATES only —
+        // pindexNew itself is gated upstream by IsBlockACandidateForActivation
+        // and (post-F1) the predicate's literal-level semantics.
         bool fInvalidAncestor = false;
+        bool fMissingData = false;
         for (CBlockIndex* pancestor = pindexNew; pancestor; pancestor = pancestor->pprev) {
             if (pancestor->IsInvalid()) {
                 fInvalidAncestor = true;
                 break;
             }
+            // Stop walking once we reach the active chain — those blocks
+            // are guaranteed to have data on disk by construction.
+            if (pancestor == pindexTip) break;
+            if (pancestor->IsOnMainChain()) break;
+            // Genesis exemption: nHeight==0 has no parent block content
+            // requirement we care about for a reorg plan (genesis is
+            // materialized at startup, not via ConnectTip).
+            if (pancestor->nHeight == 0) break;
+            // F5 gate: every INTERMEDIATE (i.e., not the leaf itself) must
+            // have BLOCK_HAVE_DATA. Skip the leaf — pindexNew's data
+            // requirement is enforced by F3's pre-validation pass at
+            // ActivateBestChainStep entry, which reads every block in the
+            // disconnect+connect plan including the leaf.
+            if (pancestor != pindexNew &&
+                !(pancestor->nStatus & CBlockIndex::BLOCK_HAVE_DATA)) {
+                fMissingData = true;
+                break;
+            }
         }
 
-        if (!fInvalidAncestor) {
+        if (!fInvalidAncestor && !fMissingData) {
             return pindexNew;
         }
 
-        // Mark this leaf as BLOCK_FAILED_CHILD (unless it's already
-        // BLOCK_FAILED_VALID itself) and drop it from candidates. Retry
-        // with the next-best candidate.
-        if (!pindexNew->IsInvalid()) {
-            pindexNew->nStatus |= CBlockIndex::BLOCK_FAILED_CHILD;
+        if (fInvalidAncestor) {
+            // Mark this leaf as BLOCK_FAILED_CHILD (unless it's already
+            // BLOCK_FAILED_VALID itself) and drop it from candidates. Retry
+            // with the next-best candidate.
+            if (!pindexNew->IsInvalid()) {
+                pindexNew->nStatus |= CBlockIndex::BLOCK_FAILED_CHILD;
+            }
+            m_setBlockIndexCandidates.erase(it);
+        } else {
+            // fMissingData: drop without marking failed — data may still
+            // arrive. RecomputeCandidates after a successful disk-write
+            // re-adds the leaf. Mirrors upstream validation.cpp:3142-3155.
+            m_setBlockIndexCandidates.erase(it);
         }
-        m_setBlockIndexCandidates.erase(it);
     }
 
     return nullptr;
