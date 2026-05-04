@@ -1667,7 +1667,13 @@ bool CChainState::ConnectTip(CBlockIndex* pindex, const CBlock& block, bool skip
     }
 
     // Step 3: Mark block as connected
-    pindex->nStatus |= CBlockIndex::BLOCK_VALID_CHAIN;
+    // v4.3.3 F2 (audit modality 2 HIGH-4): also OR in BLOCK_HAVE_DATA.
+    // Upstream Bitcoin Core's ReceivedBlockTransactions sets BLOCK_HAVE_DATA
+    // at disk-write of the full block; pre-fix, port-path blocks could reach
+    // ConnectTip via header-first arrival paths without the flag ever being
+    // set, leaving HaveData() permanently false. F5's per-ancestor data gate
+    // depends on this flag being authoritative once a block is connected.
+    pindex->nStatus |= CBlockIndex::BLOCK_VALID_CHAIN | CBlockIndex::BLOCK_HAVE_DATA;
 
     // BUG #56 FIX: Notify block connect callbacks (wallet update)
     // NOTE: We don't hold cs_main during callbacks to prevent deadlock
