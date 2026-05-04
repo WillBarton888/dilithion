@@ -520,6 +520,48 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
                     break;
                 }
 
+                // v4.3.3 F10 (companion to F9 — VDF tiebreak grace-period gate).
+                // F9's comparator picks the lower-vdfOutput sibling on equal
+                // chainwork. F10 stops VDF replacement once the grace window
+                // has expired. Mirrors legacy ShouldReplaceVDFTip's grace-
+                // period check (chain.cpp:300-309). Without F10, the port
+                // path would flap indefinitely as later vdfOutputs propagate,
+                // even when the network has settled on a tip at this height.
+                //
+                // Conditions for the gate to fire:
+                //   * Both tip and candidate have non-null vdfOutput
+                //     (skips DIL chain and pre-VDF DilV blocks).
+                //   * Same height + same parent (a sibling).
+                //   * Equal chainwork (chainwork-greater-than is the
+                //     primary path; equal-work is the tiebreak case).
+                //   * m_vdfTipAcceptHeight matches current tip height
+                //     (timestamp was anchored at this height).
+                //   * Elapsed > vdfLotteryGracePeriod.
+                // When all conditions hold: KEEP current tip; do NOT replace.
+                if (pindexTip != nullptr &&
+                    Dilithion::g_chainParams &&
+                    pindexMostWork->nHeight == pindexTip->nHeight &&
+                    pindexMostWork->pprev == pindexTip->pprev &&
+                    !pindexMostWork->header.vdfOutput.IsNull() &&
+                    !pindexTip->header.vdfOutput.IsNull() &&
+                    !ChainWorkGreaterThan(pindexMostWork->nChainWork,
+                                          pindexTip->nChainWork) &&
+                    !ChainWorkGreaterThan(pindexTip->nChainWork,
+                                          pindexMostWork->nChainWork) &&
+                    m_vdfTipAcceptHeight == pindexTip->nHeight) {
+                    const auto now = std::chrono::steady_clock::now();
+                    const auto elapsed =
+                        std::chrono::duration_cast<std::chrono::seconds>(
+                            now - m_vdfTipAcceptTime).count();
+                    if (elapsed > Dilithion::g_chainParams->vdfLotteryGracePeriod) {
+                        // Grace expired. Keep current tip despite F9's
+                        // "lower vdfOutput wins" ordering. The candidate
+                        // stays in m_setBlockIndexCandidates — future
+                        // chainwork-greater arrivals can still reorg.
+                        break;
+                    }
+                }
+
                 // Phase 5 BLOCKER 3 fix (red-team audit 2026-04-26):
                 // checkpoint validation must cover the FULL ancestry from
                 // the current tip up to pindexMostWork, not just the
@@ -2879,6 +2921,19 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
         // Advance tip after each successful connect.
         pindexTip = p;
         m_cachedHeight.store(p->nHeight, std::memory_order_release);
+
+        // v4.3.3 F10: anchor the VDF grace-period clock when we arrive
+        // at a new tip height. Mirrors legacy chain.cpp:622-627 which
+        // does the same in Case 2 (extend-by-one). For multi-block
+        // reorgs the FINAL connect-loop iteration anchors the timestamp
+        // at the post-reorg tip height — exactly what F10's grace gate
+        // expects: "first arrived at THIS height at THIS time."
+        if (p->nVersion >= 4 &&
+            Dilithion::g_chainParams &&
+            p->nHeight >= Dilithion::g_chainParams->vdfLotteryActivationHeight) {
+            m_vdfTipAcceptTime = std::chrono::steady_clock::now();
+            m_vdfTipAcceptHeight = p->nHeight;
+        }
         // v4.3.1: persist DB best-block on every tip mutation. Same rationale
         // as disconnect-loop write above. With per-step writes, the tail
         // post-loop write below is redundant on success but harmless.
