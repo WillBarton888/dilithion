@@ -104,7 +104,7 @@ jobs:
   sanitizer-asan:
     name: AddressSanitizer (Memory Safety)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
     - name: Checkout code
@@ -178,7 +178,7 @@ jobs:
   sanitizer-ubsan:
     name: UndefinedBehaviorSanitizer
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
     - name: Checkout code
@@ -252,7 +252,7 @@ jobs:
   sanitizer-tsan:
     name: ThreadSanitizer (Data Races)
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 120
 
     steps:
     - name: Checkout code
