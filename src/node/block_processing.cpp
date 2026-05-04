@@ -1076,7 +1076,11 @@ BlockProcessResult ProcessNewBlock(
     // =========================================================================
     auto pblockIndex = std::make_unique<CBlockIndex>(block);
     pblockIndex->phashBlock = blockHash;
-    pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
+    // v4.3.3 F1: OR-merge instead of assign. The default-constructed
+    // CBlockIndex has nStatus=0 so this is functionally identical here,
+    // but mirrors upstream Bitcoin Core's accumulating-flag idiom and
+    // is robust against any future code path that might pre-set bits.
+    pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
 
 
 

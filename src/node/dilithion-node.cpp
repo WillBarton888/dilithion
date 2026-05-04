@@ -5662,7 +5662,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // HIGH-C001 FIX: Use smart pointer for automatic RAII cleanup
             auto pblockIndex = std::make_unique<CBlockIndex>(block);
             pblockIndex->phashBlock = blockHash;
-            pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
+            // v4.3.3 F1: OR-merge (mirrors upstream accumulating-flag idiom).
+            pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
 
             // Link to parent block
             pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
@@ -5889,7 +5890,8 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // Create block index
             auto pblockIndex = std::make_unique<CBlockIndex>(block);
             pblockIndex->phashBlock = blockHash;
-            pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
+            // v4.3.3 F1: OR-merge (mirrors upstream accumulating-flag idiom).
+            pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
             pblockIndex->pprev = g_chainstate.GetBlockIndex(block.hashPrevBlock);
             if (!pblockIndex->pprev) {
                 std::cerr << "[VDF] ERROR: Cannot find parent block" << std::endl;

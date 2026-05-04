@@ -353,7 +353,8 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
         // Create block index
         auto pblockIndex = std::make_unique<CBlockIndex>(block);
         pblockIndex->phashBlock = blockHash;
-        pblockIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
+        // v4.3.3 F1: OR-merge (mirrors upstream accumulating-flag idiom).
+        pblockIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
 
         // Link to parent
         pblockIndex->pprev = m_chainstate.GetBlockIndex(block.hashPrevBlock);
@@ -459,7 +460,8 @@ bool CBlockValidationQueue::ProcessBlock(const QueuedBlock& queued_block) {
                     // Create block index for orphan
                     auto pOrphanIndex = std::make_unique<CBlockIndex>(orphanBlock);
                     pOrphanIndex->phashBlock = orphanBlockHash;
-                    pOrphanIndex->nStatus = CBlockIndex::BLOCK_HAVE_DATA;
+                    // v4.3.3 F1: OR-merge (mirrors upstream accumulating-flag idiom).
+                    pOrphanIndex->nStatus |= CBlockIndex::BLOCK_HAVE_DATA;
                     pOrphanIndex->pprev = pOrphanParent;
                     pOrphanIndex->nHeight = orphanHeight;
                     pOrphanIndex->BuildChainWork();

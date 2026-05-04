@@ -69,6 +69,20 @@ public:
     CBlockIndex* GetAncestor(int height);
     const CBlockIndex* GetAncestor(int height) const;
 
+    // v4.3.3 F1 (audit modality 1 I4 / modality 2 LOW-15): bit-layout fix.
+    // Pre-fix: BLOCK_VALID_MASK = 0x1F (5 bits). The mask covered the slot
+    // BLOCK_HAVE_DATA = 0x08 was assigned to, so a block with only the
+    // BLOCK_HAVE_DATA bit set evaluated to validLevel == 8 ≥ 3 ==
+    // BLOCK_VALID_TRANSACTIONS, accidentally satisfying
+    // IsBlockACandidateForActivation when the block had only data, no
+    // validation. This let header-only-with-stale-HAVE-DATA leaves into
+    // the candidate set; combined with the missing per-ancestor data gate
+    // (F5), it produced the canary-3 chain-truncation incident.
+    //
+    // Post-fix: BLOCK_VALID_MASK = 0x07 (3 bits) — disjoint from data /
+    // failure flags. validLevel literally is 0..5 again. Mirrors upstream
+    // Bitcoin Core's `chain.h` enum (BLOCK_VALID_MASK covers 1|2|3|4|5,
+    // i.e. the level field, NOT the higher flag bits).
     enum BlockStatus : uint32_t {
         BLOCK_VALID_UNKNOWN      = 0,
         BLOCK_VALID_HEADER       = 1,
@@ -76,17 +90,19 @@ public:
         BLOCK_VALID_TRANSACTIONS = 3,
         BLOCK_VALID_CHAIN        = 4,
         BLOCK_VALID_SCRIPTS      = 5,
-        BLOCK_VALID_MASK         = 31,
-        BLOCK_HAVE_DATA          = 8,
-        BLOCK_HAVE_UNDO          = 16,
+        // v4.3.3 F1: 0x07 covers values 0..5 only; HAVE/FAILED flags are
+        // now strictly outside the level field.
+        BLOCK_VALID_MASK         = 0x07,
+        BLOCK_HAVE_DATA          = 0x08,
+        BLOCK_HAVE_UNDO          = 0x10,
 
         // BUG #255: Failed block tracking (Bitcoin-style)
         // These flags prevent infinite retry loops for invalid blocks.
         // IMPORTANT: Only set during authoritative validation (ConnectTip)
         // where parent is on active chain and state is correct.
         // NEVER set during ProcessNewBlock, async queue, or fork staging.
-        BLOCK_FAILED_VALID       = 32,   // Block failed validation in ConnectTip
-        BLOCK_FAILED_CHILD       = 64,   // Descends from a BLOCK_FAILED_VALID block
+        BLOCK_FAILED_VALID       = 0x20,  // Block failed validation in ConnectTip
+        BLOCK_FAILED_CHILD       = 0x40,  // Descends from a BLOCK_FAILED_VALID block
         BLOCK_FAILED_MASK        = BLOCK_FAILED_VALID | BLOCK_FAILED_CHILD,
     };
 
