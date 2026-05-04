@@ -733,7 +733,8 @@ bool CChainState::ActivateBestChain(CBlockIndex* pindexNew, const CBlock& block,
             std::cerr << "[CRITICAL] Case 2.5 ConnectTip failed. "
                       << "Triggering auto_rebuild (no in-place rollback — Patch B retired in PR5.4)."
                       << std::endl;
-            m_chain_needs_rebuild.store(true);
+            // v4.3.3 F16: Case 2.5 ConnectTip failure → ConnectTipFailure cause.
+            FlagChainRebuild(ChainRebuildReason::ConnectTipFailure);
             return false;
         }
 
@@ -2274,7 +2275,8 @@ void CChainState::RecordUndoFailure(const uint256& blockHash, int height) {
                   << " height=" << height
                   << " consecutive=" << failures
                   << ". Triggering auto_rebuild." << std::endl;
-        m_chain_needs_rebuild.store(true);
+        // v4.3.3 F16: BUG #277 persistent UndoBlock failure → UndoFailure cause.
+        FlagChainRebuild(ChainRebuildReason::UndoFailure);
     }
 }
 
@@ -2286,6 +2288,14 @@ void CChainState::ResetUndoFailureCounter() {
 
 void CChainState::ClearChainRebuildFlag() {
     m_chain_needs_rebuild.store(false);
+    // v4.3.3 F17 (Layer-3 round 3 INFO-2): setter symmetry. The reason
+    // was set by FlagChainRebuild; on clear, reset to default UndoFailure
+    // so a future fire that hits a default-only site (i.e., one of the
+    // legacy `m_chain_needs_rebuild.store(true)` sites that hasn't been
+    // converted to FlagChainRebuild) doesn't read back a stale prior
+    // reason. No active caller relies on this today; defensive symmetry.
+    m_chain_rebuild_reason.store(ChainRebuildReason::UndoFailure,
+                                  std::memory_order_release);
     ResetUndoFailureCounter();
 }
 
@@ -2829,7 +2839,8 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
             std::cerr << "[CRITICAL] DisconnectTip failure mid-reorg — "
                       << (any_disconnect_committed ? "chain partially rewound. " : "")
                       << "Triggering auto_rebuild." << std::endl;
-            m_chain_needs_rebuild.store(true);
+            // v4.3.3 F16: DisconnectTip mid-reorg → DisconnectTipFailure cause.
+            FlagChainRebuild(ChainRebuildReason::DisconnectTipFailure);
             return false;
         }
         any_disconnect_committed = true;
@@ -2859,7 +2870,8 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
                           << "failed at disconnect step h=" << pindexTip->nHeight
                           << ". Triggering auto_rebuild." << std::endl;
                 if (m_reorgWAL) m_reorgWAL->AbortReorg();
-                m_chain_needs_rebuild.store(true);
+                // v4.3.3 F16: WriteBestBlock failure → WriteBestBlockFailure cause.
+                FlagChainRebuild(ChainRebuildReason::WriteBestBlockFailure);
                 return false;
             }
         }
@@ -2887,7 +2899,8 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
                 if (m_reorgWAL) m_reorgWAL->AbortReorg();
                 if (any_disconnect_committed) {
                     // BLOCKER #1 fix: disconnects committed; chain truncated.
-                    m_chain_needs_rebuild.store(true);
+                    // v4.3.3 F16: ReadBlock failure → ReadBlockFailure cause.
+                    FlagChainRebuild(ChainRebuildReason::ReadBlockFailure);
                 }
                 return false;
             }
@@ -2904,7 +2917,8 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
                     std::cerr << "[CRITICAL] ReadBlock failed after committing "
                               << disconnectedCount << " disconnect(s). Triggering auto_rebuild."
                               << std::endl;
-                    m_chain_needs_rebuild.store(true);
+                    // v4.3.3 F16: ReadBlock failure → ReadBlockFailure cause.
+                    FlagChainRebuild(ChainRebuildReason::ReadBlockFailure);
                 }
                 return false;
             }
@@ -2934,7 +2948,8 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
                 std::cerr << "[CRITICAL] ConnectTip failed after committing "
                           << disconnectedCount << " disconnect(s). Chain truncated; "
                           << "triggering auto_rebuild." << std::endl;
-                m_chain_needs_rebuild.store(true);
+                // v4.3.3 F16: ConnectTip-after-disconnect → ConnectTipFailure cause.
+                FlagChainRebuild(ChainRebuildReason::ConnectTipFailure);
                 return false;
             }
             // Pure no-disconnect-yet failure (e.g., genesis activation
@@ -2965,7 +2980,8 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
                           << "failed at connect step h=" << p->nHeight
                           << ". Triggering auto_rebuild." << std::endl;
                 if (m_reorgWAL) m_reorgWAL->AbortReorg();
-                m_chain_needs_rebuild.store(true);
+                // v4.3.3 F16: WriteBestBlock connect-step failure.
+                FlagChainRebuild(ChainRebuildReason::WriteBestBlockFailure);
                 return false;
             }
         }

@@ -178,8 +178,17 @@ public:
     // with the flag. First-set-wins semantics: M1 helper's once-latch
     // means only the first cause to fire is reported.
     enum class ChainRebuildReason : uint32_t {
-        UndoFailure    = 0,  // BUG #277 / v4.0.19 / v4.3.1 BLOCKER #1
-        DepthRejection = 1,  // v4.3.3 F8 (MAX_REORG_DEPTH exceeded)
+        UndoFailure          = 0,  // BUG #277 persistent UndoBlock failure (chain.cpp:2257)
+        DepthRejection       = 1,  // v4.3.3 F8: MAX_REORG_DEPTH exceeded (depth ≠ invalid)
+        // v4.3.3 F16 (Layer-3 round 3 INFO-1): pre-F16 the ConnectTip-failure
+        // and WriteBestBlock-failure sites in chain.cpp were mislabeled
+        // "Persistent UndoBlock failure" by the M1 helper. F16 introduces
+        // distinct cause classes so operator-facing banners are accurate
+        // for each failure mode.
+        ConnectTipFailure    = 2,  // chain.cpp:716/2812/2917 ConnectTip after disconnect/reorg
+        DisconnectTipFailure = 3,  // chain.cpp:2842 DisconnectTip mid-reorg failure
+        ReadBlockFailure     = 4,  // chain.cpp:2870/2887 ReadBlock fail with disconnects committed
+        WriteBestBlockFailure = 5, // chain.cpp:2956 per-step WriteBestBlock failure (BLOCKER #1)
     };
 private:
     std::atomic<ChainRebuildReason> m_chain_rebuild_reason{
