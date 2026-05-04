@@ -566,6 +566,20 @@ public:
     void RecomputeCandidates();
 
     /**
+     * v4.3.3 F6 (audit modality 2 HIGH-5): prune the candidate set of any
+     * entry whose chainwork is strictly less than the current tip's. Mirrors
+     * upstream Bitcoin Core's `PruneBlockIndexCandidates` at validation.cpp:3164.
+     * Called after each successful tip activation in ActivateBestChainStep.
+     *
+     * Bounds memory growth (without it, every fork sibling and its leaves
+     * stay in the candidate set forever) and ensures FindMostWorkChainImpl's
+     * comparator-walk only considers entries that could actually be selected.
+     *
+     * Never erases the active tip itself.
+     */
+    void PruneBlockIndexCandidates();
+
+    /**
      * Phase 5: predicate — pindex is a leaf, has BLOCK_VALID_TRANSACTIONS,
      * is not invalid, and has more work than current tip.
      */

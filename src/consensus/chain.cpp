@@ -2336,6 +2336,33 @@ void CChainState::RecomputeCandidates()
     }
 }
 
+void CChainState::PruneBlockIndexCandidates()
+{
+    std::lock_guard<std::recursive_mutex> lock(cs_main);
+
+    // v4.3.3 F6 (audit modality 2 HIGH-5): mirror upstream Bitcoin Core
+    // validation.cpp:3164-3173. After a successful tip activation, any
+    // candidate with strictly less work than the new tip can never be
+    // selected (FindMostWorkChainImpl returns the heaviest), so erase it
+    // to bound memory and avoid re-walking it on every header receipt.
+    //
+    // Do NOT erase the active tip itself — it stays in the set so the
+    // next ActivateBestChain call's "no better candidate" path returns
+    // the tip cleanly (FindMostWorkChainImpl returns pindexTip and the
+    // outer loop short-circuits via pindexMostWork == pindexTip).
+    if (!pindexTip) return;
+    for (auto it = m_setBlockIndexCandidates.begin();
+         it != m_setBlockIndexCandidates.end(); ) {
+        CBlockIndex* p = *it;
+        if (p != pindexTip &&
+            ChainWorkGreaterThan(pindexTip->nChainWork, p->nChainWork)) {
+            it = m_setBlockIndexCandidates.erase(it);
+        } else {
+            ++it;
+        }
+    }
+}
+
 void CChainState::MarkBlockAsFailed(CBlockIndex* pindex)
 {
     if (!pindex) return;
@@ -2842,6 +2869,12 @@ bool CChainState::ActivateBestChainStep(CBlockIndex* pindexMostWork,
         }
         ++connectedCount;
         if (m_reorgWAL) m_reorgWAL->UpdateConnectProgress(connectedCount);
+        // v4.3.3 F6 (audit modality 2 HIGH-5): prune candidates whose work
+        // is strictly less than the new tip. Mirrors upstream Bitcoin Core
+        // validation.cpp:3244 calling PruneBlockIndexCandidates() after each
+        // successful step. Bounds memory; avoids re-walking stale leaves on
+        // every header receipt.
+        PruneBlockIndexCandidates();
     }
 
     // 8) Full reorg success — persist best block to disk.
