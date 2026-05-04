@@ -8305,8 +8305,20 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
             state.newMIKsToday = 0;
         }
 
-        // Check if this MIK has been attested before from this subnet
-        bool isRenewal = (state.knownMIKs.find(mikIdHex) != state.knownMIKs.end());
+        // The chain is the source of truth for "is this a known MIK." In-memory
+        // state.knownMIKs is just a per-/24 cross-restart cache and was the only
+        // signal until the 2026-05-03 outage exposed two failure modes:
+        //   (a) seed restarts wipe the map — returning miners look "new"
+        //   (b) miners on dynamic-IP carriers (PLDT, IIJ, etc.) appear from a
+        //       different /24 each session and bypass the cache hit
+        // Both are rate-limited even though their MIK is permanently registered
+        // on-chain. Consult the chain first; the in-memory map is the fallback.
+        std::array<uint8_t, 20> mikArr;
+        std::copy(mikIdentity.data, mikIdentity.data + 20, mikArr.begin());
+        bool isOnChain = g_node_context.mik_pubkey_cache &&
+                         g_node_context.mik_pubkey_cache->DbStillHasMIK(mikArr);
+        bool isRenewal = isOnChain ||
+                         (state.knownMIKs.find(mikIdHex) != state.knownMIKs.end());
 
         if (!isRenewal) {
             // New MIK for this subnet — apply rate limit
@@ -8324,7 +8336,8 @@ std::string CRPCServer::RPC_GetMIKAttestation(const std::string& params) {
                       << " today, limit: " << m_attestationMaxPerDay << ")" << std::endl;
         } else {
             std::cout << "[Attestation] Renewal for known MIK " << mikIdHex.substr(0, 12) << "..."
-                      << " from subnet " << subnetKey << ".* (bypassing rate limit)" << std::endl;
+                      << " from subnet " << subnetKey << ".* (bypassing rate limit, source="
+                      << (isOnChain ? "chain" : "cache") << ")" << std::endl;
         }
 
         // Record this MIK as known for this subnet

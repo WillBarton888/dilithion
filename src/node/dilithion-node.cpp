@@ -752,6 +752,23 @@ struct NodeConfig {
                     return false;
                 }
             }
+            else if (arg.find("--attestation-rate-limit=") == 0) {
+                // Max MIK attestations per /24 subnet per day (Sybil defense).
+                // Wired through SetAttestationRateLimit at startup. Was missing
+                // a parser block until 2026-05-04 — flag silently fell through
+                // to the unknown-arg handler.
+                try {
+                    int val = std::stoi(arg.substr(25));
+                    if (val < 1 || val > 100) {
+                        std::cerr << "Error: Invalid attestation-rate-limit (must be 1-100): " << arg << std::endl;
+                        return false;
+                    }
+                    attestation_rate_limit = val;
+                } catch (const std::exception& e) {
+                    std::cerr << "Error: Invalid attestation-rate-limit format: " << arg << std::endl;
+                    return false;
+                }
+            }
             else if (arg == "--usenewpeerman" || arg == "--usenewpeerman=1") {
                 // --usenewpeerman opt-in to the Bitcoin Core port PeerManager.
                 // Wired in Phase 6 PR6.5b.1a; full body work + dual-layer

@@ -745,7 +745,7 @@ struct NodeConfig {
             else if (arg.find("--attestation-rate-limit=") == 0) {
                 // Max MIK attestations per /24 subnet per day (Sybil defense)
                 try {
-                    int val = std::stoi(arg.substr(24));
+                    int val = std::stoi(arg.substr(25));
                     if (val < 1 || val > 100) {
                         std::cerr << "Error: Invalid attestation-rate-limit (must be 1-100): " << arg << std::endl;
                         return false;
