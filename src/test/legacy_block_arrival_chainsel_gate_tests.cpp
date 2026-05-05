@@ -38,13 +38,18 @@ public:
     bool ProcessNewBlock(std::shared_ptr<const CBlock> block,
                          bool force_processing,
                          bool* triggered_reorg) override {
+        (void)force_processing;
+        if (triggered_reorg != nullptr) {
+            *triggered_reorg = false;
+        }
         ++process_new_block_calls;
         if (block) {
             last_seen_block_hash = block->GetHash();
         } else {
             last_seen_block_hash = uint256();
         }
-        return m_inner->ProcessNewBlock(std::move(block), force_processing, triggered_reorg);
+        // This fixture is a routing gate: record arrival only, skip validation.
+        return true;
     }
 
     bool ProcessNewHeader(const CBlockHeader& header) override {
