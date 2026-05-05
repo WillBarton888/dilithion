@@ -179,34 +179,17 @@ private:
     // is caught by ProcessMessage's try/catch (UnknownMessage weight=1).
     bool HandleBlock(NodeId peer, CDataStream& vRecv);
 
-    // HandleGetData: deserialize the inv vector and validate. Empty inv is
-    // a no-op (matches upstream Bitcoin Core behavior — not misbehavior).
-    // For inv entries with type=MSG_BLOCK_INV, look up the hash via
-    // m_chain_selector.LookupBlockIndex(hash); unknown blocks tick scorer
-    // with MisbehaviorType::UnknownMessage weight=1. Outbound block
-    // payload responses are forbidden in this PR (PR6.5b.6 scope).
-    // Returns true on a structurally-valid getdata; under-length throws.
-    bool HandleGetData(NodeId peer, CDataStream& vRecv);
+    // HandleGetData declaration removed in v4.3.4 cut Block 2 — was never reached
+    // in production (Layer-3 H4 + audit gap-list G04).
 
-    // ===== ProcessMessage handlers (PR6.5b.2) =====
+    // ===== ProcessMessage handlers (PR6.5b.2 — partially retired in v4.3.4 cut Block 2) =====
     //
-    // Each handler follows the copy-state-out pattern: lock m_peers_mutex →
-    // look up CPeer* → mutate fields under lock → drop lock → call out
-    // (e.g., m_scorer). Under-length deserialization throws from CDataStream;
-    // ProcessMessage's dispatch wraps every handler in a try/catch and routes
-    // throws to the malformed-message scorer tick path.
-    bool HandleVersion(NodeId peer, CDataStream& vRecv);
-    bool HandleVerack(NodeId peer, CDataStream& vRecv);
-    bool HandlePing(NodeId peer, CDataStream& vRecv);
-    bool HandlePong(NodeId peer, CDataStream& vRecv);
-
-    // PR6.5b.3: headers handler. Deserializes header vector, delegates to
-    // CHeadersManager::ProcessHeadersWithDoSProtection via the
-    // g_node_context.headers_manager raw pointer pattern, then updates
-    // per-peer BlockDownloadState::n_best_known_height. SAFE: copy-state-out
-    // — every callout to m_scorer / g_node_context.headers_manager happens
-    // outside m_peers_mutex (and outside m_sync_state_mutex).
-    bool HandleHeaders(NodeId peer, CDataStream& vRecv);
+    // v4.3.4 Option C cut Block 2: HandleVersion / HandleVerack / HandlePing /
+    // HandlePong / HandleHeaders / HandleGetData declarations removed; their
+    // bodies were dead in production (Layer-3 H4 + audit gap-list G04, verified
+    // by Cursor pre-impl review). Only HandleBlock remains (declaration below)
+    // because it IS reachable via CConnman::ProcessQueuedMessage (Cursor errata
+    // E1). HandleBlock retires in Block 6 alongside dual-dispatch removal.
 
     // PR6.5b.3: headers-sync helpers. Each helper performs the full
     // copy-state-out pattern (read peer state under m_peers_mutex, drop;

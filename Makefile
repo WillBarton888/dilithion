@@ -672,25 +672,11 @@ peer_manager_dual_dispatch_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_d
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_dual_dispatch_tests built successfully$(COLOR_RESET)"
 
-# Phase 6 PR6.5b.2: ProcessMessage dispatch tests (9 cases). Verifies the
-# version/verack/ping/pong handler bodies, dispatch-chain semantics for
-# unknown commands and unknown peer ids, double-version misbehavior, and
-# pins the current "deferred handlers route to UnknownMessage" stub
-# behavior (so a regression in PR6.5b.3 / 6b.4 surfaces loudly).
-peer_manager_processmessage_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_processmessage_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@echo "$(COLOR_GREEN)✓ peer_manager_processmessage_tests built successfully$(COLOR_RESET)"
-
-# Phase 6 PR6.5b.3: headers-sync delegation + GetHeadersSyncPeer body tests
-# (7 cases). Verifies the dispatch arm for `headers`, GetHeadersSyncPeer
-# happy/empty paths, sync-peer election by best known height, rotation on
-# stall, pool-exhausted safety valve, and the SSOT split between
-# CPeerManager (sync-peer election) and CHeadersManager (sync state).
-peer_manager_headers_sync_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_headers_sync_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@echo "$(COLOR_GREEN)✓ peer_manager_headers_sync_tests built successfully$(COLOR_RESET)"
+# peer_manager_processmessage_tests + peer_manager_headers_sync_tests
+# REMOVED in v4.3.4 Option C cut Block 2: both targets exercised handlers
+# (HandleVersion/Verack/Ping/Pong/Headers/GetData) that had zero production
+# producers and were deleted in this Block. HandleBlock survives Block 2;
+# its coverage stays in peer_manager_block_download_tests.
 
 # Phase 6 PR6.5b.4: block-download accounting + block_fetcher fold-in tests
 # (8 cases). Verifies the dispatch arm for `block` and `getdata`,

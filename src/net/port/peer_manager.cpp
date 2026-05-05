@@ -530,6 +530,19 @@ void CPeerManager::RetryStaleBlocksLocked() {
 bool CPeerManager::ProcessMessage(NodeId peer,
                                   const std::string& strCommand,
                                   CDataStream& vRecv) {
+    // v4.3.4 Option C cut Block 2: dispatch shrunk to "block" only.
+    // The other handlers (version/verack/ping/pong/headers/getdata) were
+    // never live producers — Layer-3 H4 + audit gap-list G04 + Cursor pre-
+    // impl review (errata E1: HandleBlock IS reachable via
+    // CConnman::ProcessQueuedMessage; the other 6 handlers are dead).
+    // Block 6 of the architectural cut deletes HandleBlock + the
+    // ProcessQueuedMessage port branch alongside dual-dispatch retirement.
+    //
+    // For the 6 deleted commands, this dispatch SILENTLY returns false:
+    // those are valid p2p commands handled by legacy via the existing
+    // m_msg_handler dispatch in CConnman; ticking the port scorer for
+    // them would be incorrect (legacy is the production handler).
+
     // Unknown-peer guard: harmless race with disconnect. Drop silently
     // without scorer tick (no peer to score).
     {
@@ -541,294 +554,33 @@ bool CPeerManager::ProcessMessage(NodeId peer,
 
     // Wrap handler dispatch in try/catch so any CDataStream under-length
     // read (which throws std::runtime_error per serialize.h:144) becomes
-    // a malformed-message scorer tick. Per contract: route to existing
-    // UnknownMessage weight=1 (NOT a new MisbehaviorType enum value —
-    // that's interface-bump territory deferred to a later PR).
+    // a malformed-message scorer tick on the surviving "block" handler.
     try {
-        if (strCommand == "version") {
-            return HandleVersion(peer, vRecv);
-        } else if (strCommand == "verack") {
-            return HandleVerack(peer, vRecv);
-        } else if (strCommand == "ping") {
-            return HandlePing(peer, vRecv);
-        } else if (strCommand == "pong") {
-            return HandlePong(peer, vRecv);
-        } else if (strCommand == "headers") {
-            return HandleHeaders(peer, vRecv);
-        } else if (strCommand == "block") {
+        if (strCommand == "block") {
             return HandleBlock(peer, vRecv);
-        } else if (strCommand == "getdata") {
-            return HandleGetData(peer, vRecv);
         }
     } catch (const std::exception&) {
-        // Malformed message — scorer tick on UnknownMessage weight=1, then
-        // signal failure to caller. SAFE: no peers_mutex held here.
+        // Malformed block payload — scorer tick on UnknownMessage weight=1,
+        // then signal failure to caller. SAFE: no peers_mutex held here.
         m_scorer.Misbehaving(peer, ::dilithion::net::MisbehaviorType::UnknownMessage,
-                             "malformed message body");
+                             "malformed block message body");
         return false;
     }
 
-    // Unhandled command — scorer tick once, return false. PR6.5b.3 / 6b.4
-    // will replace this for headers/block/getdata/inv/etc. The
-    // deferred-handlers-still-stubbed test pins this behavior so a
-    // regression in 6b.3 surfaces loudly.
-    // SAFE: no peers_mutex held here.
-    m_scorer.Misbehaving(peer, ::dilithion::net::MisbehaviorType::UnknownMessage,
-                         "unknown command: " + strCommand);
+    // Non-block command — silently fall through. Legacy m_msg_handler in
+    // connman handles version/verack/ping/pong/headers/getdata/inv/etc.
     return false;
 }
 
-// version handler. Reads enough of the upstream wire format to populate
-// nVersion / nServices / m_peer_claimed_time on the per-peer CPeer struct,
-// closing the deferred-from-PR6.5b.1b populate path. Wire layout matches
-// CNetMessageProcessor::SerializeVersionMessage in src/net/net.cpp:2843.
-//
-// SAFE: copy-state-out — duplicate-version detection AND out-of-range
-// timestamp detection mutate state under the lock; m_scorer calls are
-// performed AFTER drop with captured-out `is_duplicate` / `is_out_of_range`
-// bools. Bounds check on read_timestamp uses Consensus::MAX_FUTURE_BLOCK_TIME
-// (src/consensus/params.h:201) symmetrically (past and future), routing
-// out-of-range values to UnknownMessage — no new enum value (PR6.5b.fixups-
-// semantic, finding PR6.5b.2-SEC-MD-2).
-bool CPeerManager::HandleVersion(NodeId peer, CDataStream& vRecv) {
-    // Read minimum required fields from the wire. CDataStream throws on
-    // under-length; ProcessMessage's try/catch routes to UnknownMessage.
-    const int32_t  read_version  = vRecv.ReadInt32();
-    const uint64_t read_services = vRecv.ReadUint64();
-    const int64_t  read_timestamp = vRecv.ReadInt64();
+// v4.3.4 Option C cut Block 2 — six dead handlers deleted:
+//   HandleVersion / HandleVerack / HandlePing / HandlePong / HandleHeaders / HandleGetData.
+// They had zero production callers (Layer-3 H4 + audit gap-list G04, verified by
+// Cursor pre-impl review). Only HandleBlock survives Block 2 because HandleBlock IS
+// reachable via CConnman::ProcessQueuedMessage (Cursor pre-impl errata E1) and routes
+// blocks under flag=1 to m_chain_selector.ProcessNewBlock. HandleBlock + ProcessMessage
+// + the ProcessQueuedMessage port branch are retired together in Block 6 alongside
+// dual-dispatch wiring removal.
 
-    // Bounds-check the peer-claimed timestamp against local clock.
-    // Out-of-range (in either direction) is treated as a malformed VERSION:
-    // route to UnknownMessage (no new enum) and reject the message. The
-    // bound matches Consensus::MAX_FUTURE_BLOCK_TIME (2 hours) symmetrically.
-    const int64_t now = GetTime();
-    const bool is_out_of_range =
-        (read_timestamp > now + Consensus::MAX_FUTURE_BLOCK_TIME) ||
-        (read_timestamp < now - Consensus::MAX_FUTURE_BLOCK_TIME);
-
-    bool is_duplicate = false;
-    {
-        std::lock_guard<std::mutex> lk(m_peers_mutex);
-        auto it = m_peers.find(peer);
-        if (it == m_peers.end()) return false;  // disconnected mid-handler
-        CPeer& p = *it->second;
-
-        // Upstream pattern: a second version on the same peer is misbehavior
-        // (DuplicateVersion weight=1 in MisbehaviorType). PR6.5b.fixups-mechanical
-        // (finding PR6.5b.2-SEC-MD-1): use a dedicated bool sentinel rather than
-        // `nVersion != 0`. The legacy test silently failed when read_version
-        // happened to be zero on the first message — the second VERSION wouldn't
-        // dispatch misbehavior because nVersion would still read as zero.
-        if (p.m_version_received) {
-            is_duplicate = true;
-        } else if (!is_out_of_range) {
-            // Commit state only on a clean (non-duplicate, in-range) version.
-            // An out-of-range version is rejected without touching CPeer state
-            // (treated as if the message never arrived) — the scorer tick is
-            // performed below after lock drop.
-            p.nVersion = read_version;
-            p.nServices = read_services;
-            p.m_peer_claimed_time = read_timestamp;
-            p.m_version_received = true;
-        }
-    }
-
-    // SAFE: copy-state-out — m_peers_mutex dropped before scorer callout.
-    if (is_duplicate) {
-        m_scorer.Misbehaving(peer, ::dilithion::net::MisbehaviorType::DuplicateVersion,
-                             "duplicate version message");
-        return false;
-    }
-    if (is_out_of_range) {
-        m_scorer.Misbehaving(peer, ::dilithion::net::MisbehaviorType::UnknownMessage,
-                             "version timestamp out of range");
-        return false;
-    }
-    return true;
-}
-
-// verack handler. Sets the handshake-complete bit on CPeer. Outbound
-// verack reply is deferred to PR6.5b.6 SendMessages — under dual-dispatch,
-// legacy ::CPeerManager continues to own outbound side until then.
-//
-// SAFE: copy-state-out — handler performs no callout (no scorer/connman
-// invocation), so the lock_guard scope IS the entire body. Pattern still
-// preserved: state mutation under lock; nothing held across function exit.
-bool CPeerManager::HandleVerack(NodeId peer, CDataStream& /*vRecv*/) {
-    std::lock_guard<std::mutex> lk(m_peers_mutex);
-    auto it = m_peers.find(peer);
-    if (it == m_peers.end()) return false;
-    it->second->m_handshake_complete = true;
-    return true;
-}
-
-// ping handler. Stores the received nonce on CPeer so PR6.5b.6 SendMessages
-// can later produce the pong reply. No outbound send in 6b.2.
-//
-// SAFE: copy-state-out — body performs no external callout. Lock_guard
-// scope IS the entire body.
-bool CPeerManager::HandlePing(NodeId peer, CDataStream& vRecv) {
-    const uint64_t nonce = vRecv.ReadUint64();
-
-    std::lock_guard<std::mutex> lk(m_peers_mutex);
-    auto it = m_peers.find(peer);
-    if (it == m_peers.end()) return false;
-    it->second->m_last_ping_nonce_recvd = nonce;
-    return true;
-}
-
-// pong handler. With a matching expected nonce, clears the pong-expected
-// state. With a wrong/unexpected nonce, returns true BUT ticks scorer once
-// (per contract: pong with wrong nonce is misbehavior, but the message
-// was structurally well-formed so dispatch result is true).
-//
-// SAFE: copy-state-out — `should_score` captured under lock, scorer called
-// after drop.
-bool CPeerManager::HandlePong(NodeId peer, CDataStream& vRecv) {
-    const uint64_t nonce = vRecv.ReadUint64();
-
-    bool should_score = false;
-    {
-        std::lock_guard<std::mutex> lk(m_peers_mutex);
-        auto it = m_peers.find(peer);
-        if (it == m_peers.end()) return false;
-        CPeer& p = *it->second;
-
-        if (p.m_pong_expected && p.m_pong_expected_nonce == nonce) {
-            // Matching nonce: clear expected state. Happy path.
-            p.m_pong_expected = false;
-            p.m_pong_expected_nonce = 0;
-        } else {
-            // Wrong/unexpected nonce: scoring deferred until after lock drop.
-            should_score = true;
-        }
-    }
-
-    // SAFE: copy-state-out — m_peers_mutex dropped before scorer callout.
-    if (should_score) {
-        m_scorer.Misbehaving(peer, 1, "pong with wrong/unexpected nonce");
-    }
-    return true;
-}
-
-// PR6.5b.3: headers handler. Deserializes the wire-format header vector
-// (matches CNetMessageProcessor::ProcessHeadersMessage in net.cpp:1529),
-// delegates to CHeadersManager::ProcessHeadersWithDoSProtection via the
-// g_node_context.headers_manager raw-pointer pattern locked in PR6.5b.0
-// (5-param constructor stays frozen), then updates per-peer
-// BlockDownloadState::n_best_known_height to the height implied by the
-// last header in the batch (best-effort tip tracking; CHeadersManager
-// remains authoritative for actual sync-state).
-//
-// Returns:
-//   * true on a structurally-valid header vector (regardless of whether
-//     CHeadersManager::ProcessHeadersWithDoSProtection returns true or
-//     false — handler success means "we delegated").
-//   * false if g_node_context.headers_manager is null (delegate not
-//     available — node-side configuration issue, NOT peer misbehavior;
-//     does NOT score the peer).
-//   * false (via ProcessMessage's try/catch) on under-length read
-//     (CDataStream throws → caught by ProcessMessage → routes to
-//     UnknownMessage weight=1).
-//
-// SAFE: copy-state-out — m_peers_mutex / m_sync_state_mutex are NEVER
-// held across the g_node_context.headers_manager callout. Per-peer
-// n_best_known_height mutation happens in a separate scoped lock AFTER
-// the delegate call returns.
-bool CPeerManager::HandleHeaders(NodeId peer, CDataStream& vRecv) {
-    // Read header count (compact-size). Throws on under-length —
-    // ProcessMessage's try/catch routes throw to UnknownMessage weight=1.
-    const uint64_t header_count = vRecv.ReadCompactSize();
-
-    // Bound header count at upstream Bitcoin Core's MAX_HEADERS_RESULTS
-    // (2000). This guards against pre-allocation DoS before the real
-    // CHeadersManager::ProcessHeadersWithDoSProtection two-phase guard
-    // kicks in. Mirrors net.cpp:1571 cap.
-    // PR6.5b.fixups-mechanical (finding PR6.5b.3-SEC-MD-2): reference the
-    // SSOT constant in <consensus/params.h> rather than re-spelling the
-    // literal 2000, so future consensus-cap changes propagate uniformly.
-    if (header_count > Consensus::MAX_HEADERS_RESULTS) {
-        // Throw rather than reach for a new MisbehaviorType enum value
-        // (interface bump deferred). ProcessMessage's catch then ticks
-        // UnknownMessage. Functionally equivalent for this PR — the real
-        // misbehavior path comes online with PR6.5b.6.
-        throw std::runtime_error("HEADERS count exceeds MAX_HEADERS_RESULTS");
-    }
-
-    std::vector<CBlockHeader> headers;
-    headers.reserve(header_count);
-    for (uint64_t i = 0; i < header_count; ++i) {
-        CBlockHeader header;
-        header.nVersion      = vRecv.ReadInt32();
-        header.hashPrevBlock = vRecv.ReadUint256();
-        header.hashMerkleRoot = vRecv.ReadUint256();
-        header.nTime         = vRecv.ReadUint32();
-        header.nBits         = vRecv.ReadUint32();
-        header.nNonce        = vRecv.ReadUint32();
-
-        // VDF extension fields (version >= 4). Mirrors net.cpp:1597.
-        if (header.IsVDFBlock()) {
-            header.vdfOutput     = vRecv.ReadUint256();
-            header.vdfProofHash  = vRecv.ReadUint256();
-        }
-
-        // Skip transaction count (headers message has 0 txs per header).
-        // Throws on under-length — caught upstream.
-        const uint64_t tx_count = vRecv.ReadCompactSize();
-        if (tx_count != 0) {
-            throw std::runtime_error("HEADERS message with tx_count != 0");
-        }
-
-        headers.push_back(header);
-    }
-
-    // SAFE: copy-state-out — no peers_mutex / sync_state_mutex held here.
-    // Null-check g_node_context.headers_manager before dereference. Null is
-    // a node-side configuration issue, not peer misbehavior; return false
-    // without scoring.
-    CHeadersManager* hdr_mgr = g_node_context.headers_manager.get();
-    if (hdr_mgr == nullptr) {
-        return false;
-    }
-
-    // Delegate to CHeadersManager — SSOT for header sync state.
-    // ProcessHeadersWithDoSProtection's return value (true/false) is
-    // CHeadersManager's signal about delegation outcome; per contract,
-    // HandleHeaders ALWAYS returns true on a structurally-valid vector
-    // (delegated successfully), regardless of CHeadersManager's verdict.
-    // CHeadersManager reports its own misbehavior via existing legacy
-    // paths (peer_manager.cpp:6 of legacy peers.cpp).
-    (void)hdr_mgr->ProcessHeadersWithDoSProtection(peer, headers);
-
-    // PR6.5b.3 best-effort tip tracking: update per-peer
-    // n_best_known_height to the height implied by the highest header
-    // in the batch. CHeadersManager already knows the canonical heights
-    // from validation; we use HeightForHash on the last header's
-    // hashPrevBlock + 1 as a best-effort estimate. If the lookup fails
-    // (parent unknown to CHeadersManager — happens during initial sync
-    // when batches arrive out of order), leave n_best_known_height
-    // unchanged.
-    //
-    // SAFE: copy-state-out — read tip estimate from hdr_mgr (no peers
-    // lock held), THEN take m_peers_mutex to mutate the per-peer state.
-    if (!headers.empty()) {
-        const CBlockHeader& tip = headers.back();
-        const int parent_height = hdr_mgr->GetHeightForHash(tip.hashPrevBlock);
-        if (parent_height >= 0) {
-            const int64_t implied_height = static_cast<int64_t>(parent_height) + 1;
-            std::lock_guard<std::mutex> lk(m_peers_mutex);
-            auto it = m_peers.find(peer);
-            if (it != m_peers.end()) {
-                CPeer& p = *it->second;
-                if (implied_height > p.m_block_download.n_best_known_height) {
-                    p.m_block_download.n_best_known_height = implied_height;
-                }
-            }
-        }
-    }
-
-    return true;
-}
 
 // PR6.5b.3 — port of CIbdCoordinator::SelectHeadersSyncPeer
 // (ibd_coordinator.cpp:2718-2803), adapted to per-peer
@@ -1173,64 +925,9 @@ bool CPeerManager::HandleBlock(NodeId peer, CDataStream& vRecv) {
     return true;
 }
 
-// PR6.5b.4 — HandleGetData. Deserializes the inv vector and validates each
-// entry. Empty inv is a no-op (matches upstream Bitcoin Core net_processing.cpp
-// behavior — not misbehavior). For inv entries with type=MSG_BLOCK_INV, look
-// up the hash via m_chain_selector.LookupBlockIndex; unknown blocks tick
-// scorer with MisbehaviorType::UnknownMessage weight=1. Outbound block
-// payload responses are forbidden in this PR (PR6.5b.6 SendMessages scope).
-//
-// Wire layout: CompactSize(count) + count * (uint32 type + uint256 hash).
-// Under-length throws → caught upstream.
-//
-// SAFE: copy-state-out — no PeerManager mutex is held during the
-// chain_selector callout or the scorer callout.
-bool CPeerManager::HandleGetData(NodeId peer, CDataStream& vRecv) {
-    const uint64_t count = vRecv.ReadCompactSize();
+// v4.3.4 Option C cut Block 2: HandleGetData deleted (was production-dead;
+//   the 6 dead handlers retired with port::ProcessMessage dispatch shrinkage).
 
-    // Bound count at MAX_INV_SIZE (50000) per net.cpp:1063. Throws →
-    // caught upstream. Empty inv is permitted (no-op success path).
-    if (count > NetProtocol::MAX_INV_SIZE) {
-        throw std::runtime_error("getdata count exceeds MAX_INV_SIZE");
-    }
-
-    std::vector<NetProtocol::CInv> invs;
-    invs.reserve(count);
-    for (uint64_t i = 0; i < count; ++i) {
-        NetProtocol::CInv inv;
-        inv.type = vRecv.ReadUint32();
-        inv.hash = vRecv.ReadUint256();
-        invs.push_back(inv);
-    }
-
-    // Validate each inv. Unknown inv types or unknown block hashes are
-    // misbehavior (UnknownMessage weight=1, no new enum value per
-    // Decision 1). Outbound block-message issuance is deferred to PR6.5b.6.
-    //
-    // SAFE: m_chain_selector / m_scorer callouts happen outside any
-    // PeerManager mutex.
-    for (const auto& inv : invs) {
-        const bool unknown_type = (inv.type < NetProtocol::MSG_TX_INV ||
-                                   inv.type > NetProtocol::MSG_CMPCT_BLOCK);
-        if (unknown_type) {
-            m_scorer.Misbehaving(peer, ::dilithion::net::MisbehaviorType::UnknownMessage,
-                                 "getdata: unknown inv type");
-            continue;
-        }
-        if (inv.type == NetProtocol::MSG_BLOCK_INV) {
-            CBlockIndex* idx = m_chain_selector.LookupBlockIndex(inv.hash);
-            if (idx == nullptr) {
-                m_scorer.Misbehaving(peer, ::dilithion::net::MisbehaviorType::UnknownMessage,
-                                     "getdata: unknown block hash");
-            }
-            // Outbound block payload response deferred to PR6.5b.6 SendMessages.
-        }
-        // MSG_TX_INV / MSG_FILTERED_BLOCK / MSG_CMPCT_BLOCK responses also
-        // deferred to PR6.5b.6 (out of scope for this PR per contract).
-    }
-
-    return true;
-}
 
 // PR6.5b.4 — MarkBlockInFlight. Increments per-peer
 // BlockDownloadState::n_blocks_in_flight (under m_peers_mutex) and inserts

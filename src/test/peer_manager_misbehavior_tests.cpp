@@ -683,36 +683,11 @@ void test_parity_gate_on_peer_disconnected_port_state_only()
 // ============================================================================
 void test_parity_gate_headers_handler_port_scores_only_on_dos_reject()
 {
-    std::cout << "  test_parity_gate_headers_handler_port_scores_only_on_dos_reject..."
-              << std::flush;
-
-    MisbehaviorFixture fix;
-    fix.pm.OnPeerConnected(kPeerId);
-
-    // Build a wire payload claiming header_count = 2001 (> MAX_HEADERS_
-    // RESULTS = 2000). The body never produces 2001 headers; we only
-    // need the compact-size field to be > cap so HandleHeaders throws
-    // immediately on the bound check.
-    //
-    // CompactSize encoding for 2001 (0x7D1): 0xFD followed by little-endian
-    // uint16 0x07D1.
-    std::vector<uint8_t> wire;
-    wire.push_back(0xFD);
-    wire.push_back(0xD1);
-    wire.push_back(0x07);
-
-    CDataStream stream(wire);
-    bool result = fix.pm.ProcessMessage(kPeerId, "headers", stream);
-
-    // Throw caught by ProcessMessage → false return after scorer tick.
-    assert(result == false);
-
-    // Port scorer ticked exactly once (UnknownMessage default weight=1).
-    assert(fix.port_scorer.GetScore(kPeerId) == 1);
-    // Legacy scorer untouched (γ ownership: protocol misbehavior is port).
-    assert(fix.legacy_scorer.GetScore(kPeerId) == 0);
-
-    std::cout << " OK\n";
+    // Body removed by v4.3.4 Option C cut Block 2: this test exercised
+    // a now-deleted port handler (HandleHeaders / HandleGetData). The
+    // function name + call site are preserved so main() compiles; the
+    // function trivially passes. v5 work may reframe.
+    std::cout << "  test_parity_gate_headers_handler_port_scores_only_on_dos_reject (skipped — handler deleted)" << std::endl;
 }
 
 // ============================================================================
@@ -722,40 +697,11 @@ void test_parity_gate_headers_handler_port_scores_only_on_dos_reject()
 // ============================================================================
 void test_parity_gate_getdata_unknown_block_port_scores_only()
 {
-    std::cout << "  test_parity_gate_getdata_unknown_block_port_scores_only..."
-              << std::flush;
-
-    MisbehaviorFixture fix;
-    fix.pm.OnPeerConnected(kPeerId);
-
-    // Build a getdata with one inv: type = MSG_BLOCK_INV (2), hash = all-0xCD
-    // (deterministically unknown to a fresh chain_selector).
-    //
-    // Wire layout: CompactSize(count=1) + uint32 type + uint256 hash.
-    std::vector<uint8_t> wire;
-    wire.push_back(0x01);  // count = 1 (compact-size, single byte)
-    // type = MSG_BLOCK_INV (2), little-endian uint32
-    const uint32_t inv_type = static_cast<uint32_t>(NetProtocol::MSG_BLOCK_INV);
-    wire.push_back(static_cast<uint8_t>(inv_type & 0xFF));
-    wire.push_back(static_cast<uint8_t>((inv_type >> 8) & 0xFF));
-    wire.push_back(static_cast<uint8_t>((inv_type >> 16) & 0xFF));
-    wire.push_back(static_cast<uint8_t>((inv_type >> 24) & 0xFF));
-    // hash (uint256, 32 bytes of 0xCD — extremely unlikely to be a real block)
-    for (int i = 0; i < 32; ++i) wire.push_back(0xCD);
-
-    CDataStream stream(wire);
-    bool result = fix.pm.ProcessMessage(kPeerId, "getdata", stream);
-
-    // HandleGetData succeeds structurally (returns true) even when an inv
-    // is unknown — the unknown is reported via scorer tick, not return value.
-    assert(result == true);
-
-    // Port scorer ticked exactly once for the unknown block hash.
-    assert(fix.port_scorer.GetScore(kPeerId) == 1);
-    // Legacy scorer untouched.
-    assert(fix.legacy_scorer.GetScore(kPeerId) == 0);
-
-    std::cout << " OK\n";
+    // Body removed by v4.3.4 Option C cut Block 2: this test exercised
+    // a now-deleted port handler (HandleHeaders / HandleGetData). The
+    // function name + call site are preserved so main() compiles; the
+    // function trivially passes. v5 work may reframe.
+    std::cout << "  test_parity_gate_getdata_unknown_block_port_scores_only (skipped — handler deleted)" << std::endl;
 }
 
 // ============================================================================
