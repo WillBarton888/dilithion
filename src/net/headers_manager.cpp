@@ -14,7 +14,6 @@
 #include <util/time.h>
 #include <util/logging.h>  // For g_verbose flag
 #include <node/genesis.h>
-#include <net/port/peer_manager.h>      // v4.3.3: mirror header tip to port PeerManager
 #include <net/port/sync_coordinator.h>  // Phase 6 PR6.5a: IsSynced() via adapter
 #include <consensus/ichain_selector.h>  // Phase 6 PR6.1: chain_selector wiring
 // PR5.5 (2026-04-26): node/fork_manager.h include retired from

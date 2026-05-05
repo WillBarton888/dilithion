@@ -266,7 +266,6 @@ extern CChainState g_chainstate;
 #include <core/node_context.h>
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 #include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
-#include <net/port/peer_manager.h>              // Phase 6 PR6.5b.1a: port-CPeerManager (flag=1 backing)
 extern NodeContext g_node_context;
 
 // Phase 5: Helper function to connect to a peer (for outbound connections)
@@ -306,7 +305,6 @@ extern NodeState g_node_state;
 #include <core/node_context.h>
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 #include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
-#include <net/port/peer_manager.h>              // Phase 6 PR6.5b.1a: port-CPeerManager (flag=1 backing)
 extern NodeContext g_node_context;
 
 // Global flag for UTXO sync optimization (defined in utxo_set.cpp)
@@ -6930,31 +6928,17 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         CIbdCoordinator ibd_coordinator(g_chainstate, g_node_context);
         g_node_context.ibd_coordinator = &ibd_coordinator;  // Register for IsSynced() access
 
-        // Phase 6 PR6.5b.1a: select sync_coordinator backing based on --usenewpeerman.
-        // See dilithion-node.cpp for full context. Default OFF.
-        const bool use_port_pm = config.use_new_peerman
-                              && g_node_context.chain_selector
-                              && Dilithion::g_chainParams;
-        if (config.use_new_peerman && !use_port_pm) {
-            LogPrintf(NET, ERROR,
-                "PR6.5b.1a: --usenewpeerman=1 requested but a prerequisite ref is null "
-                "(chain_selector=%p chainparams=%p). "
-                "Falling back to legacy CIbdCoordinator path.",
-                (void*)g_node_context.chain_selector.get(),
-                (void*)Dilithion::g_chainParams);
+        // v4.3.4 cut Block 7: sync_coordinator always backs onto legacy
+        // CIbdCoordinator via CIbdCoordinatorAdapter. See dilithion-node.cpp
+        // for full context. Closes G08-G11.
+        if (config.use_new_peerman) {
+            LogPrintf(NET, WARN,
+                "v4.3.4: --usenewpeerman=1 was set but is a no-op as of v4.3.4. "
+                "The port::CPeerManager surface was retired; sync_coordinator "
+                "always backs onto legacy CIbdCoordinator. Flag removal in next release.");
         }
-        if (use_port_pm) {
-            auto port_pm = std::make_unique<dilithion::net::port::CPeerManager>(
-                *g_node_context.chain_selector,
-                *Dilithion::g_chainParams);
-            g_node_context.sync_coordinator = std::move(port_pm);
-            LogPrintf(NET, INFO,
-                "Phase 6 PR6.5b.1a/1b: sync_coordinator backed by port-CPeerManager "
-                "(--usenewpeerman=1)");
-        } else {
-            g_node_context.sync_coordinator =
-                std::make_unique<dilithion::net::port::CIbdCoordinatorAdapter>(ibd_coordinator);
-        }
+        g_node_context.sync_coordinator =
+            std::make_unique<dilithion::net::port::CIbdCoordinatorAdapter>(ibd_coordinator);
         LogPrintf(IBD, INFO, "IBD Coordinator initialized");
 
         // Solo mining prevention state - declared before new_block_found handler

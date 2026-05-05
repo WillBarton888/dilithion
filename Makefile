@@ -239,7 +239,6 @@ NET_SOURCES := src/net/protocol.cpp \
                src/net/port/addrman_migrator.cpp \
                src/net/port/peer_scorer.cpp \
                src/net/port/sync_coordinator_adapter.cpp \
-               src/net/port/peer_manager.cpp \
                src/net/banman.cpp \
                src/net/headerssync.cpp \
                src/net/blockencodings.cpp \
