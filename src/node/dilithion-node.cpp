@@ -3545,15 +3545,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_context.block_fetcher) {
                 g_node_context.block_fetcher->OnPeerConnected(peer_id);
             }
-            // Phase 6 PR6.5b.4: dual-dispatch — under flag=1, port-CPeerManager
-            // also sees the verack-handshake-complete event so its block-download
-            // accounting state is initialized. Under flag=0, sync_coordinator is
-            // backed by CIbdCoordinatorAdapter (NOT CPeerManager), so the
-            // dynamic_cast returns null and this is a no-op. Legacy line above
-            // stays byte-identical per Decision 2.
-            if (auto* port_pm = dynamic_cast<dilithion::net::port::CPeerManager*>(g_node_context.sync_coordinator.get())) {
-                port_pm->OnPeerConnected(peer_id);
-            }
+            // v4.3.4 cut Block 5 (errata E2): verack-path dynamic_cast +
+            // OnPeerConnected dispatch to port::CPeerManager removed. Block 4
+            // already deleted the port-side per-peer state that this hook
+            // initialized. Block 7 retires the class entirely.
 
             // Phase C FIX: Notify CPeerManager of handshake completion
             // This is CRITICAL for IsPeerSuitableForDownload() to return true
