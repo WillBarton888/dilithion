@@ -450,7 +450,7 @@ dilv-genesis-vdf: $(CORE_OBJECTS) $(OBJ_DIR)/tools/dilv_genesis_vdf.o $(DILITHIU
 # Test Binaries
 # ============================================================================
 
-tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests peer_scorer_tests peer_scorer_banman_integration_tests peer_scorer_disconnect_cleanup_tests header_proof_checker_tests chain_selector_tests getchaintips_equivalence_tests chain_case_2_5_equivalence_tests chain_work_smoke_tests reorg_wal_crash_injection_tests competing_sibling_below_checkpoint_tests headers_manager_to_chain_selector_wiring_tests fast_path_2_boundary_tests v4_1_checkpoint_enforcement_tests v4_1_chain_selector_suppression_tests auto_rebuild_marker_mode_symmetry_tests add_block_index_flag_merge_tests port_chain_selector_invariants_tests legacy_vs_port_differential_tests
+tests: phase1_test miner_tests wallet_tests rpc_tests rpc_auth_tests timestamp_tests crypter_tests wallet_encryption_integration_tests wallet_persistence_tests integration_tests net_tests connman_tests tx_validation_tests tx_relay_tests mining_integration_tests dfmp_mik_tests mik_registration_persistence_tests dna_propagation_tests test_passphrase_validator script_tests addrman_v2_tests peer_scorer_tests peer_scorer_banman_integration_tests header_proof_checker_tests chain_selector_tests getchaintips_equivalence_tests chain_case_2_5_equivalence_tests chain_work_smoke_tests reorg_wal_crash_injection_tests competing_sibling_below_checkpoint_tests headers_manager_to_chain_selector_wiring_tests fast_path_2_boundary_tests v4_1_checkpoint_enforcement_tests v4_1_chain_selector_suppression_tests auto_rebuild_marker_mode_symmetry_tests add_block_index_flag_merge_tests port_chain_selector_invariants_tests legacy_vs_port_differential_tests
 	@echo "$(COLOR_GREEN)✓ All tests built successfully$(COLOR_RESET)"
 
 phase1_test: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase1_simple_test.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
@@ -569,11 +569,6 @@ peer_scorer_banman_integration_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_score
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_scorer_banman_integration_tests built successfully$(COLOR_RESET)"
 
-peer_scorer_disconnect_cleanup_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_scorer_disconnect_cleanup_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@echo "$(COLOR_GREEN)✓ peer_scorer_disconnect_cleanup_tests built successfully$(COLOR_RESET)"
-
 header_proof_checker_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/header_proof_checker_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
@@ -660,105 +655,6 @@ peer_manager_wiring_prep_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_wir
 	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ peer_manager_wiring_prep_tests built successfully$(COLOR_RESET)"
-
-# Phase 6 PR6.5b.1a: lifecycle tests for port-CPeerManager (4 cases).
-# Verifies polymorphic ISyncCoordinator usage, vacuous defaults, lifecycle
-# idempotency, and observable-state stability across hook calls. Out of
-# unit-test scope (covered by diff subagent + manual smoke): flag parsing,
-# runtime-selection logic in main(), legacy CIbdCoordinator path.
-peer_manager_lifecycle_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_lifecycle_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@echo "$(COLOR_GREEN)✓ peer_manager_lifecycle_tests built successfully$(COLOR_RESET)"
-
-# Phase 6 PR6.5b.1b: dual-dispatch tests (3 cases). Lifecycle-A asserts BOTH
-# legacy + port observe peer events under flag=1; Lifecycle-B asserts port
-# is NOT invoked under flag=0; Drift-Watch asserts ProcessMessage routing
-# stays legacy-only (port stub doesn't get accidentally hit).
-peer_manager_dual_dispatch_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_dual_dispatch_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@echo "$(COLOR_GREEN)✓ peer_manager_dual_dispatch_tests built successfully$(COLOR_RESET)"
-
-# peer_manager_processmessage_tests + peer_manager_headers_sync_tests
-# REMOVED in v4.3.4 Option C cut Block 2: both targets exercised handlers
-# (HandleVersion/Verack/Ping/Pong/Headers/GetData) that had zero production
-# producers and were deleted in this Block. HandleBlock survives Block 2;
-# its coverage stays in peer_manager_block_download_tests.
-
-# Phase 6 PR6.5b.4: block-download accounting + block_fetcher fold-in tests
-# (8 cases). Verifies the dispatch arm for `block` and `getdata`,
-# MarkBlockInFlight / RemoveBlockInFlight / GetBlocksInFlightForPeer
-# accounting, OnPeerDisconnected in-flight cleanup, RequestNextBlocks
-# per-peer cap enforcement, and no-peer no-op behavior.
-peer_manager_block_download_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_block_download_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@echo "$(COLOR_GREEN)✓ peer_manager_block_download_tests built successfully$(COLOR_RESET)"
-
-# Phase 6 PR6.5b.5: sync-state hysteresis + stall sweep tests (7 cases).
-# Verifies the real bodies of IsInitialBlockDownload / IsSynced / Tick's
-# new state update + stall sweep, the SYNC_TOLERANCE / UNSYNC_THRESHOLD
-# hysteresis, the (blocks_behind <= 20) ? 15 : 60 timeout selector, and
-# the "misbehavior dispatch on stall deferred to PR6.5b.6" invariant.
-peer_manager_sync_state_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_sync_state_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@echo "$(COLOR_GREEN)✓ peer_manager_sync_state_tests built successfully$(COLOR_RESET)"
-
-# Phase 6 PR6.5b.6: misbehavior + OnOrphan/OnBlockConnected + SendMessages
-# tests (9 cases). Verifies γ topology integration invariant
-# (MisbehaviorOwnership_ExactlyOneScorerTicks_UnderFlag1), stall-misbehavior
-# dispatch via port-scorer, DisconnectNode bad-peer rotation (bulk + near-tip
-# regimes), OnOrphanBlockReceived counter increment, OnBlockConnected counter
-# resets (orphan + per-peer), and SendMessages intentional no-op.
-peer_manager_misbehavior_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_misbehavior_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@echo "$(COLOR_GREEN)✓ peer_manager_misbehavior_tests built successfully$(COLOR_RESET)"
-
-# Phase 6 PR6.5b.7-close-prep: static-grep lock-order tests (3 cases). Reads
-# peer_manager.cpp source and asserts structural invariants via regex +
-# brace-depth tracking. Pin the locked partial order documented in
-# peer_manager.h: connman_peer_lock < m_peers_mutex < m_sync_state_mutex
-# < m_blocks_in_flight_mutex < cs_main. Cases:
-#   1. lock_order_no_reverse_acquisition (m_blocks_in_flight_mutex never
-#      held while acquiring m_peers_mutex / m_sync_state_mutex)
-#   2. no_callout_under_peer_manager_mutex (m_scorer/m_connman/m_chain_
-#      selector/m_addrman never invoked under any PM mutex)
-#   3. no_node_context_callout_under_peer_manager_mutex (g_node_context.*
-#      and hdr_mgr-> calls never under a PM mutex; closes re-entry hazard)
-peer_manager_lock_order_static_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_lock_order_static_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
-	@echo "$(COLOR_GREEN)✓ peer_manager_lock_order_static_tests built successfully$(COLOR_RESET)"
-
-# Phase 6 PR6.5b.7-b: multithreaded lock-order invariants tests (6 cases).
-# Drives CPeerManager's public surface from concurrent threads to surface
-# any unsynchronised state that the static-grep tests cannot see. Intended
-# to be built and run under `make TSAN=1 …` on a Linux host with libtsan.
-# Cases:
-#   1. tick_with_concurrent_process_message
-#   2. mark_remove_block_in_flight_concurrent
-#   3. peer_lifecycle_churn_with_tick
-#   4. send_messages_concurrent_across_peers
-#   5. misbehavior_dispatch_concurrent_unknown_messages
-#   6. mixed_full_load
-peer_manager_lock_order_invariants_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_lock_order_invariants_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -lpthread
-	@echo "$(COLOR_GREEN)✓ peer_manager_lock_order_invariants_tests built successfully$(COLOR_RESET)"
-
-# Phase 6 PR6.5b.7-c: 3-node in-process integration tests (5 cases).
-# Wires three CPeerManager fixtures via a TestRoutingConnman that
-# captures each fixture's outbound PushMessage and re-delivers it as
-# inbound ProcessMessage on the destination fixture. Drives cross-
-# fixture γ ownership + multithreaded contention. Run under TSAN
-# (`make TSAN=1 ...`) for race detection at integration level.
-peer_manager_three_node_integration_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/peer_manager_three_node_integration_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
-	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
-	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS) -lpthread
-	@echo "$(COLOR_GREEN)✓ peer_manager_three_node_integration_tests built successfully$(COLOR_RESET)"
 
 # Phase 6 PR6.4: FAST PATH 2 boundary tests (5 cases). Gates Patch H deletion.
 # Tests the specific defect class that caused PR5.6's revert.

@@ -19,34 +19,16 @@
 #define DILITHION_NET_PORT_PEER_MANAGER_H
 
 #include <core/chainparams.h>
-#include <net/port/peer.h>
+#include <net/iconnection_manager.h>
 #include <net/port/sync_coordinator.h>
 
 #include <atomic>
 #include <chrono>
-#include <map>
-#include <memory>
-#include <mutex>
-#include <set>
 #include <vector>
 
 class CBlock;
 class CBlockHeader;
 class CDataStream;
-
-// PR6.5b.test-hardening — forward declaration for friend access. The fixture
-// itself is defined at global scope in src/test/peer_manager_sync_state_tests.cpp
-// (intentionally NOT in an anonymous namespace so the friend declaration on
-// CPeerManager can name it).
-struct SyncStateFixture;
-
-// PR6.5b.6 — same pattern for the misbehavior-test fixture. Defined at
-// global scope in src/test/peer_manager_misbehavior_tests.cpp; needs friend
-// access to the m_test_*_override fields (test-hardening clock injection
-// seam from PR6.5b.test-hardening) AND to m_consecutive_orphan_blocks /
-// m_last_block_connected_ticks for direct counter observation. Production
-// code never instantiates this fixture (it's a test-only struct).
-struct MisbehaviorFixture;
 
 namespace dilithion {
 
@@ -81,14 +63,6 @@ struct PeerInfo {
 // --usenewpeerman=1 flag swaps this in transparently for IBDCoordinator
 // at the 37 call sites migrated in PR6.5a.
 class CPeerManager : public ::dilithion::net::port::ISyncCoordinator {
-    // PR6.5b.test-hardening — friend the test fixture so unit tests can
-    // inject deterministic clock/height values via the private override
-    // fields (m_test_now_override, m_test_header_height_override,
-    // m_test_chain_height_override). The fixtures are the ONLY entities
-    // outside CPeerManager that may set these fields. Production never
-    // instantiates these fixture structs.
-    friend struct ::SyncStateFixture;
-    friend struct ::MisbehaviorFixture;
 public:
     // Construction wires consumed interfaces. None are held by smart
     // pointer here; PeerManager does not own them.
@@ -118,12 +92,8 @@ public:
     bool ProcessMessage(NodeId peer, const std::string& strCommand,
                         CDataStream& vRecv);
 
-    // Per-peer maintenance cycle. Sync rotation, stall detection,
-    // in-flight cleanup. Called once per ThreadMessageHandler iter.
+    // Per-peer maintenance cycle. Called once per ThreadMessageHandler iter.
     void SendMessages(NodeId peer);
-
-    // Block-download dispatch. Called from Tick() when in IBD.
-    void RequestNextBlocks();
 
     // Peer info for RPC.
     int GetPeerCount() const;
@@ -133,38 +103,10 @@ public:
     void OnPeerConnected(NodeId peer);
     void OnPeerDisconnected(NodeId peer);
 
-    // v4.3.3: connman.Start() runs before RegisterPortPeerManager in node
-    // main(). Peers that connected in that window never received port-side
-    // OnPeerConnected — call once after registration to mirror legacy state.
-    void CatchUpRegisteredLegacyPeers();
-
-    // v4.3.3: Incoming headers are deserialized on the net path
-    // (ProcessHeadersMessage → callback → headers_manager), not via
-    // port::ProcessMessage(HandleHeaders). Mirror legacy
-    // UpdatePeerBestKnownTip so RequestNextBlocks sees non-trivial
-    // n_best_known_height under --usenewpeerman=1.
-    void NotifyPeerBestKnownFromHeaders(NodeId peer, int height, const uint256& hash);
-
-    /// Best-known block height from port block-download state (-1 if unknown).
-    int64_t GetPeerBestKnownBlockHeight(NodeId peer) const;
-
-    // ===== Block-download accounting (PR6.5b.4) =====
-    //
-    // Mark a block hash as in-flight from `peer`. Increments the per-peer
-    // BlockDownloadState::n_blocks_in_flight counter and inserts the hash
-    // into m_blocks_in_flight. Idempotent: re-marking the same hash from
-    // the same peer is a no-op (no double-count). Lock order: takes
-    // m_peers_mutex then m_blocks_in_flight_mutex (per locked partial
-    // order). Peer must be present (silently ignored if disconnected).
+    // Block-download accounting hooks retained as no-ops while HandleBlock
+    // still calls them; Block 6 removes this surface with HandleBlock.
     void MarkBlockInFlight(NodeId peer, const uint256& hash);
-
-    // Remove a block hash from in-flight state. Decrements the per-peer
-    // counter and removes the hash from m_blocks_in_flight. No-op if the
-    // hash isn't tracked (does not throw, does not decrement). Same lock
-    // order as MarkBlockInFlight.
     void RemoveBlockInFlight(NodeId peer, const uint256& hash);
-
-    // Read the per-peer in-flight counter. Returns 0 for unknown peers.
     int GetBlocksInFlightForPeer(NodeId peer) const;
 
 private:
@@ -182,160 +124,15 @@ private:
     // HandleGetData declaration removed in v4.3.4 cut Block 2 — was never reached
     // in production (Layer-3 H4 + audit gap-list G04).
 
-    // ===== ProcessMessage handlers (PR6.5b.2 — partially retired in v4.3.4 cut Block 2) =====
-    //
-    // v4.3.4 Option C cut Block 2: HandleVersion / HandleVerack / HandlePing /
-    // HandlePong / HandleHeaders / HandleGetData declarations removed; their
-    // bodies were dead in production (Layer-3 H4 + audit gap-list G04, verified
-    // by Cursor pre-impl review). Only HandleBlock remains (declaration below)
-    // because it IS reachable via CConnman::ProcessQueuedMessage (Cursor errata
-    // E1). HandleBlock retires in Block 6 alongside dual-dispatch removal.
-
-    // PR6.5b.3: headers-sync helpers. Each helper performs the full
-    // copy-state-out pattern (read peer state under m_peers_mutex, drop;
-    // mutate m_sync_state_mutex data, drop; perform any
-    // g_node_context.headers_manager callout outside both locks).
-    //
-    // *_Locked suffix is a misnomer that mirrors the upstream IBD
-    // coordinator's helper naming (SelectHeadersSyncPeer /
-    // CheckHeadersSyncProgress / SwitchHeadersSyncPeer). They run under
-    // the m_sync_state_mutex they manage internally — the caller MUST
-    // NOT already hold m_sync_state_mutex.
-    void SelectHeadersSyncPeerLocked();
-    bool CheckHeadersSyncProgressLocked();
-    void SwitchHeadersSyncPeerLocked(bool penalize);
-
-    // PR6.5b.5: sync-state hysteresis update. Reads
-    // headers_manager->GetBestHeight() + m_chain_selector.GetActiveHeight()
-    // OUTSIDE m_sync_state_mutex, then flips m_synced under hysteresis
-    // rules (SYNC_TOLERANCE_BLOCKS / UNSYNC_THRESHOLD_BLOCKS). MUST NOT
-    // be called with m_sync_state_mutex held — the *_Locked suffix is
-    // the same naming-misnomer convention used by PR6.5b.3 helpers.
-    void UpdateSyncStateLocked();
-
-    // PR6.5b.5: walk m_blocks_in_flight, snapshot stale (hash, peer_id)
-    // pairs under m_blocks_in_flight_mutex briefly, drop, then call
-    // RemoveBlockInFlight(peer, hash) for each (which takes its own
-    // locks). NO scorer dispatch, NO disconnect — misbehavior on stall
-    // is PR6.5b.6.
-    void RetryStaleBlocksLocked();
-
-    // PR6.5b.5: any-peer handshake-complete check. Walks m_peers under
-    // m_peers_mutex briefly; returns true iff any CPeer::m_handshake_complete
-    // is true. Replaces the legacy
-    // m_node_context.peer_manager->HasCompletedHandshakes() callout from
-    // CIbdCoordinator::UpdateState:389-390 with a port-side equivalent.
-    bool HasCompletedHandshakeWithAnyPeer() const;
-
-    // PR6.5b.test-hardening — clock/height injection seams.
-    //
-    // Production behavior is preserved: when the override is at its sentinel
-    // value, the helper returns the real source. Tests (via the friended
-    // SyncStateFixture) set the override to a non-sentinel value to inject
-    // deterministic time/height for hysteresis + stall-timeout assertions.
-    //
-    // Sentinel values (per contract):
-    //   * m_test_now_override == 0          → real source (std::time(nullptr))
-    //   * m_test_header_height_override == -1 → real source (g_node_context.headers_manager
-    //                                            ->GetBestHeight(), or 0 on null hdr_mgr —
-    //                                            matches existing fast-out at peer_manager.cpp:285-287)
-    //   * m_test_chain_height_override == -1 → real source (m_chain_selector.GetActiveHeight())
-    //
-    // Lock-order discipline: helpers do NOT acquire any PeerManager mutex.
-    // They read overrides as plain int64_t (single-writer test-only pattern;
-    // no race in production because overrides are never set there).
-    int64_t Now() const;
-    int     GetHeaderHeightForSync() const;
-    int     GetChainHeightForSync() const;
-
-    // ===== Lock-order discipline (v1.5 §2.1.1 rule 5; Option B) =====
-    //
-    // Partial order:  connman_peer_lock < m_peers_mutex
-    //                 < m_sync_state_mutex
-    //                 < m_blocks_in_flight_mutex < cs_main
-    //
-    // The new m_sync_state_mutex slots BETWEEN m_peers_mutex and
-    // m_blocks_in_flight_mutex (PR6.5b.3, HIGH-risk lock-order discipline).
-    //
-    // Hard rules:
-    //   * No callout under m_peers_mutex OR m_sync_state_mutex. Copy state
-    //     out, drop lock, then call out (m_scorer, m_connman, m_chain_selector,
-    //     g_node_context.headers_manager).
-    //   * Mutexes are std::mutex (NOT std::recursive_mutex). Re-entry from
-    //     a callback is forbidden — that's the AB/BA route Option B's CI
-    //     gates close.
-    //   * Inbound chain.cpp callbacks fire SYNCHRONOUSLY under cs_main
-    //     (Option B; not Option A's queue dispatch). PeerManager
-    //     handlers MUST be invokable under cs_main.
-
-    // Caller must hold m_peers_mutex. Inserts CPeer(peer) if absent (OnPeerConnected /
-    // CatchUpRegisteredLegacyPeers).
-    void insert_peer_if_absent_locked(NodeId peer);
-
-    std::map<NodeId, std::unique_ptr<CPeer>> m_peers;
-    mutable std::mutex m_peers_mutex;
-
-    // PR6.5b.3: headers-sync state. CPeerManager is authoritative for
-    // "is this peer the chosen sync-peer." (CHeadersManager remains
-    // authoritative for "have I started syncing from this peer" —
-    // SSOT split per decomposition.)
-    NodeId m_headers_sync_peer{-1};                                  // current sync peer
-    int m_headers_sync_last_height{0};                               // height at last progress check
-    uint64_t m_headers_sync_last_processed{0};                       // processed count at last progress check
-    std::chrono::steady_clock::time_point m_headers_sync_timeout{};  // when sync peer is considered stalled
-    int m_headers_sync_peer_consecutive_stalls{0};                   // consecutive stalls for current peer
-    std::set<NodeId> m_headers_bad_peers;                            // peers that repeatedly stalled
-    mutable std::mutex m_sync_state_mutex;
-
-    // PR6.5b.3 timeout / stall constants. Mirror upstream
-    // CIbdCoordinator::HEADERS_SYNC_TIMEOUT_BASE_SECS /
-    // HEADERS_SYNC_TIMEOUT_PER_HEADER_MS / MAX_HEADERS_CONSECUTIVE_STALLS.
-    static constexpr int HEADERS_SYNC_TIMEOUT_BASE_SECS = 120;
-    static constexpr int HEADERS_SYNC_TIMEOUT_PER_HEADER_MS = 1;
-    static constexpr int MAX_HEADERS_CONSECUTIVE_STALLS = 3;
-
-    // PR6.5b.5 hysteresis + stall-timeout constants (SSOT — private to
-    // CPeerManager; mirrors CIbdCoordinator's private constants in
-    // ibd_coordinator.h:203-204 and the literal `(blocks_behind <= 20)
-    // ? 15 : 60` selector at ibd_coordinator.cpp:2174).
-    static constexpr int SYNC_TOLERANCE_BLOCKS = 2;
-    static constexpr int UNSYNC_THRESHOLD_BLOCKS = 10;
-    static constexpr int BLOCK_TIMEOUT_NEAR_TIP_SECS = 15;
-    static constexpr int BLOCK_TIMEOUT_BULK_SECS = 60;
-    static constexpr int BLOCKS_NEAR_TIP_THRESHOLD = 20;
-
-    // PR6.5b.6 (Item A) — bad-peer rotation threshold. After a peer
-    // accumulates this many consecutive block-download stalls (sweep
-    // removals via RetryStaleBlocksLocked), the rotation logic invokes
-    // m_connman.DisconnectNode. Mirrors legacy ibd_coordinator.cpp:2197.
-    // Near-tip aggressiveness (Item A step 3) drops the effective threshold
-    // to 1 when blocks_behind <= BLOCKS_NEAR_TIP_THRESHOLD.
-    static constexpr int MAX_PEER_CONSECUTIVE_TIMEOUTS = 3;
-
-    // PR6.5b.6 (Item B) — orphan-block counter. Incremented from
+    // Counter incremented from
     // OnOrphanBlockReceived() (parameterless per ISyncCoordinator §1.5).
-    // Mirrors legacy CIbdCoordinator::m_consecutive_orphan_blocks
-    // (ibd_coordinator.h:132). Reset to 0 from OnBlockConnected() (Item C).
-    // Single-writer pattern in legacy carries over: chain.cpp callbacks
-    // fire serially under cs_main, so no race between increment and reset.
-    // std::atomic for cross-thread reads (RPC / future scoring).
     std::atomic<int> m_consecutive_orphan_blocks{0};
 
-    // PR6.5b.6 (Item C) — last block-connected timestamp (steady_clock
-    // ticks via .count() of nanoseconds duration since epoch). Updated
-    // from OnBlockConnected; read only from RPC / future stall heuristics.
-    // std::atomic<int64_t> for race-free read; written under cs_main from
-    // OnBlockConnected. Sentinel 0 = never connected.
+    // Updated from OnBlockConnected; read by telemetry/RPC surfaces.
     std::atomic<int64_t> m_last_block_connected_ticks{0};
 
-    // PR6.5b.5 sync state. std::atomic<bool> mirrors
-    // CIbdCoordinator::m_synced idiom (ibd_coordinator.h). NO mutex —
-    // single bool, atomic acquire/release. Initial value matches legacy:
-    // start NOT synced (so IsInitialBlockDownload() == true at construction).
+    // Sync state atomically recomputed from chain/header heights.
     std::atomic<bool> m_synced{false};
-
-    std::map<uint256, BlockDownloadInfo> m_blocks_in_flight;
-    mutable std::mutex m_blocks_in_flight_mutex;
 
     // Held interfaces (non-owning).
     ::dilithion::net::IConnectionManager& m_connman;

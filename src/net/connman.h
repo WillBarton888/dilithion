@@ -447,12 +447,9 @@ private:
     // (default), this field stays nullptr and only legacy sees connect/disconnect
     // events — existing behavior unchanged. Under --usenewpeerman=1, node
     // startup registers a non-null port-CPeerManager via RegisterPortPeerManager().
-    // Ideal ordering is before Start(); if registration happens after Start(),
-    // node main must call port::CPeerManager::CatchUpRegisteredLegacyPeers() once
-    // so port-side m_peers matches already-connected legacy peers. Both legacy AND
-    // port see events for new connects thereafter (intentional dual-dispatch —
-    // legacy keeps CNode map for 15+ dependent connman queries; port tracks its
-    // own ISyncCoordinator state). Sequential-not-nested.
+    // Both legacy AND port see events for new connects thereafter (intentional
+    // dual-dispatch — legacy keeps CNode map for 15+ dependent connman queries;
+    // port tracks its own ISyncCoordinator state). Sequential-not-nested.
     //
     // Lifetime: non-owning. Caller (NodeContext) MUST deregister via
     // RegisterPortPeerManager(nullptr) BEFORE destroying port-CPeerManager.
@@ -462,8 +459,7 @@ private:
 public:
     // Register / deregister port-CPeerManager for dual-dispatch of peer events.
     // Pass nullptr to deregister (call before port instance is destroyed).
-    // Prefer before Start(); if after Start(), pair with CatchUpRegisteredLegacyPeers()
-    // in node main. The field is checked at every event-site dispatch so
+    // The field is checked at every event-site dispatch so
     // re-registration under load is technically safe but not load-tested in 1b.
     void RegisterPortPeerManager(dilithion::net::port::CPeerManager* pm) {
         m_port_peer_manager = pm;

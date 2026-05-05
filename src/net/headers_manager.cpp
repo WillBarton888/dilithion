@@ -3401,14 +3401,6 @@ void CHeadersManager::HeaderProcessorThread()
             if (g_node_context.peer_manager) {
                 g_node_context.peer_manager->UpdatePeerBestKnownTip(pending.peer_id, bestHeight, bestHash);
             }
-            // v4.3.3: port-CPeerManager (--usenewpeerman=1) never runs HandleHeaders on
-            // the inbound path (headers go net.cpp → callback → here). Without this
-            // mirror, m_block_download.n_best_known_height stays at -1 and
-            // RequestNextBlocks never issues GETDATA (IBD async stall).
-            if (auto* port_pm =
-                    dynamic_cast<::dilithion::net::port::CPeerManager*>(g_node_context.sync_coordinator.get())) {
-                port_pm->NotifyPeerBestKnownFromHeaders(pending.peer_id, bestHeight, bestHash);
-            }
         } else {
             std::cerr << "[HeadersManager] Failed to process headers from peer "
                       << pending.peer_id << std::endl;

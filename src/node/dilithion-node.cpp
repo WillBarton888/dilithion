@@ -7091,9 +7091,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             if (g_node_context.connman) {
                 g_node_context.connman->RegisterPortPeerManager(port_pm.get());
             }
-            // v4.3.3: connman.Start() already ran — peers may exist with no port-side
-            // OnPeerConnected. Catch up so Tick()/RequestNextBlocks see real peers.
-            port_pm->CatchUpRegisteredLegacyPeers();
             g_node_context.sync_coordinator = std::move(port_pm);
             LogPrintf(NET, INFO,
                 "Phase 6 PR6.5b.1a/1b: sync_coordinator backed by port-CPeerManager "
