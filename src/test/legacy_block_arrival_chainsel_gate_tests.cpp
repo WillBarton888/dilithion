@@ -100,7 +100,7 @@ bool InitRegtestGenesisOnGlobalChainstate()
     g_chainstate.Cleanup();
     Dilithion::g_chainParams = &s_regtest_params;
 
-    const CBlock genesis = Genesis::CreateGenesisBlock();
+    const CBlock genesis = Genesis::CreateDilVGenesisBlock();
     const uint256 genesis_hash = genesis.GetHash();
 
     auto pindex = std::make_unique<CBlockIndex>(genesis);
