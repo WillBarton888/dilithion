@@ -22,7 +22,7 @@
 //     cross-fixture state machine that unit-level (b) tests cannot
 //     observe.
 //
-// Cases (5):
+// Cases (7):
 //   1. routing_connman_round_trip
 //      — A→B "junk_msg" via routing connman; B's port_scorer
 //        ticks for sender=A_idx, A's scorer untouched. Smoke-test
@@ -51,31 +51,49 @@
 //   5. mixed_full_load_three_nodes
 //      — Combined: per-fixture inbound routing + per-fixture Tick +
 //        per-fixture lifecycle churn, all concurrent.
+//   6. test_port_peer_manager_ibd_catchup_under_usenewpeerman_v1
+//      — v4.3.3: ProcessHeadersMessage → QueueRawHeaders → async mirror
+//        to port CPeerManager; RequestNextBlocks arms; blocks advance tip.
+//   7. test_port_peer_manager_ibd_negative_without_mirror_dynamic_cast_v1
+//      — Negative: sync_coordinator is not port CPeerManager → mirror
+//        skipped; port height stale; no in-flight block requests.
 
 #include <consensus/port/chain_selector_impl.h>
 #include <consensus/chain.h>
 #include <core/chainparams.h>
 #include <core/node_context.h>
 #include <net/connman.h>
+#include <net/headers_manager.h>
 #include <net/iconnection_manager.h>
 #include <net/ipeer_scorer.h>
+#include <net/net.h>
+#include <net/node.h>
+#include <net/peers.h>
 #include <net/port/addrman_v2.h>
+#include <net/port/connman_adapter.h>
 #include <net/port/peer_manager.h>
 #include <net/port/peer_scorer.h>
+#include <net/port/sync_coordinator.h>
 #include <net/protocol.h>
 #include <net/serialize.h>
+#include <node/genesis.h>
+#include <primitives/block.h>
 
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <iostream>
 #include <memory>
 #include <mutex>
 #include <string>
 #include <thread>
 #include <vector>
+
+extern CChainState g_chainstate;
 
 namespace {
 
@@ -229,6 +247,418 @@ struct ThreeNodeHarness {
 };
 
 }  // anonymous namespace
+
+// ============================================================================
+// v4.3.3 — Port peer manager IBD mirror (commit 415353e) integration
+//
+// Producer path (net.cpp:299–398): CNetMessageProcessor::ProcessMessage
+// routes "headers" → ProcessHeadersMessage → dilv-node SetHeadersHandler
+// (QueueRawHeadersForProcessing) → HeaderProcessorThread → mirror onto
+// port::CPeerManager when sync_coordinator is the port manager.
+//
+// Consumer path: port::CPeerManager::Tick → RequestNextBlocks issues
+// outbound getdata (MSG_BLOCK_INV) via IConnectionManager::PushMessage;
+// we record pushes and assert payload matches peer_manager.cpp's
+// placeholder hash encoding for regtest (same bytes production emits
+// today; real header hashes are filled on a different code path).
+//
+// Uses global g_chainstate (CHeadersManager consults it during header
+// validation). Tests run after the PR6.5b.7-c harness so g_chainParams
+// churn from ThreeNodeHarness is already restored.
+// ============================================================================
+namespace ibdl_port_mirror_test {
+
+constexpr int kPeerA = 501;
+constexpr int kHeaderChainLen = 6;
+constexpr int kPollTimeoutMs = 60000;
+
+static Dilithion::ChainParams s_regtestParams = Dilithion::ChainParams::Regtest();
+
+NetProtocol::CAddress MakeTestAddress(uint16_t port = 8444)
+{
+    NetProtocol::CAddress addr;
+    std::memset(addr.ip, 0, 10);
+    addr.ip[10] = 0xff;
+    addr.ip[11] = 0xff;
+    addr.ip[12] = 127;
+    addr.ip[13] = 0;
+    addr.ip[14] = 0;
+    addr.ip[15] = 1;
+    addr.port = port;
+    addr.services = 0;
+    addr.time = 0;
+    return addr;
+}
+
+bool PollUntil(int timeout_ms, const std::function<bool()>& pred)
+{
+    const auto t0 = std::chrono::steady_clock::now();
+    while (true) {
+        if (pred()) {
+            return true;
+        }
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0)
+                .count() >= timeout_ms) {
+            return false;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(5));
+    }
+}
+
+std::vector<CBlockHeader> BuildVdfHeaderExtension(const uint256& genesis_hash)
+{
+    std::vector<CBlockHeader> out;
+    uint256 prev = genesis_hash;
+    for (int i = 1; i <= kHeaderChainLen; ++i) {
+        CBlockHeader h;
+        h.nVersion = CBlockHeader::VDF_VERSION;
+        h.hashPrevBlock = prev;
+        h.hashMerkleRoot = uint256();
+        h.nTime = 1700000500u + static_cast<uint32_t>(i);
+        h.nBits = 0x1d00ffff;
+        h.nNonce = 0;
+        std::memset(h.vdfOutput.data, 0, 32);
+        std::memset(h.vdfProofHash.data, 0, 32);
+        h.vdfOutput.data[0] = static_cast<uint8_t>(i & 0xff);
+        out.push_back(h);
+        prev = h.GetHash();
+    }
+    return out;
+}
+
+bool InitRegtestGenesisOnGlobalChainstate()
+{
+    g_chainstate.Cleanup();
+    Dilithion::g_chainParams = &s_regtestParams;
+
+    const CBlock genesis = Genesis::CreateGenesisBlock();
+    const uint256 gh = genesis.GetHash();
+
+    auto pindex = std::make_unique<CBlockIndex>(genesis);
+    pindex->phashBlock = gh;
+    pindex->pprev = nullptr;
+    pindex->nHeight = 0;
+    pindex->nChainWork = pindex->GetBlockProof();
+    pindex->nStatus = CBlockIndex::BLOCK_VALID_CHAIN | CBlockIndex::BLOCK_HAVE_DATA;
+
+    if (!g_chainstate.AddBlockIndex(gh, std::move(pindex))) {
+        return false;
+    }
+    CBlockIndex* tip = g_chainstate.GetBlockIndex(gh);
+    if (!tip) {
+        return false;
+    }
+    bool reorg = false;
+    return g_chainstate.ActivateBestChain(tip, genesis, reorg);
+}
+
+void ClearGlobalNodeContext()
+{
+    g_node_context.headers_manager.reset();
+    if (g_node_context.connman) {
+        g_node_context.connman->RegisterPortPeerManager(nullptr);
+    }
+    g_node_context.sync_coordinator.reset();
+    g_node_context.message_processor = nullptr;
+    g_node_context.connman.reset();
+    g_node_context.peer_manager.reset();
+    g_node_context.chain_selector.reset();
+    g_node_context.chainstate = nullptr;
+}
+
+struct DummySyncCoordinator final : dilithion::net::port::ISyncCoordinator {
+    bool IsInitialBlockDownload() const override { return true; }
+    bool IsSynced() const override { return false; }
+    int GetHeadersSyncPeer() const override { return -1; }
+    void OnOrphanBlockReceived() override {}
+    void OnBlockConnected() override {}
+    void Tick() override {}
+};
+
+// Mirrors peer_manager.cpp RequestNextBlocks placeholder encoding
+// (peer id in upper 8 bytes of first 16 bytes, target height in lower 8).
+uint256 ExpectedPlaceholderInvHash(dilithion::net::NodeId peer, int target_height)
+{
+    uint256 placeholder;
+    const uint64_t lo = static_cast<uint64_t>(target_height);
+    const uint64_t hi = static_cast<uint64_t>(static_cast<uint32_t>(peer));
+    for (int b = 0; b < 8; ++b) {
+        placeholder.data[b] = static_cast<uint8_t>((lo >> (8 * b)) & 0xff);
+        placeholder.data[8 + b] = static_cast<uint8_t>((hi >> (8 * b)) & 0xff);
+    }
+    return placeholder;
+}
+
+// Wraps CConnmanAdapter to record outbound getdata (command + inv list)
+// while still delivering to the legacy connman (production-shaped path).
+class RecordingConnmanAdapter final : public dilithion::net::IConnectionManager {
+public:
+    struct GetDataPush {
+        dilithion::net::NodeId peer{};
+        std::vector<std::pair<uint32_t, uint256>> invs;
+    };
+    std::vector<GetDataPush> getdata_pushes;
+
+    explicit RecordingConnmanAdapter(CConnman& connman)
+        : m_inner(connman) {}
+
+    void DisconnectNode(dilithion::net::NodeId peer,
+                        const std::string& reason) override {
+        m_inner.DisconnectNode(peer, reason);
+    }
+    dilithion::net::NodeId ConnectNode(const std::string& addr,
+                                       dilithion::net::OutboundClass cls) override {
+        return m_inner.ConnectNode(addr, cls);
+    }
+    std::vector<dilithion::net::ConnectionInfo> GetConnections() const override {
+        return m_inner.GetConnections();
+    }
+    int GetOutboundTarget(dilithion::net::OutboundClass cls) const override {
+        return m_inner.GetOutboundTarget(cls);
+    }
+    bool IsBanned(const std::string& addr) const override {
+        return m_inner.IsBanned(addr);
+    }
+    int GetConnectionCount(dilithion::net::OutboundClass cls) const override {
+        return m_inner.GetConnectionCount(cls);
+    }
+    int GetTotalInbound() const override { return m_inner.GetTotalInbound(); }
+    int GetTotalOutbound() const override { return m_inner.GetTotalOutbound(); }
+
+    bool PushMessage(dilithion::net::NodeId peer, const CNetMessage& msg) override {
+        std::string cmd(msg.header.command,
+                        strnlen(msg.header.command, sizeof(msg.header.command)));
+        if (cmd == "getdata") {
+            try {
+                CDataStream s(msg.payload);
+                const uint64_t n = s.ReadCompactSize();
+                GetDataPush cap;
+                cap.peer = peer;
+                cap.invs.reserve(static_cast<size_t>(n));
+                for (uint64_t i = 0; i < n; ++i) {
+                    const uint32_t typ = s.ReadUint32();
+                    const uint256 h = s.ReadUint256();
+                    cap.invs.push_back({typ, h});
+                }
+                getdata_pushes.push_back(std::move(cap));
+            } catch (...) {
+                // Leave getdata_pushes unchanged; forward still runs; test will fail on assert.
+            }
+        }
+        return m_inner.PushMessage(peer, msg);
+    }
+
+private:
+    dilithion::net::port::CConnmanAdapter m_inner;
+};
+
+void RunPositiveMirrorPath()
+{
+    assert(InitRegtestGenesisOnGlobalChainstate());
+
+    g_node_context.chainstate = &g_chainstate;
+    g_node_context.chain_selector =
+        std::make_unique<dilithion::consensus::port::ChainSelectorAdapter>(g_chainstate);
+
+    g_node_context.peer_manager = std::make_unique<CPeerManager>("");
+    g_node_context.connman = std::make_unique<CConnman>();
+    g_node_context.connman->SetTestPeerManager(*g_node_context.peer_manager);
+
+    RecordingConnmanAdapter recording_conn(*g_node_context.connman);
+    dilithion::net::port::CAddrMan_v2 addrman;
+    dilithion::net::port::CPeerScorer scorer;
+    auto* selector = static_cast<dilithion::consensus::port::ChainSelectorAdapter*>(
+        g_node_context.chain_selector.get());
+
+    auto port_pm = std::make_unique<dilithion::net::port::CPeerManager>(
+        recording_conn, addrman, scorer, *selector, s_regtestParams);
+    dilithion::net::port::CPeerManager* port_raw = port_pm.get();
+
+    g_node_context.connman->RegisterPortPeerManager(port_raw);
+    g_node_context.sync_coordinator =
+        std::unique_ptr<dilithion::net::port::ISyncCoordinator>(std::move(port_pm));
+
+    g_node_context.headers_manager = std::make_unique<CHeadersManager>();
+
+    auto msg_proc = std::make_unique<CNetMessageProcessor>(*g_node_context.peer_manager);
+    g_node_context.message_processor = msg_proc.get();
+
+    msg_proc->SetHeadersHandler([](int peer_id, const std::vector<CBlockHeader>& headers) {
+        if (headers.empty()) {
+            return;
+        }
+        (void)g_node_context.headers_manager->QueueRawHeadersForProcessing(
+            peer_id, std::vector<CBlockHeader>(headers));
+    });
+
+    NetProtocol::CAddress addr = MakeTestAddress();
+    auto test_node = std::make_unique<CNode>(kPeerA, addr, /*inbound=*/false);
+    test_node->state.store(CNode::STATE_HANDSHAKE_COMPLETE);
+
+    assert(g_node_context.connman->DispatchPeerConnected(
+        kPeerA, test_node.get(), addr, /*inbound=*/false));
+
+    port_raw->CatchUpRegisteredLegacyPeers();
+
+    const CBlock genesis = Genesis::CreateGenesisBlock();
+    const uint256 genesis_hash = genesis.GetHash();
+    const std::vector<CBlockHeader> ext = BuildVdfHeaderExtension(genesis_hash);
+
+    const CNetMessage hdr_msg = msg_proc->CreateHeadersMessage(ext);
+    assert(msg_proc->ProcessMessage(kPeerA, hdr_msg));
+
+    assert(PollUntil(kPollTimeoutMs, [&]() {
+        return g_node_context.headers_manager &&
+               g_node_context.headers_manager->GetBestHeight() >= kHeaderChainLen;
+    }));
+
+    assert(port_raw->GetPeerBestKnownBlockHeight(kPeerA) == kHeaderChainLen);
+
+    port_raw->Tick();
+    assert(port_raw->GetBlocksInFlightForPeer(kPeerA) > 0);
+
+    // RequestNextBlocks must issue at least one outbound getdata whose
+    // MSG_BLOCK_INV hashes match the production placeholder encoding for
+    // heights (active+1 ..) capped by regtest per-peer limit (4).
+    assert(!recording_conn.getdata_pushes.empty());
+    const auto& gd0 = recording_conn.getdata_pushes.front();
+    assert(gd0.peer == kPeerA);
+    assert(!gd0.invs.empty());
+    constexpr int kRegtestCap = 4;
+    const int expect_invs = std::min(kHeaderChainLen, kRegtestCap);
+    assert(static_cast<int>(gd0.invs.size()) == expect_invs);
+    for (int i = 0; i < expect_invs; ++i) {
+        assert(gd0.invs[static_cast<size_t>(i)].first == NetProtocol::MSG_BLOCK_INV);
+        const int target_h = 1 + i;
+        assert(gd0.invs[static_cast<size_t>(i)].second ==
+               ExpectedPlaceholderInvHash(kPeerA, target_h));
+    }
+
+    for (const CBlockHeader& hdr : ext) {
+        CBlock block(hdr);
+        CDataStream blk_stream;
+        blk_stream.WriteInt32(block.nVersion);
+        blk_stream.WriteUint256(block.hashPrevBlock);
+        blk_stream.WriteUint256(block.hashMerkleRoot);
+        blk_stream.WriteUint32(block.nTime);
+        blk_stream.WriteUint32(block.nBits);
+        blk_stream.WriteUint32(block.nNonce);
+        if (block.IsVDFBlock()) {
+            blk_stream.WriteUint256(block.vdfOutput);
+            blk_stream.WriteUint256(block.vdfProofHash);
+        }
+        blk_stream.WriteCompactSize(0);
+        (void)port_raw->ProcessMessage(kPeerA, "block", blk_stream);
+    }
+
+    assert(g_chainstate.GetHeight() == kHeaderChainLen);
+
+    msg_proc->SetHeadersHandler(nullptr);
+    msg_proc.reset();
+    ClearGlobalNodeContext();
+    g_chainstate.Cleanup();
+    Dilithion::g_chainParams = nullptr;
+}
+
+void RunNegativeNoMirrorDynamicCast()
+{
+    assert(InitRegtestGenesisOnGlobalChainstate());
+
+    g_node_context.chainstate = &g_chainstate;
+    g_node_context.chain_selector =
+        std::make_unique<dilithion::consensus::port::ChainSelectorAdapter>(g_chainstate);
+
+    g_node_context.peer_manager = std::make_unique<CPeerManager>("");
+    g_node_context.connman = std::make_unique<CConnman>();
+    g_node_context.connman->SetTestPeerManager(*g_node_context.peer_manager);
+
+    RecordingConnmanAdapter recording_conn(*g_node_context.connman);
+    dilithion::net::port::CAddrMan_v2 addrman;
+    dilithion::net::port::CPeerScorer scorer;
+    auto* selector = static_cast<dilithion::consensus::port::ChainSelectorAdapter*>(
+        g_node_context.chain_selector.get());
+
+    auto detached_port = std::make_unique<dilithion::net::port::CPeerManager>(
+        recording_conn, addrman, scorer, *selector, s_regtestParams);
+    dilithion::net::port::CPeerManager* port_raw = detached_port.get();
+
+    g_node_context.connman->RegisterPortPeerManager(port_raw);
+    g_node_context.sync_coordinator = std::make_unique<DummySyncCoordinator>();
+
+    g_node_context.headers_manager = std::make_unique<CHeadersManager>();
+
+    auto msg_proc = std::make_unique<CNetMessageProcessor>(*g_node_context.peer_manager);
+    g_node_context.message_processor = msg_proc.get();
+
+    msg_proc->SetHeadersHandler([](int peer_id, const std::vector<CBlockHeader>& headers) {
+        if (headers.empty()) {
+            return;
+        }
+        (void)g_node_context.headers_manager->QueueRawHeadersForProcessing(
+            peer_id, std::vector<CBlockHeader>(headers));
+    });
+
+    NetProtocol::CAddress addr = MakeTestAddress();
+    auto test_node = std::make_unique<CNode>(kPeerA, addr, /*inbound=*/false);
+    test_node->state.store(CNode::STATE_HANDSHAKE_COMPLETE);
+
+    assert(g_node_context.connman->DispatchPeerConnected(
+        kPeerA, test_node.get(), addr, /*inbound=*/false));
+
+    port_raw->CatchUpRegisteredLegacyPeers();
+
+    const CBlock genesis = Genesis::CreateGenesisBlock();
+    const uint256 genesis_hash = genesis.GetHash();
+    const std::vector<CBlockHeader> ext = BuildVdfHeaderExtension(genesis_hash);
+
+    const CNetMessage hdr_msg = msg_proc->CreateHeadersMessage(ext);
+    assert(msg_proc->ProcessMessage(kPeerA, hdr_msg));
+
+    assert(PollUntil(kPollTimeoutMs, [&]() {
+        return g_node_context.headers_manager &&
+               g_node_context.headers_manager->GetBestHeight() >= kHeaderChainLen;
+    }));
+
+    assert(port_raw->GetPeerBestKnownBlockHeight(kPeerA) < kHeaderChainLen);
+
+    port_raw->Tick();
+    assert(port_raw->GetBlocksInFlightForPeer(kPeerA) == 0);
+    assert(g_chainstate.GetHeight() == 0);
+    assert(recording_conn.getdata_pushes.empty());
+
+    msg_proc->SetHeadersHandler(nullptr);
+    msg_proc.reset();
+
+    g_node_context.headers_manager.reset();
+    g_node_context.connman->RegisterPortPeerManager(nullptr);
+    detached_port.reset();
+    g_node_context.sync_coordinator.reset();
+    g_node_context.message_processor = nullptr;
+    g_node_context.connman.reset();
+    g_node_context.peer_manager.reset();
+    g_node_context.chain_selector.reset();
+    g_node_context.chainstate = nullptr;
+
+    g_chainstate.Cleanup();
+    Dilithion::g_chainParams = nullptr;
+}
+
+void test_port_peer_manager_ibd_catchup_under_usenewpeerman_v1()
+{
+    std::cout << "  test_port_peer_manager_ibd_catchup_under_usenewpeerman_v1..." << std::flush;
+    RunPositiveMirrorPath();
+    std::cout << " OK\n";
+}
+
+void test_port_peer_manager_ibd_negative_without_mirror_dynamic_cast_v1()
+{
+    std::cout << "  test_port_peer_manager_ibd_negative_without_mirror_dynamic_cast_v1..." << std::flush;
+    RunNegativeNoMirrorDynamicCast();
+    std::cout << " OK\n";
+}
+
+}  // namespace ibdl_port_mirror_test
 
 // ============================================================================
 // Test 1 — routing_connman_round_trip
@@ -469,7 +899,7 @@ void test_mixed_full_load_three_nodes()
 int main()
 {
     std::cout << "Phase 6 PR6.5b.7-c — 3-node in-process integration tests\n";
-    std::cout << "  (5-case suite — TestRoutingConnman + cross-fixture γ + TSAN harness)\n\n";
+    std::cout << "  (7-case suite — PR6.5b.7-c harness + v4.3.3 port IBD mirror)\n\n";
 
     try {
         test_routing_connman_round_trip();
@@ -477,11 +907,13 @@ int main()
         test_multithreaded_three_node_concurrent_inbound();
         test_multithreaded_three_node_lifecycle_churn();
         test_mixed_full_load_three_nodes();
+        ibdl_port_mirror_test::test_port_peer_manager_ibd_catchup_under_usenewpeerman_v1();
+        ibdl_port_mirror_test::test_port_peer_manager_ibd_negative_without_mirror_dynamic_cast_v1();
     } catch (const std::exception& e) {
         std::cerr << "\nFAILED: " << e.what() << "\n";
         return 1;
     }
 
-    std::cout << "\nAll 5 PR6.5b.7-c three-node integration tests passed.\n";
+    std::cout << "\nAll 7 three-node integration tests passed.\n";
     return 0;
 }
