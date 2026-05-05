@@ -16,10 +16,6 @@
 #include <consensus/port/chain_selector_impl.h>    // Phase 5: ChainSelectorAdapter
 #include <node/fork_manager.h>                     // Phase 11 A1: ForkManager wiring
 #include <net/port/sync_coordinator.h>             // Phase 6 PR6.5a: ISyncCoordinator complete type for unique_ptr destructor
-#include <net/port/addrman_v2.h>                   // Phase 6 PR6.5b.0: port-namespace IAddressManager impl
-#include <net/port/legacy_addrman_adapter.h>       // Phase 6 PR6.5b.0: legacy IAddressManager fallback
-#include <net/port/peer_scorer.h>                  // Phase 6 PR6.5b.0: port-namespace IPeerScorer impl
-#include <net/port/connman_adapter.h>              // Phase 6 PR6.5b.0: IConnectionManager adapter (complete type for unique_ptr)
 #include <util/logging.h>
 
 #include <cstdlib>  // std::getenv
@@ -107,53 +103,6 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
         LogPrintf(NET, INFO, "Initialized peer manager");
     } catch (const std::exception& e) {
         LogPrintf(NET, ERROR, "Failed to initialize peer manager: %s", e.what());
-        return false;
-    }
-
-    // Phase 6 PR6.5b.0: port-namespace wiring prep instances.
-    //
-    // These coexist with legacy ::CPeerManager's private addrman / m_scorer
-    // (constructed inside CPeerManager's ctor; peers.cpp:80,82,108). Legacy
-    // peer-discovery still uses the private instances. The NodeContext-level
-    // instances added here exist SOLELY so port-CPeerManager (PR6.5b.1a, under
-    // --usenewpeerman=1) has refs to construct against. Inert under flag=0.
-    //
-    // Same env-var selection as peers.cpp:76-110 for operator consistency:
-    //   DILITHION_USE_ADDRMAN_V2=0  -> LegacyAddrManAdapter (rollback escape)
-    //   default                     -> CAddrMan_v2 (production)
-    //   DILITHION_USE_NEW_PEER_SCORER=0  -> peer_scorer left null
-    //   default                          -> CPeerScorer
-    //
-    // connman_adapter is NOT constructed here; it requires g_node_context.connman
-    // which isn't set up until node startup (dilithion-node.cpp main() / dilv-
-    // node.cpp main() construct CConnman locally then move into NodeContext).
-    // Node startup wires connman_adapter immediately after that move.
-    try {
-        const char* addrman_env = std::getenv("DILITHION_USE_ADDRMAN_V2");
-        const bool use_legacy_addrman = (addrman_env != nullptr) && (std::strcmp(addrman_env, "0") == 0);
-        if (use_legacy_addrman) {
-            addrman = std::make_unique<dilithion::net::port::LegacyAddrManAdapter>();
-        } else {
-            addrman = std::make_unique<dilithion::net::port::CAddrMan_v2>();
-        }
-        LogPrintf(NET, INFO, "PR6.5b.0: port-namespace addrman instance constructed (%s)",
-                  use_legacy_addrman ? "LegacyAddrManAdapter" : "CAddrMan_v2");
-    } catch (const std::exception& e) {
-        LogPrintf(NET, ERROR, "PR6.5b.0: Failed to construct port-namespace addrman: %s", e.what());
-        return false;
-    }
-
-    try {
-        const char* scorer_env = std::getenv("DILITHION_USE_NEW_PEER_SCORER");
-        const bool scorer_disabled = (scorer_env != nullptr) && (std::strcmp(scorer_env, "0") == 0);
-        if (!scorer_disabled) {
-            peer_scorer = std::make_unique<dilithion::net::port::CPeerScorer>();
-            LogPrintf(NET, INFO, "PR6.5b.0: port-namespace peer_scorer instance constructed (CPeerScorer)");
-        } else {
-            LogPrintf(NET, INFO, "PR6.5b.0: port-namespace peer_scorer disabled via DILITHION_USE_NEW_PEER_SCORER=0");
-        }
-    } catch (const std::exception& e) {
-        LogPrintf(NET, ERROR, "PR6.5b.0: Failed to construct port-namespace peer_scorer: %s", e.what());
         return false;
     }
 
@@ -289,22 +238,6 @@ void NodeContext::Shutdown() {
     }
 
 
-    // Phase 6 PR6.5b.1b: deregister port-CPeerManager from connman BEFORE the
-    // sync_coordinator (which may own port-CPeerManager under flag=1) gets
-    // destroyed. Avoids dangling raw ptr in connman if a peer event fires
-    // during teardown. Connman's setter accepts nullptr to deregister.
-    if (connman) {
-        connman->RegisterPortPeerManager(nullptr);
-    }
-
-    // Phase 6 PR6.5b.0: reset CConnmanAdapter BEFORE connman because the
-    // adapter holds a non-owning CConnman& reference. Resetting addrman /
-    // peer_scorer here too — they don't depend on connman, but grouping with
-    // other port-namespace instances keeps shutdown ordering legible.
-    connman_adapter.reset();
-    addrman.reset();
-    peer_scorer.reset();
-
     // Phase 2: Stop CConnman
     if (connman) {
         connman->Stop();
@@ -365,16 +298,6 @@ void NodeContext::Reset() {
     // Phase 5: reset selector BEFORE clearing chainstate.
     chain_selector.reset();
     chainstate = nullptr;
-    // Phase 6 PR6.5b.1b: deregister port-CPeerManager from connman before any
-    // teardown (mirrors Shutdown). sync_coordinator (which may own port-pm)
-    // gets destructed by NodeContext destructor / member destruction order.
-    if (connman) {
-        connman->RegisterPortPeerManager(nullptr);
-    }
-    // Phase 6 PR6.5b.0: reset adapter/instances BEFORE peer_manager/connman.
-    connman_adapter.reset();
-    addrman.reset();
-    peer_scorer.reset();
     peer_manager.reset();
     connman.reset();  // Phase 2: Reset CConnman
     message_processor = nullptr;

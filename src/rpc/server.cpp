@@ -5205,13 +5205,7 @@ std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
     // Get all connected peers
     auto peers = g_node_context.peer_manager->GetConnectedPeers();
 
-    // Phase 9 PR9.3: per-response manager_class is uniform under current γ
-    // dispatch design (every peer event fires in both managers when
-    // port-pm is registered). Per-peer placement preserves space for
-    // future per-peer routing if γ ever splits.
-    const char* manager_class = (g_node_context.connman && g_node_context.connman->HasPortPeerManager())
-                                    ? "both"
-                                    : "legacy";
+    const char* manager_class = "legacy";
 
     std::ostringstream oss;
     oss << "[";
@@ -5255,7 +5249,7 @@ std::string CRPCServer::RPC_GetPeerInfo(const std::string& params) {
         // Phase 2 port: misbehavior score moved into CPeerScorer; query via
         // the manager's accessor.
         oss << "\"misbehavior\":" << g_node_context.peer_manager->GetMisbehaviorScore(peer->id) << ",";
-        // Phase 9 PR9.3: additive field; "legacy" or "both" (γ dual-dispatch).
+        // Phase 9 PR9.3: additive field preserved for monitoring compatibility.
         oss << "\"manager_class\":\"" << manager_class << "\"";
         oss << "}";
     }
@@ -5304,9 +5298,7 @@ std::string CRPCServer::RPC_GetSyncStatus(const std::string& params) {
     // blocks. The snapshot is internally consistent by construction.
     auto snap = g_node_context.headers_manager->GetSyncSnapshot();
 
-    const char* manager_class = (g_node_context.connman && g_node_context.connman->HasPortPeerManager())
-                                    ? "both"
-                                    : "legacy";
+    const char* manager_class = "legacy";
 
     std::ostringstream oss;
     oss << "{";
@@ -5324,9 +5316,7 @@ std::string CRPCServer::RPC_GetBlockDownloadStats(const std::string& params) {
         return "{\"error\":\"block_fetcher not initialized\"}";
     }
 
-    const char* manager_class = (g_node_context.connman && g_node_context.connman->HasPortPeerManager())
-                                    ? "both"
-                                    : "legacy";
+    const char* manager_class = "legacy";
 
     size_t total_in_flight = g_node_context.block_fetcher->GetInFlightCount();
     size_t total_pending = g_node_context.block_fetcher->GetPendingCount();

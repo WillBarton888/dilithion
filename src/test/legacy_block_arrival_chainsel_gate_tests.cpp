@@ -141,9 +141,6 @@ CBlock BuildChildOfTip()
 
 void ClearGlobalNodeContext()
 {
-    if (g_node_context.connman) {
-        g_node_context.connman->RegisterPortPeerManager(nullptr);
-    }
     g_node_context.message_processor = nullptr;
     g_node_context.sync_coordinator.reset();
     g_node_context.headers_manager.reset();
@@ -180,8 +177,6 @@ void test_legacy_block_arrival_routes_to_chain_selector_without_port_pm()
     CConnmanOptions opts;
     opts.fListen = false;
     assert(g_node_context.connman->Start(*g_node_context.peer_manager, msg_processor, opts));
-    assert(!g_node_context.connman->HasPortPeerManager());
-
     const int kPeerId = 7001;
     NetProtocol::CAddress addr = MakeTestAddress();
     auto test_node = std::make_unique<CNode>(kPeerId, addr, /*inbound=*/false);

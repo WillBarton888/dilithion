@@ -51,7 +51,6 @@
 #include <net/headers_manager.h>
 #include <net/block_fetcher.h>
 #include <net/block_tracker.h>
-#include <net/port/peer_manager.h>
 
 #include <cassert>
 #include <cstring>
@@ -89,26 +88,6 @@ void AssertContains(const std::string& haystack, const std::string& needle,
                   << needle << "' in:\n  " << haystack << "\n";
         assert(false);
     }
-}
-
-// Helper: install a port-CPeerManager registration on connman so
-// HasPortPeerManager() returns true. We pass a non-null pointer (cast
-// from a sentinel) — connman only checks non-null at the dispatch site
-// + at HasPortPeerManager(). No methods are invoked on the pointer
-// inside the test path, so a sentinel suffices.
-void RegisterPortPmStub(CConnman& connman)
-{
-    // Sentinel pointer: any non-null value satisfies HasPortPeerManager().
-    // Using a static sentinel avoids constructing a real CPeerManager
-    // (which has heavy dependencies). The tests do NOT invoke methods
-    // on the registered pointer.
-    static auto* sentinel = reinterpret_cast<dilithion::net::port::CPeerManager*>(0x1);
-    connman.RegisterPortPeerManager(sentinel);
-}
-
-void DeregisterPortPm(CConnman& connman)
-{
-    connman.RegisterPortPeerManager(nullptr);
 }
 
 }  // anonymous namespace
@@ -158,7 +137,7 @@ void test_getsyncstatus_happy_path()
 }
 
 // ============================================================================
-// Case 3: getsyncstatus manager_class = "legacy" when no port-pm registered
+// Case 3: getsyncstatus manager_class is "legacy"
 // ============================================================================
 void test_getsyncstatus_manager_class_legacy()
 {
@@ -167,14 +146,10 @@ void test_getsyncstatus_manager_class_legacy()
 
     g_node_context.headers_manager = std::make_unique<CHeadersManager>();
     g_node_context.connman = std::make_unique<CConnman>();
-    // Default state: m_port_peer_manager == nullptr → HasPortPeerManager() == false.
-    assert(!g_node_context.connman->HasPortPeerManager());
-
     CRPCServer server(0);
     std::string result = server.InvokeRPCForTest("getsyncstatus", "[]");
 
     AssertContains(result, "\"manager_class\":\"legacy\"", "case 3");
-    // And NOT "both" (proves the branch is by-value, not constant).
     assert(!Contains(result, "\"manager_class\":\"both\""));
 
     ResetNodeContext();
@@ -182,25 +157,22 @@ void test_getsyncstatus_manager_class_legacy()
 }
 
 // ============================================================================
-// Case 4: getsyncstatus manager_class = "both" when port-pm registered
+// Case 4: getsyncstatus manager_class remains "legacy"
 // ============================================================================
-void test_getsyncstatus_manager_class_both()
+void test_getsyncstatus_manager_class_stable_legacy()
 {
-    std::cout << "  test_getsyncstatus_manager_class_both..." << std::flush;
+    std::cout << "  test_getsyncstatus_manager_class_stable_legacy..." << std::flush;
     ResetNodeContext();
 
     g_node_context.headers_manager = std::make_unique<CHeadersManager>();
     g_node_context.connman = std::make_unique<CConnman>();
-    RegisterPortPmStub(*g_node_context.connman);
-    assert(g_node_context.connman->HasPortPeerManager());
 
     CRPCServer server(0);
     std::string result = server.InvokeRPCForTest("getsyncstatus", "[]");
 
-    AssertContains(result, "\"manager_class\":\"both\"", "case 4");
-    assert(!Contains(result, "\"manager_class\":\"legacy\""));
+    AssertContains(result, "\"manager_class\":\"legacy\"", "case 4");
+    assert(!Contains(result, "\"manager_class\":\"both\""));
 
-    DeregisterPortPm(*g_node_context.connman);
     ResetNodeContext();
     std::cout << " OK\n";
 }
@@ -422,13 +394,6 @@ void test_getpeerinfo_manager_class_field()
     AssertContains(result_legacy, "\"manager_class\":\"legacy\"", "case 9 legacy");
     assert(!Contains(result_legacy, "\"manager_class\":\"both\""));
 
-    // Register port-pm sentinel; same call should now report "both".
-    RegisterPortPmStub(*g_node_context.connman);
-    std::string result_both = server.InvokeRPCForTest("getpeerinfo", "[]");
-    AssertContains(result_both, "\"manager_class\":\"both\"", "case 9 both");
-    assert(!Contains(result_both, "\"manager_class\":\"legacy\""));
-
-    DeregisterPortPm(*g_node_context.connman);
     ResetNodeContext();
     std::cout << " OK\n";
 }
@@ -456,7 +421,7 @@ int main()
         test_getsyncstatus_null_headers_manager();        // 1
         test_getsyncstatus_happy_path();                  // 2
         test_getsyncstatus_manager_class_legacy();        // 3
-        test_getsyncstatus_manager_class_both();          // 4
+        test_getsyncstatus_manager_class_stable_legacy(); // 4
         test_getblockdownloadstats_null_block_fetcher();  // 5
         test_getblockdownloadstats_empty_peers();         // 6
         test_getblockdownloadstats_with_peers();          // 7

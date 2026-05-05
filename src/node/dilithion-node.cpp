@@ -263,7 +263,6 @@ extern CChainState g_chainstate;
 #include <core/node_context.h>
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 #include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
-#include <net/port/connman_adapter.h>           // Phase 6 PR6.5b.0: IConnectionManager adapter
 #include <net/port/peer_manager.h>              // Phase 6 PR6.5b.1a: port-CPeerManager (flag=1 backing)
 extern NodeContext g_node_context;
 
@@ -305,7 +304,6 @@ extern NodeState g_node_state;
 #include <core/node_context.h>
 #include <node/ibd_coordinator.h>  // Phase 5.1: IBD Coordinator
 #include <net/port/sync_coordinator_adapter.h>  // Phase 6 PR6.5a: adapter
-#include <net/port/connman_adapter.h>           // Phase 6 PR6.5b.0: IConnectionManager adapter
 #include <net/port/peer_manager.h>              // Phase 6 PR6.5b.1a: port-CPeerManager (flag=1 backing)
 extern NodeContext g_node_context;
 
@@ -3315,16 +3313,6 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Phase 1.2: Store in NodeContext (Bitcoin Core pattern)
         g_node_context.connman = std::move(connman);
         g_node_context.message_processor = &message_processor;
-
-        // Phase 6 PR6.5b.0: construct CConnmanAdapter wrapping the now-registered
-        // CConnman. Inert under --usenewpeerman=0 (legacy path doesn't route
-        // through it). PR6.5b.1a will pass this adapter as one of port-CPeerManager's
-        // 5 constructor refs when the flag is added (default OFF). NodeContext
-        // shutdown resets this BEFORE connman to honor non-owning-ref ordering.
-        if (g_node_context.connman) {
-            g_node_context.connman_adapter =
-                std::make_unique<dilithion::net::port::CConnmanAdapter>(*g_node_context.connman);
-        }
 
         // Phase 5: Create and start async broadcaster for non-blocking message broadcasting
         // Now uses CConnman instead of CConnectionManager
@@ -7039,57 +7027,26 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Phase 6 PR6.5b.1a: select sync_coordinator backing based on --usenewpeerman.
         // Default (flag=0): legacy CIbdCoordinator path via CIbdCoordinatorAdapter.
-        // Opt-in (flag=1): port-CPeerManager — PR6.5b.0 wired the 5 prerequisite
-        // refs into NodeContext (connman_adapter, addrman, peer_scorer,
-        // chain_selector, plus Dilithion::g_chainParams). Flag is EXPERIMENTAL /
-        // DEVELOPER-ONLY; misbehavior dispatch lands in PR6.5b.6 — flag=1 should
-        // not be used for soak / network-facing testing until then.
+        // Opt-in (flag=1): minimal port-CPeerManager implementation.
         const bool use_port_pm = config.use_new_peerman
-                              && g_node_context.connman_adapter
-                              && g_node_context.addrman
-                              && g_node_context.peer_scorer
                               && g_node_context.chain_selector
                               && Dilithion::g_chainParams;
         if (config.use_new_peerman && !use_port_pm) {
             LogPrintf(NET, ERROR,
                 "PR6.5b.1a: --usenewpeerman=1 requested but a prerequisite ref is null "
-                "(connman_adapter=%p addrman=%p peer_scorer=%p chain_selector=%p chainparams=%p). "
+                "(chain_selector=%p chainparams=%p). "
                 "Falling back to legacy CIbdCoordinator path.",
-                (void*)g_node_context.connman_adapter.get(),
-                (void*)g_node_context.addrman.get(),
-                (void*)g_node_context.peer_scorer.get(),
                 (void*)g_node_context.chain_selector.get(),
                 (void*)Dilithion::g_chainParams);
         }
         if (use_port_pm) {
             auto port_pm = std::make_unique<dilithion::net::port::CPeerManager>(
-                *g_node_context.connman_adapter,
-                *g_node_context.addrman,
-                *g_node_context.peer_scorer,
                 *g_node_context.chain_selector,
                 *Dilithion::g_chainParams);
-
-            // Phase 6 PR6.5b.1b: register port-CPeerManager on connman for
-            // dual-dispatch of peer-events (legacy + port both see connect /
-            // disconnect under flag=1; legacy-only under flag=0). Per
-            // post-1a dual-dispatch amendment 2026-04-28 in
-            // .claude/contracts/port_phase_6_5b_decomposition.md.
-            //
-            // NOTE on registration ordering: connman.Start() runs earlier in
-            // main() (~line 5481) than this construction site. A small window
-            // exists between Start() and this registration where peer events
-            // go to legacy ONLY. Acceptable for flag=1 developer-only scope;
-            // if the window matters operationally, PR6.5b.5+ may move port-pm
-            // construction earlier. Contract registration-ordering ("BEFORE
-            // Start()") is honored in spirit (no peers expected to connect
-            // in the window) but not literal under current main() layout.
-            if (g_node_context.connman) {
-                g_node_context.connman->RegisterPortPeerManager(port_pm.get());
-            }
             g_node_context.sync_coordinator = std::move(port_pm);
             LogPrintf(NET, INFO,
                 "Phase 6 PR6.5b.1a/1b: sync_coordinator backed by port-CPeerManager "
-                "(--usenewpeerman=1); registered on connman for dual-dispatch");
+                "(--usenewpeerman=1)");
         } else {
             g_node_context.sync_coordinator =
                 std::make_unique<dilithion::net::port::CIbdCoordinatorAdapter>(ibd_coordinator);
