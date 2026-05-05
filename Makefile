@@ -635,6 +635,14 @@ phase_9_telemetry_rpc_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/phase_9_telemetry_r
 	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
 	@echo "$(COLOR_GREEN)✓ phase_9_telemetry_rpc_tests built successfully$(COLOR_RESET)"
 
+# v4.3.4 Option C cut Block 3: regression gate proving legacy block-arrival
+# reaches chain selector with DILITHION_USE_NEW_CHAIN_SELECTOR=1 and NO
+# port peer manager registration.
+legacy_block_arrival_chainsel_gate_tests: $(CORE_OBJECTS) $(OBJ_DIR)/test/legacy_block_arrival_chainsel_gate_tests.o $(DILITHIUM_OBJECTS) $(CHIAVDF_OBJECTS)
+	@echo "$(COLOR_BLUE)[LINK]$(COLOR_RESET) $@"
+	@$(CXX) $(CXXFLAGS) -o $@ $^ $(LDFLAGS) $(LIBS)
+	@echo "$(COLOR_GREEN)✓ legacy_block_arrival_chainsel_gate_tests built successfully$(COLOR_RESET)"
+
 # Phase 6 PR6.1: HeadersManager → chain_selector wiring tests (5 cases).
 # Verifies happy-path, idempotency, orphan, rejected-parent flood,
 # cap-saturation per v1.5 plan §4 PR6.1.
