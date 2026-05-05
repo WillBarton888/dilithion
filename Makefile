@@ -133,7 +133,7 @@ OBJ_DIR := $(BUILD_DIR)/obj
 
 # Phase 6 sub-stream (b) — Thread Sanitizer build mode.
 # Usage:   make TSAN=1 <target>
-# Example: make TSAN=1 peer_manager_misbehavior_tests
+# Example: make TSAN=1 reorg_wal_crash_injection_tests
 # Run the resulting binary directly; TSAN prints a race report on stderr
 # and exits non-zero if a data race is detected. TSAN-built objects go to
 # build-tsan/ to keep them separate from the normal build artifacts. To

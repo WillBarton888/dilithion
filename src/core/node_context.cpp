@@ -75,11 +75,12 @@ bool NodeContext::Init(const std::string& datadir, CChainState* chainstate_ptr) 
     // node startup once blockchain_db is set) is null-safe — it's a no-op
     // when chain_selector is nullptr (env-var unset).
     //
-    // Per v4.3 deploy: the wrapper /root/run-dilv-seed.sh exports
-    // DILITHION_USE_NEW_CHAIN_SELECTOR=1 alongside --usenewpeerman=1; both
-    // are required for the port path to be active. Without the env-var,
-    // chain_selector stays null AND --usenewpeerman=1 logs an ERROR and
-    // falls back to legacy CIbdCoordinator (fail-loud).
+    // Activation: wrapper /root/run-dilv-seed.sh exports
+    // DILITHION_USE_NEW_CHAIN_SELECTOR=1 to enable the port chain selector.
+    // The companion --usenewpeerman flag was retired in v4.3.4 (Block 8 of
+    // Option C cut) — the chain-selector env-var is now an independent toggle.
+    // Without the env-var, chain_selector stays null and the legacy
+    // chain.cpp validation path runs (fail-loud).
     try {
         const char* selector_env = std::getenv("DILITHION_USE_NEW_CHAIN_SELECTOR");
         const bool use_new_selector = (selector_env != nullptr) && (std::strcmp(selector_env, "1") == 0);

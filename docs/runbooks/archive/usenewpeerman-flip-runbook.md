@@ -1,3 +1,15 @@
+# `--usenewpeerman` Flip Runbook — RETIRED
+
+> **🛑 RETIRED 2026-05-05 — `--usenewpeerman` flag removed by v4.3.4 Option C architectural cut.**
+>
+> The `port::CPeerManager` class this runbook was written to flip-into has been deleted entirely. The `--usenewpeerman` CLI flag no longer exists in `dilv-node` or `dilithion-node`. `g_node_context.sync_coordinator` always backs onto legacy `CIbdCoordinator` via `CIbdCoordinatorAdapter`.
+>
+> This runbook is preserved here for **historical reference only**. The flip it describes is no longer possible against current binaries; references to telemetry fields like `manager_class == "both"` are likewise impossible (the field is now constant `"legacy"`).
+>
+> See `.claude/contracts/option_c_architectural_cut_contract.md` for the cut decision and `git tag v4.3.4-pre-cut-baseline` for the pre-cut codebase if any historical reproduction is needed.
+
+---
+
 # `--usenewpeerman` Flip Runbook
 
 **Audience:** mainnet seed-node operators (NYC, LDN, SGP, SYD).

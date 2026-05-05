@@ -118,16 +118,19 @@ void CIbdCoordinator::Tick() {
     // v4.3.2 M1: Auto-recovery from chain corruption — moved to free helper
     // =========================================================================
     // The poll-and-write block previously lived here (lines 126-167 in v4.3.1).
-    // Under `--usenewpeerman=1` this Tick() is bypassed entirely (port
-    // CPeerManager replaces CIbdCoordinatorAdapter as sync_coordinator), so the
-    // legacy in-Tick() recovery path was never reached. LDN canary 2026-05-04
-    // failed because [CRITICAL] Triggering auto_rebuild logs printed but no
-    // marker file was ever written and the chain regressed 254 blocks.
+    // The v4.3.1 LDN canary 2026-05-04 failed because under the then-existing
+    // --usenewpeerman=1 path, this Tick() was bypassed (port::CPeerManager
+    // replaced CIbdCoordinatorAdapter as sync_coordinator), so the in-Tick()
+    // recovery path never reached its WriteAutoRebuildMarker call — [CRITICAL]
+    // logs printed but no marker was written and the chain regressed 254 blocks.
     //
     // Logic moved to Dilithion::MaybeTriggerChainRebuild and called from BOTH
     // dilv-node.cpp and dilithion-node.cpp main loops, AFTER
-    // sync_coordinator->Tick(). That call covers both flag=0 (this Tick still
-    // runs via the adapter) and flag=1 (port path) modes with one code path.
+    // sync_coordinator->Tick(). Post v4.3.4 Option C cut, sync_coordinator
+    // always wraps CIbdCoordinator via CIbdCoordinatorAdapter (Block 7
+    // retired the alternate port::CPeerManager backing; Block 8 retired
+    // the --usenewpeerman flag) — but the main-loop helper survives because
+    // it remains the cleanest single dispatch point for the marker write.
     //
     // The early-return-on-recovery semantics from the legacy block are also
     // preserved at the call site: when the helper fires, running=false is set

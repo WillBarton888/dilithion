@@ -4,9 +4,12 @@
 // Phase 6 PR6.5a — IBDCoordinator → ISyncCoordinator adapter.
 //
 // Wraps an existing CIbdCoordinator instance and exposes it through the
-// ISyncCoordinator interface. PR6.5a uses this for BOTH flag values
-// (legacy backing for both); PR6.5b will add a CPeerManager-backed
-// implementation for flag=1.
+// ISyncCoordinator interface. Post v4.3.4 Option C cut, this is the SOLE
+// production implementation of ISyncCoordinator (Block 7 retired the
+// alternate port::CPeerManager-backed implementation; Block 8 retired the
+// --usenewpeerman flag that selected between them). The interface +
+// adapter are preserved for future architectural evolution per
+// .claude/contracts/v5_architecture_decision_prep.md.
 
 #ifndef DILITHION_NET_PORT_SYNC_COORDINATOR_ADAPTER_H
 #define DILITHION_NET_PORT_SYNC_COORDINATOR_ADAPTER_H

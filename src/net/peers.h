@@ -255,6 +255,16 @@ private:
 
     // F21 (v4.3.3 Track B): single throttle table for future send/recv hooks;
     // RemovePeer on disconnect prevents map growth once RecordTransfer is wired.
+    //
+    // F24 SSOT contract (v4.3.4 cut Block 10): this field is the SINGLE
+    // source of truth for per-peer bandwidth throttling state. The API is
+    // defined in <net/bandwidth_throttle.h> (CPerPeerThrottle::RecordTransfer,
+    // CheckLimits, RemovePeer, etc.). Future maintainers adding rate-limit
+    // logic should extend CPerPeerThrottle's interface and consult this
+    // single instance — do NOT introduce a parallel per-peer throttle map
+    // elsewhere. Any future code path that needs throttling state for a peer
+    // queries this field via CPeerManager (legacy peer manager owns the
+    // singleton). Lifetime: same as legacy CPeerManager (NodeContext::peer_manager).
     CPerPeerThrottle m_peer_bandwidth_throttle;
 
 public:

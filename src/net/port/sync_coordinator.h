@@ -4,14 +4,18 @@
 // Phase 6 PR6.5a — ISyncCoordinator adapter interface.
 //
 // Stable surface used by ~37 production touch sites that previously
-// called CIbdCoordinator directly. Both CIbdCoordinator (legacy path,
-// --usenewpeerman=0) and CPeerManager (new path, --usenewpeerman=1)
-// implement this interface. PR6.5a wires legacy backing for both
-// flag values (compile-safe, behavior-neutral). PR6.5b adds the
-// PeerManager backing for flag=1.
+// called CIbdCoordinator directly. The interface is implemented by
+// CIbdCoordinatorAdapter (which wraps the legacy CIbdCoordinator) —
+// the sole production implementation post v4.3.4 cut (Block 7 retired
+// the alternate port::CPeerManager-backed implementation; Block 8
+// retired the --usenewpeerman flag that selected between the two).
+// The interface is preserved as a stable abstraction for future
+// architectural work (cf. v5_architecture_decision_prep.md).
 //
 // See `.claude/contracts/port_phase_6_call_site_compatibility_table.md`
-// for the full call-site map and parity test naming.
+// for the full call-site map and parity test naming, and
+// `.claude/contracts/option_c_architectural_cut_contract.md` for the
+// v4.3.4 retirement of the CPeerManager-backed alternative.
 
 #ifndef DILITHION_NET_PORT_SYNC_COORDINATOR_H
 #define DILITHION_NET_PORT_SYNC_COORDINATOR_H

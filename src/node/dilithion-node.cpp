@@ -2950,8 +2950,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
         // Phase 11 A1: now that blockchain_db is wired, enable fork-staging
         // dispatch on the port chain selector adapter. This routes port-path
         // ProcessNewBlock through ForkManager (validate-before-disconnect)
-        // instead of calling ActivateBestChain directly. Without this call,
-        // --usenewpeerman=true would bypass fork-staging on P2P-arriving blocks.
+        // instead of calling ActivateBestChain directly.
+        // Post v4.3.4 cut: the port::CPeerManager bypass concern is moot
+        // (class deleted, flag retired) — only the legacy block-arrival path
+        // reaches ProcessNewBlock now, and it always traverses ForkManager.
         if (!g_node_context.WireForkStaging()) {
             std::cerr << "[startup] WARN: WireForkStaging failed — port path will not stage forks" << std::endl;
         }
@@ -7266,11 +7268,10 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // ========================================
             // Phase 5.1: Use IBD Coordinator instead of inline logic.
             // This encapsulates all IBD logic (backoff, queueing, fetching, retries).
-            // Phase 6 PR6.5a fix-up 2026-04-27 (per dual-validation): route
-            // Tick() through ISyncCoordinator so the --usenewpeerman=1 flag
-            // (added in PR6.5b) flips this to CPeerManager::Tick() without
-            // a code change. Behavior under flag=0 is identical (both
-            // route to CIbdCoordinator::Tick via the adapter).
+            // Phase 6 PR6.5a fix-up 2026-04-27: route Tick() through
+            // ISyncCoordinator. Post v4.3.4 cut, this always routes to
+            // CIbdCoordinator::Tick via CIbdCoordinatorAdapter (the
+            // alternate port::CPeerManager Tick was retired in Block 7).
             if (g_node_context.sync_coordinator) {
                 g_node_context.sync_coordinator->Tick();
             }

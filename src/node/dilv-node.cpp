@@ -2855,8 +2855,9 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
 
         // Phase 11 A1: now that blockchain_db is wired, enable fork-staging
         // dispatch on the port chain selector adapter. See dilithion-node.cpp
-        // for full rationale. Without this call, --usenewpeerman=true would
-        // bypass fork-staging on P2P-arriving blocks.
+        // for full rationale. Post v4.3.4 cut: the port::CPeerManager bypass
+        // concern is moot (class deleted, flag retired) — only the legacy
+        // block-arrival path reaches ProcessNewBlock now.
         if (!g_node_context.WireForkStaging()) {
             std::cerr << "[startup] WARN: WireForkStaging failed — port path will not stage forks" << std::endl;
         }
@@ -7128,21 +7129,23 @@ load_genesis_block:  // Bug #29: Label for automatic retry after blockchain wipe
             // BLOCK DOWNLOAD COORDINATION (IBD)
             // ========================================
             // Phase 5.1: Use IBD Coordinator instead of inline logic.
-            // Phase 6 PR6.5a fix-up 2026-04-27 (per dual-validation): route
-            // Tick() through ISyncCoordinator so the --usenewpeerman=1 flag
-            // (added in PR6.5b) flips this to CPeerManager::Tick() without
-            // a code change. Behavior under flag=0 is identical.
+            // Phase 6 PR6.5a fix-up 2026-04-27: route Tick() through
+            // ISyncCoordinator. Post v4.3.4 cut, this always routes to
+            // CIbdCoordinator::Tick via CIbdCoordinatorAdapter (the
+            // alternate port::CPeerManager Tick was retired in Block 7).
             if (g_node_context.sync_coordinator) {
                 g_node_context.sync_coordinator->Tick();
             }
 
             // v4.3.2 M1 fix: poll chainstate's UTXO/chain rebuild flags and
             // surface auto_rebuild + shutdown if either fires. Lifted out of
-            // CIbdCoordinator::Tick so it runs in BOTH legacy (flag=0) and
-            // port (flag=1) sync-coordinator configurations. Single helper,
-            // single call site, single point of truth for the recovery path.
-            // LDN canary 2026-05-04 regressed 254 blocks because the previous
-            // in-Tick() recovery was bypassed under --usenewpeerman=1.
+            // CIbdCoordinator::Tick to a free helper called from main loop.
+            // Original motivation: under the then-existing --usenewpeerman=1
+            // path, this Tick() was bypassed — LDN canary 2026-05-04 regressed
+            // 254 blocks because the in-Tick() recovery never ran. Post
+            // v4.3.4 cut, sync_coordinator always wraps CIbdCoordinator
+            // (Block 7 retired the alternate path), but the main-loop helper
+            // remains the cleanest single dispatch point.
             //
             // v4.3.2 M1 H1 (Layer-3 review 2026-05-04): pass config.datadir,
             // NOT g_chainParams->dataDir. The chainparams field is set ONCE

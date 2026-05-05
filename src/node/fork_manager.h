@@ -36,25 +36,16 @@ namespace Dilithion {
  * This file SURVIVES the v4.1 port via the LEGACY block-receive path.
  * Fork-staging fires when block_processing::ProcessNewBlock is invoked
  * (9 sites: dilithion-node.cpp x3, dilv-node.cpp x3, ibd_coordinator.cpp x3).
- * The port path (CPeerManager::HandleBlock -> ChainSelectorAdapter::
- * ProcessNewBlock -> CChainState::ActivateBestChain) BYPASSES fork-staging.
- * Today (--usenewpeerman=0 default) all operational paths use the legacy
- * entry points, so fork-staging is fully operational. At Phase 9+ default
- * flip + ibd_coordinator retirement, an explicit Track A decision is
- * required: re-implement fork-staging in the port adapter (Path A1) or
- * accept the bypass (Path A2). Both are consensus-adjacent. Note: the
- * bypass under Path A2 is PARTIAL — even at Phase 9+ default flip,
- * BIP152 compact-block reconstruction sites (in dilithion-node.cpp +
- * dilv-node.cpp main loops) plus mining and RPC submission paths
- * continue to invoke `block_processing::ProcessNewBlock`, so fork-
- * staging continues to fire for those paths regardless of the A1/A2
- * choice. P2P-arriving blocks under flag=1 are the bypass surface.
- * Until the A1/A2 decision lands, do not retire ibd_coordinator or
- * change the --usenewpeerman default. Retirement of this file clusters with
- * `ibd_coordinator` retirement at Phase 9+ (post `--usenewpeerman`
- * default flip + burn-in window per consensus_activation_policy.md).
- * See `.claude/contracts/port_phase_7_implementation_plan.md` v0.3 for
- * the current Phase 7 framing.
+ * Post v4.3.4 Option C cut, all operational paths use the legacy
+ * entry points (the port-CPeerManager-driven HandleBlock path that
+ * could have bypassed fork-staging was retired in Block 6, and the
+ * port::CPeerManager class itself was deleted in Block 7). Fork-
+ * staging is therefore fully operational on every block-arrival path
+ * under all flag values. The "Path A1 vs Path A2" bypass concern that
+ * existed pre-cut is moot — there is no bypass path remaining.
+ * Retirement of this file clusters with `ibd_coordinator` retirement
+ * if/when v5 architectural review revisits IBD orchestration; see
+ * `.claude/contracts/v5_architecture_decision_prep.md`.
  *
  * ## What ForkManager does
  *

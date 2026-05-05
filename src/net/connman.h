@@ -437,8 +437,11 @@ private:
 public:
     // Test-only: set the legacy m_peer_manager pointer without going through
     // Start(). Production code wires this via Start(peer_mgr, msg_proc, options).
-    // Phase 6 PR6.5b.1b dual-dispatch tests need legacy wired without spinning
-    // up sockets/threads. Restricted to test fixtures by convention.
+    // Originally written for Phase 6 PR6.5b.1b dual-dispatch tests; dual-dispatch
+    // wiring was retired in v4.3.4 Option C cut Block 6, but the test seam still
+    // serves the regression-gate test (legacy_block_arrival_chainsel_gate_tests)
+    // and any future test wanting legacy CPeerManager wired without I/O.
+    // Restricted to test fixtures by convention.
     void SetTestPeerManager(::CPeerManager& pm) {
         m_peer_manager = &pm;
     }

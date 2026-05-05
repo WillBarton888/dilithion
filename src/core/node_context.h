@@ -88,10 +88,10 @@ struct NodeContext {
 
     // Phase 6 PR6.5a: ISyncCoordinator adapter — stable surface used by
     // ~37 production touch sites that previously called ibd_coordinator
-    // directly. Backed by CIbdCoordinatorAdapter (legacy) under
-    // --usenewpeerman=0 OR by CPeerManager (PR6.5b) under
-    // --usenewpeerman=1. PR6.5a wires legacy backing for both flag
-    // values (compile-safe migration only). Lifetime: owned by main()
+    // directly. Always backed by CIbdCoordinatorAdapter (wrapping legacy
+    // CIbdCoordinator) post v4.3.4 Option C cut: the alternate
+    // port::CPeerManager backing was retired (Block 7) along with the
+    // --usenewpeerman flag (Block 8). Lifetime: owned by main()
     // alongside ibd_coordinator.
     std::unique_ptr<dilithion::net::port::ISyncCoordinator> sync_coordinator;
 
