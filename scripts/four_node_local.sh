@@ -38,7 +38,6 @@
 #   3 — chain too shallow (mining didn't progress to MIN_HEIGHT in MAX_WAIT)
 #
 # Environment:
-#   USE_NEW_PEERMAN=1 — set on all 4 nodes (default OFF; set 1 to test port path)
 #   PRESERVE_DATADIRS=1 — keep tmp datadirs after run (debugging)
 
 set -u
@@ -67,12 +66,6 @@ P2P_A=19444; RPC_A=19332
 P2P_B=19445; RPC_B=19333
 P2P_C=19446; RPC_C=19334
 P2P_D=19447; RPC_D=19335
-
-PEER_FLAG=""
-if [[ "${USE_NEW_PEERMAN:-0}" = "1" ]]; then
-    PEER_FLAG="--usenewpeerman"
-    echo "NOTE: --usenewpeerman=1 (port-CPeerManager engaged)"
-fi
 
 # Stress scenario: Node D also mines (2-miner mainnet-topology mimic per
 # v0.1.3 PR8.3 reframe). Default smoke = single miner (Node A only).
@@ -138,7 +131,7 @@ echo "[A] Starting (P2P $P2P_A, RPC $RPC_A, datadir nodeA, mine=yes)..."
 # DnaCommitmentRequiredAtTip_) fires when activation heights are future,
 # letting MIK injection populate coinbase scriptSigs → scenario 5 measurable.
 "$BIN" --regtest --datadir="$DA" --mine --no-upnp --yes \
-    --port=$P2P_A --rpcport=$RPC_A $PEER_FLAG \
+    --port=$P2P_A --rpcport=$RPC_A \
     --addnode=127.0.0.1:$P2P_B --addnode=127.0.0.1:$P2P_C --addnode=127.0.0.1:$P2P_D \
     >"$TMPBASE/nodeA.log" 2>&1 < /dev/null &
 PID_A=$!
@@ -152,7 +145,7 @@ echo "[A] Running (PID $PID_A)"
 
 echo "[B] Starting (P2P $P2P_B, RPC $RPC_B, datadir nodeB, mine=no)..."
 "$BIN" --regtest --datadir="$DB" --no-upnp --relay-only --yes \
-    --port=$P2P_B --rpcport=$RPC_B $PEER_FLAG \
+    --port=$P2P_B --rpcport=$RPC_B \
     --addnode=127.0.0.1:$P2P_A --addnode=127.0.0.1:$P2P_C --addnode=127.0.0.1:$P2P_D \
     >"$TMPBASE/nodeB.log" 2>&1 < /dev/null &
 PID_B=$!
@@ -166,7 +159,7 @@ echo "[B] Running (PID $PID_B)"
 
 echo "[C] Starting (P2P $P2P_C, RPC $RPC_C, datadir nodeC, mine=no)..."
 "$BIN" --regtest --datadir="$DC" --no-upnp --relay-only --yes \
-    --port=$P2P_C --rpcport=$RPC_C $PEER_FLAG \
+    --port=$P2P_C --rpcport=$RPC_C \
     --addnode=127.0.0.1:$P2P_A --addnode=127.0.0.1:$P2P_B --addnode=127.0.0.1:$P2P_D \
     >"$TMPBASE/nodeC.log" 2>&1 < /dev/null &
 PID_C=$!
@@ -186,13 +179,13 @@ echo "[D] Starting (P2P $P2P_D, RPC $RPC_D, datadir nodeD, mine=${MINE_D:-no})..
 if [[ -n "$MINE_D" ]]; then
     # Mining: full wallet path (regtest auto-create handles the prompt).
     "$BIN" --regtest --datadir="$DD" $MINE_D --no-upnp --yes \
-        --port=$P2P_D --rpcport=$RPC_D $PEER_FLAG \
+        --port=$P2P_D --rpcport=$RPC_D \
         --addnode=127.0.0.1:$P2P_A --addnode=127.0.0.1:$P2P_B --addnode=127.0.0.1:$P2P_C \
         >"$TMPBASE/nodeD.log" 2>&1 < /dev/null &
 else
     # Relay-only: no wallet needed.
     "$BIN" --regtest --datadir="$DD" --no-upnp --relay-only --yes \
-        --port=$P2P_D --rpcport=$RPC_D $PEER_FLAG \
+        --port=$P2P_D --rpcport=$RPC_D \
         --addnode=127.0.0.1:$P2P_A --addnode=127.0.0.1:$P2P_B --addnode=127.0.0.1:$P2P_C \
         >"$TMPBASE/nodeD.log" 2>&1 < /dev/null &
 fi
@@ -673,7 +666,7 @@ if [[ "$SCENARIO" = "delay" ]]; then
     echo "  Restarting Node A from same datadir..."
     # PR10.5b: dropped --relay-only on mining restart (same reasoning as initial start).
     "$BIN" --regtest --datadir="$DA" --mine --no-upnp --yes \
-        --port=$P2P_A --rpcport=$RPC_A $PEER_FLAG \
+        --port=$P2P_A --rpcport=$RPC_A \
         --addnode=127.0.0.1:$P2P_B --addnode=127.0.0.1:$P2P_C --addnode=127.0.0.1:$P2P_D \
         >>"$TMPBASE/nodeA.log" 2>&1 < /dev/null &
     PID_A=$!
