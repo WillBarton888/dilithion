@@ -665,12 +665,23 @@ void test_blocker1_process_new_header_rejects_invalid_parent()
 
 void test_blocker3_checkpoint_violation_in_ancestry_rejects_candidate()
 {
-    // BLOCKER 3: env-var=1 path must walk pindexMostWork's ancestry and
-    // run CheckpointCheck on each block back to the fork point. Without
-    // this, a heavier chain that violates a checkpoint MID-ANCESTRY (not
-    // at the leaf) gets activated. The legacy path checks only pindexNew
-    // because it activates one block at a time; the new path's reorg loop
-    // can advance many blocks ahead, opening this hole.
+    // BLOCKER 3 — Checkpoint-violating ancestry must reject the
+    // activation candidate. Validates Tier 2 of the four-layer
+    // defense-in-depth checkpoint enforcement (header-time +
+    // startup-validator + ProcessNewHeader BLOCKER-1 + ActivateBestChain
+    // three-tier). See chain.cpp:363-451 for the design comment.
+    //
+    // Production semantic is HARD-FAIL: ActivateBestChain returns false
+    // and instructs the operator to run `--reset-chain --yes`; block-
+    // status flags are NOT mutated. Phase 5 (26638a1, 2026-04-26)
+    // originally specified soft-fail (mark-invalid + return true); the
+    // May-2 emergency fix (f1c1d10) replaced it with hard-fail because
+    // what reaches Layer 4 in production is a node that synced the
+    // wrong fork for hours/days (e.g. v4.1 DilV rollback at h=44233),
+    // not an attacker-submitted bad block — and soft-fail's mark-
+    // invalid-then-reorg path depends on DisconnectTip / undo-data
+    // machinery with its own incident history. Hard-fail forces
+    // visibility and a controlled chain rebuild via operator action.
     std::cout << "  test_blocker3_checkpoint_violation_in_ancestry_rejects_candidate..."
               << std::flush;
 
@@ -707,8 +718,8 @@ void test_blocker3_checkpoint_violation_in_ancestry_rejects_candidate()
     CBlockIndex* D = chainstate.GetBlockIndex(hD);
 
     // Install a checkpoint at height 2 with a hash that does NOT match C.
-    // CheckpointCheck(2, hC) will return false → ancestry-walk should
-    // mark C failed and prevent D from activating.
+    // CheckpointCheck(2, hC) will return false → Tier 2 ancestry check
+    // catches the violation when activating D (h=3) and hard-fails.
     uint256 wrongHash;
     std::memset(wrongHash.data, 0, 32);
     wrongHash.data[0] = 0xAB;  // distinct from C's 0xF2 seed
@@ -740,20 +751,24 @@ void test_blocker3_checkpoint_violation_in_ancestry_rejects_candidate()
 #endif
 
     // Verify outcomes.
-    // 1. ActivateBestChain returns true (no hard failure; we just couldn't
-    //    activate any leaf because the only one violates the checkpoint).
-    assert(ok);
+    // 1. Hard-fail: ActivateBestChain returns false on checkpoint
+    //    violation. Tier 2 in chain.cpp re-verifies the highest-
+    //    checkpoint ancestor on every activation past it; D at h=3 has
+    //    C at h=2 as its ancestor, and C's hash does not match the
+    //    installed checkpoint, so Tier 2 returns false at chain.cpp:418.
+    assert(!ok);
     // 2. No reorg.
     assert(!reorgOccurred);
-    // 3. Tip stays at A (the genesis).
+    // 3. Tip stays at A (the genesis) — no advancement past violation.
     assert(chainstate.GetTip() == A);
-    // 4. C — the violating block — is now invalid.
-    assert(C->IsInvalid() && "BLOCKER 3: checkpoint-violating ancestor must be marked failed");
-    // 5. D is invalid because C is.
-    assert(D->IsInvalid() && "BLOCKER 3: descendant of failed block must inherit FAILED_CHILD");
-    // 6. A and B are unaffected.
+    // 4. Hard-fail must NOT mutate block-status flags. C and D stay
+    //    valid in-memory; only operator-driven --reset-chain rebuilds
+    //    the chain. Regression check against any future "improvement"
+    //    that quietly reverts to soft-fail.
     assert(!A->IsInvalid());
     assert(!B->IsInvalid());
+    assert(!C->IsInvalid() && "BLOCKER 3: hard-fail must NOT mark ancestor invalid");
+    assert(!D->IsInvalid() && "BLOCKER 3: hard-fail must NOT mark descendant invalid");
 
     std::cout << " OK\n";
 }
